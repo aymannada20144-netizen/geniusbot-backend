@@ -1,0 +1,42 @@
+:root {
+  font-family: var(--font-family-base);
+  color: var(--color-text-primary);
+  background-color: var(--color-background);
+
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  background-color: var(--color-background);
+  color: var(--color-text-primary);
+  line-height: var(--line-height-normal);
+}
+
+#root {
+  min-height: 100vh;
+}
+
+button,
+a,
+input,
+textarea,
+select {
+  transition:
+    color var(--transition-fast),
+    background-color var(--transition-fast),
+    border-color var(--transition-fast),
+    box-shadow var(--transition-fast);
+}
+
+button,
+a {
+  -webkit-tap-highlight-color: transparent;
+}
+
+:focus-visible {
+  outline: 3px solid var(--color-focus-ring);
+  outline-offset: 2px;
+}
