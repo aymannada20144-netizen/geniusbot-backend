@@ -4,7 +4,7 @@ const {
   RECOVERY_ATTEMPT_STATUS_VALUES,
   isRecoveryAttemptStatus,
   isRecoveryTerminalStatus,
-} = require('../../../constants/recoveryAttemptStatus');
+} = require('../../../../constants/recoveryAttemptStatus');
 
 const {
   getAllowedRecoveryTransitions,

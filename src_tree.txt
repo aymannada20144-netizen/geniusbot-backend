@@ -160,12 +160,15 @@ C:\USERS\HP\GENIUSBOT-BACKEND\SRC
 ¦   ¦       +---dto
 ¦   ¦       ¦       index.js
 ¦   ¦       ¦       RecoveryExecutionContext.js
+¦   ¦       ¦       RecoveryExecutionResult.js
 ¦   ¦       ¦       RecoveryMessagePayload.js
 ¦   ¦       ¦       
 ¦   ¦       +---errors
 ¦   ¦       ¦       index.js
 ¦   ¦       ¦       RecoveryChannelError.js
+¦   ¦       ¦       RecoveryChannelRoutingError.js
 ¦   ¦       ¦       RecoveryExecutionError.js
+¦   ¦       ¦       RecoveryMessageBuildError.js
 ¦   ¦       ¦       RecoveryPolicyError.js
 ¦   ¦       ¦       RecoveryTransitionError.js
 ¦   ¦       ¦       

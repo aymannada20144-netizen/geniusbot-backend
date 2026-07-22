@@ -1,6 +1,6 @@
 'use strict';
 
-const BaseRepository = require('../../../repositories/core/BaseRepository');
+const BaseRepository = require('../../../core/BaseRepository');
 
 const {
   RECOVERY_ATTEMPT_STATUS,
@@ -522,6 +522,60 @@ class RecoveryAttemptRepository extends BaseRepository {
         '"failure_reason" = NULL',
       ],
       metadata,
+    });
+  }
+
+  /**
+   * Reschedules a claimed attempt after a retryable processing failure.
+   *
+   * processing -> scheduled
+   *
+   * @param {object} data
+   * @param {string} data.clinicId
+   * @param {string} data.attemptId
+   * @param {Date} data.nextScheduledAt
+   * @param {string} data.failureReason
+   * @param {object} [data.metadata]
+   * @returns {Promise<object|null>}
+   */
+  async rescheduleAfterFailure({
+    clinicId,
+    attemptId,
+    nextScheduledAt,
+    failureReason,
+    metadata = {},
+  } = {}) {
+    this.#assertRequiredString(clinicId, 'clinicId');
+    this.#assertRequiredString(attemptId, 'attemptId');
+    this.#assertRequiredString(failureReason, 'failureReason');
+
+    if (
+      !(nextScheduledAt instanceof Date) ||
+      Number.isNaN(nextScheduledAt.getTime())
+    ) {
+      throw new TypeError(
+        'RecoveryAttemptRepository: "nextScheduledAt" must be a valid Date.'
+      );
+    }
+
+    return this.#transition({
+      clinicId,
+      attemptId,
+      fromStatuses: [RECOVERY_ATTEMPT_STATUS.PROCESSING],
+      toStatus: RECOVERY_ATTEMPT_STATUS.SCHEDULED,
+      setFragments: [
+        '"scheduled_at" = $nextScheduledAt',
+        '"started_at" = NULL',
+        '"attempted_at" = NULL',
+        '"finished_at" = NULL',
+        '"duration_seconds" = NULL',
+        '"failure_reason" = $failureReason',
+      ],
+      metadata,
+      namedValues: {
+        nextScheduledAt,
+        failureReason,
+      },
     });
   }
 

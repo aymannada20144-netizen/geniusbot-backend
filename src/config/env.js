@@ -5,7 +5,8 @@ const requiredEnv = [
   'GROQ_API_KEY',
   'WHATSAPP_TOKEN',
   'VERIFY_TOKEN',
-  'PHONE_NUMBER_ID'
+  'PHONE_NUMBER_ID',
+  'WHATSAPP_RECOVERY_TEMPLATE_NAME'
 ];
 
 for (const key of requiredEnv) {
@@ -26,6 +27,7 @@ module.exports = {
   whatsapp: {
     token: process.env.WHATSAPP_TOKEN,
     verifyToken: process.env.VERIFY_TOKEN,
-    phoneNumberId: process.env.PHONE_NUMBER_ID
+    phoneNumberId: process.env.PHONE_NUMBER_ID,
+    recoveryTemplateName: process.env.WHATSAPP_RECOVERY_TEMPLATE_NAME
   }
 };

@@ -2,7 +2,7 @@
 
 const {
   RECOVERY_ATTEMPT_STATUS,
-} = require('../../../constants/recoveryAttemptStatus');
+} = require('../../../../constants/recoveryAttemptStatus');
 
 /**
  * ============================================================================
@@ -51,6 +51,7 @@ const RECOVERY_TRANSITIONS = Object.freeze({
   ]),
 
   [RECOVERY_ATTEMPT_STATUS.PROCESSING]: Object.freeze([
+    RECOVERY_ATTEMPT_STATUS.SCHEDULED,
     RECOVERY_ATTEMPT_STATUS.SENT,
     RECOVERY_ATTEMPT_STATUS.FAILED,
     RECOVERY_ATTEMPT_STATUS.CANCELLED,
