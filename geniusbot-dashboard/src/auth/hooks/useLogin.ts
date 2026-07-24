@@ -18,6 +18,7 @@ function mapBackendStaffToAuthUser(
     clinicId: staff.clinic_id,
     branchId: staff.branch_id,
     email: staff.email,
+    username: staff.username,
     name: staff.full_name,
     role: staff.role,
   }

@@ -1,6 +1,6 @@
 import axios from 'axios'
 
-import { getAccessToken } from '../auth/authStorage'
+import { clearAuthSession, getAccessToken } from '../auth/authStorage'
 import { env } from '../config/env'
 import { mapToApiError } from './errorMapper'
 
@@ -30,6 +30,15 @@ apiClient.interceptors.request.use((config) => {
 apiClient.interceptors.response.use(
   (response) => response,
   (error: unknown) => {
+    if (axios.isAxiosError(error) && error.response?.status === 401) {
+      clearAuthSession()
+      apiClient.defaults.headers.common.Authorization = undefined
+
+      if (window.location.pathname !== '/login') {
+        window.location.replace('/login')
+      }
+    }
+
     return Promise.reject(mapToApiError(error))
   },
 )

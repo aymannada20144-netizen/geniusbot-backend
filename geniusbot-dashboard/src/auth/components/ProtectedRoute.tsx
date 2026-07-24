@@ -18,7 +18,7 @@ export function ProtectedRoute({
   const location = useLocation()
 
   if (isInitializing) {
-    return null
+    return <div className="auth-loading" role="status">Loading GeniusBot…</div>
   }
 
   if (!isAuthenticated) {

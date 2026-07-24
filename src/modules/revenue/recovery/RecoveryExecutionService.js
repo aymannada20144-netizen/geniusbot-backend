@@ -100,7 +100,20 @@ class RecoveryExecutionService {
     try {
       providerResponse = await provider.send(executionPayload);
     } catch (cause) {
-      throw new RecoveryExecutionError(
+      const retryableDescriptor =
+        cause !== null &&
+        (typeof cause === 'object' || typeof cause === 'function')
+          ? Object.getOwnPropertyDescriptor(cause, 'retryable')
+          : null;
+      const retryable = Boolean(
+        retryableDescriptor &&
+        Object.prototype.hasOwnProperty.call(
+          retryableDescriptor,
+          'value'
+        ) &&
+        retryableDescriptor.value === true
+      );
+      const executionError = new RecoveryExecutionError(
         'Recovery provider send failed.',
         {
           reason: 'PROVIDER_SEND_FAILED',
@@ -108,9 +121,14 @@ class RecoveryExecutionService {
           attemptId,
           opportunityId,
           channel,
+          retryable,
         },
         { cause }
       );
+
+      executionError.retryable = retryable;
+
+      throw executionError;
     }
 
     return Object.freeze({

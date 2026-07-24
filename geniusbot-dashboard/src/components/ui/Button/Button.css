@@ -47,7 +47,7 @@
 }
 
 .ui-button--md {
-  min-height: 2.5rem;
+  min-height: var(--control-height-md);
   padding: 0 var(--space-4);
 
   font-size: var(--font-size-sm);
@@ -126,4 +126,9 @@
     transition: none;
     animation: none;
   }
+}
+
+.ui-button:focus-visible {
+  outline: var(--focus-ring-width) solid var(--color-focus-ring);
+  outline-offset: var(--focus-ring-offset);
 }

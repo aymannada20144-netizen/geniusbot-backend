@@ -362,7 +362,9 @@ const clinicHoliday =
           clinic_id,
           doctor_id,
           branch_id,
-          startDateTime.dayOfWeek
+          startDateTime.dayOfWeek,
+          startDateTime.time,
+          endDateTime.time
         );
 
     if (!doctorWorkingHours) {
@@ -394,21 +396,18 @@ const clinicHoliday =
       };
     }
 
-    const startsBeforeDoctorShift =
-      startDateTime.time < doctorStartsAt;
-
-    const startsAtOrAfterDoctorShiftEnd =
-      startDateTime.time >= doctorEndsAt;
-
-    const endsAfterDoctorShift =
+    const outsideDoctorWorkingHours =
+      startDateTime.time < doctorStartsAt ||
+      startDateTime.time >= doctorEndsAt ||
       endDateTime.time > doctorEndsAt;
 
-    const outsideDoctorWorkingHours =
-      startsBeforeDoctorShift ||
-      startsAtOrAfterDoctorShiftEnd ||
-      endsAfterDoctorShift;
-
-    if (outsideDoctorWorkingHours) {
+    if (
+      doctorWorkingHours.matches_requested_time === false ||
+      (
+        doctorWorkingHours.matches_requested_time === undefined &&
+        outsideDoctorWorkingHours
+      )
+    ) {
       return {
         available: false,
         reason:
@@ -417,6 +416,7 @@ const clinicHoliday =
           'Appointment time is outside doctor working hours',
       };
     }
+
     /*
      * Step 3:
      * التحقق من عطلات العيادة.

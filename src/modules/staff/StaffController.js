@@ -16,10 +16,13 @@ class StaffController {
     this.getById = this.getById.bind(this);
     this.update = this.update.bind(this);
     this.changeRole = this.changeRole.bind(this);
+    this.remove = this.remove.bind(this);
     this.setActiveStatus =
       this.setActiveStatus.bind(this);
-    this.changePassword =
-      this.changePassword.bind(this);
+    this.changeOwnPassword =
+      this.changeOwnPassword.bind(this);
+    this.resetPassword =
+      this.resetPassword.bind(this);
     this.transferOwnership =
       this.transferOwnership.bind(this);
   }
@@ -28,7 +31,7 @@ class StaffController {
     const body = request.body || {};
 
     const result = await this.staffService.login(
-      body.email,
+      body.identifier,
       body.password
     );
 
@@ -113,13 +116,21 @@ class StaffController {
         actor,
         clinicId,
         staffId,
-        body.role
+        body.role,
+        body.branchId ?? body.branch_id ?? null
       );
 
     return reply.code(200).send({
       success: true,
       data: staff,
     });
+  }
+
+  async remove(request, reply) {
+    const actor = this.#getActor(request);
+    const { clinicId, staffId } = request.params;
+    const staff = await this.staffService.remove(actor, clinicId, staffId);
+    return reply.code(200).send({ success: true, data: staff });
   }
 
   async setActiveStatus(request, reply) {
@@ -144,23 +155,37 @@ class StaffController {
     });
   }
 
-  async changePassword(request, reply) {
+  async changeOwnPassword(request, reply) {
     const actor = this.#getActor(request);
-    const { clinicId, staffId } = request.params;
     const body = request.body || {};
 
-    const result =
-      await this.staffService.changePassword(
-        actor,
-        clinicId,
-        staffId,
-        body.newPassword ?? body.new_password
-      );
+    const result = await this.staffService.changeOwnPassword(
+      actor,
+      body.currentPassword ?? body.current_password,
+      body.newPassword ?? body.new_password,
+      body.confirmPassword ?? body.confirm_password
+    );
 
     return reply.code(200).send({
       success: true,
       data: result,
     });
+  }
+
+  async resetPassword(request, reply) {
+    const actor = this.#getActor(request);
+    const { clinicId, staffId } = request.params;
+    const body = request.body || {};
+
+    const result = await this.staffService.resetPassword(
+      actor,
+      clinicId,
+      staffId,
+      body.newPassword ?? body.new_password,
+      body.confirmPassword ?? body.confirm_password
+    );
+
+    return reply.code(200).send({ success: true, data: result });
   }
 
   async transferOwnership(request, reply) {

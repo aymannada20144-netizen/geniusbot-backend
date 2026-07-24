@@ -9,6 +9,7 @@ C:.
 ¦   package-lock.json
 ¦   package.json
 ¦   README.md
+¦   src_tree.txt
 ¦   test-room-repository.js
 ¦   
 +---.agents
@@ -80,8 +81,8 @@ C:.
 ¦   ¦   ¦   index.html
 ¦   ¦   ¦   
 ¦   ¦   +---assets
-¦   ¦           index-D6BE1aLg.js
-¦   ¦           index-DXE0iSHY.css
+¦   ¦           index-C0LMRnVg.css
+¦   ¦           index-DvqVL8CG.js
 ¦   ¦           
 ¦   +---node_modules
 ¦   ¦   ¦   .package-lock.json
@@ -8362,7 +8363,9 @@ C:.
 ¦       ¦       apiClient.ts
 ¦       ¦       apiError.ts
 ¦       ¦       apiTypes.ts
+¦       ¦       appointmentsApi.ts
 ¦       ¦       errorMapper.ts
+¦       ¦       patientsApi.ts
 ¦       ¦       
 ¦       +---auth
 ¦       ¦   ¦   authStorage.ts
@@ -8399,10 +8402,16 @@ C:.
 ¦       ¦       DashboardLayout.tsx
 ¦       ¦       
 ¦       +---pages
+¦       ¦   ¦   LoginPage.css
 ¦       ¦   ¦   LoginPage.tsx
 ¦       ¦   ¦   
 ¦       ¦   +---dashboard
+¦       ¦           AppointmentsPage.css
+¦       ¦           AppointmentsPage.tsx
+¦       ¦           ConversationPage.tsx
 ¦       ¦           DashboardHomePage.tsx
+¦       ¦           PatientsPage.css
+¦       ¦           PatientsPage.tsx
 ¦       ¦           
 ¦       +---routes
 ¦       ¦       AppRoutes.tsx
@@ -12986,6 +12995,7 @@ C:.
 ¦   ¦   ¦       SmsRecoverySender.js
 ¦   ¦   ¦       
 ¦   ¦   +---whatsapp
+¦   ¦           sendWhatsAppMessage.js
 ¦   ¦           WhatsAppController.js
 ¦   ¦           WhatsAppRecoverySender.js
 ¦   ¦           WhatsAppWebhookParser.js
@@ -13113,16 +13123,21 @@ C:.
 ¦   ¦   ¦   ¦   index.js
 ¦   ¦   ¦   ¦   
 ¦   ¦   ¦   +---recovery
+¦   ¦   ¦       ¦   createRecoveryComposition.js
+¦   ¦   ¦       ¦   createRecoveryExecutionLoader.js
 ¦   ¦   ¦       ¦   index.js
 ¦   ¦   ¦       ¦   MissedCallEventRepository.js
 ¦   ¦   ¦       ¦   MissedCallIngestionService.js
 ¦   ¦   ¦       ¦   README.md
 ¦   ¦   ¦       ¦   RecoveryAttemptRepository.js
 ¦   ¦   ¦       ¦   RecoveryChannelRouter.js
+¦   ¦   ¦       ¦   RecoveryExecutionContextProvider.js
 ¦   ¦   ¦       ¦   RecoveryExecutionService.js
 ¦   ¦   ¦       ¦   RecoveryMessageBuilder.js
 ¦   ¦   ¦       ¦   RecoveryPolicy.js
+¦   ¦   ¦       ¦   RecoveryRetryPolicy.js
 ¦   ¦   ¦       ¦   RecoverySchedulerService.js
+¦   ¦   ¦       ¦   RecoveryWorkerService.js
 ¦   ¦   ¦       ¦   RevenueOpportunityRepository.js
 ¦   ¦   ¦       ¦   src_tree.txt
 ¦   ¦   ¦       ¦   
@@ -13136,10 +13151,12 @@ C:.
 ¦   ¦   ¦       ¦       index.js
 ¦   ¦   ¦       ¦       RecoveryChannelError.js
 ¦   ¦   ¦       ¦       RecoveryChannelRoutingError.js
+¦   ¦   ¦       ¦       RecoveryExecutionContextError.js
 ¦   ¦   ¦       ¦       RecoveryExecutionError.js
 ¦   ¦   ¦       ¦       RecoveryMessageBuildError.js
 ¦   ¦   ¦       ¦       RecoveryPolicyError.js
 ¦   ¦   ¦       ¦       RecoveryTransitionError.js
+¦   ¦   ¦       ¦       RecoveryWorkerError.js
 ¦   ¦   ¦       ¦       
 ¦   ¦   ¦       +---state
 ¦   ¦   ¦               index.js
@@ -13168,6 +13185,7 @@ C:.
 ¦   +---routes
 ¦   +---services
 ¦   ¦   ¦   BookingService.js
+¦   ¦   ¦   ShadenService.js
 ¦   ¦   ¦   
 ¦   ¦   +---availability
 ¦   ¦   ¦       AvailabilityService.js

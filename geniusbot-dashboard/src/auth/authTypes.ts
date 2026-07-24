@@ -1,13 +1,17 @@
 export type AuthRole =
+  | 'platform_admin'
   | 'owner'
-  | 'admin'
+  | 'clinic_admin'
+  | 'branch_manager'
   | 'receptionist'
+  | 'doctor'
 
 export interface AuthUser {
   id: string
   clinicId: string
   branchId: string | null
   email: string
+  username: string
   name: string
   role: AuthRole
 }
@@ -17,6 +21,7 @@ export interface BackendStaff {
   clinic_id: string
   branch_id: string | null
   email: string
+  username: string
   full_name: string
   role: AuthRole
   phone?: string | null
@@ -25,7 +30,7 @@ export interface BackendStaff {
 }
 
 export interface LoginCredentials {
-  email: string
+  identifier: string
   password: string
 }
 

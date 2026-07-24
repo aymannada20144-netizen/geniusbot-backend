@@ -91,6 +91,7 @@
   --space-4: 1rem;
   --space-5: 1.25rem;
   --space-6: 1.5rem;
+  --space-7: 1.75rem;
   --space-8: 2rem;
   --space-9: 2.25rem;
   --space-10: 2.5rem;
@@ -127,6 +128,7 @@
   /* Controls */
   --control-height-sm: 2rem;
   --control-height-md: 2.75rem;
+  --control-height-lg: 3rem;
 
   /* Focus */
   --focus-ring-width: 0.125rem;

@@ -1,4 +1,4 @@
-const BaseRepository = require('./BaseRepository');
+const BaseRepository = require('../core/BaseRepository');
 
 class MessageRepository extends BaseRepository {
   constructor(db) {
@@ -375,6 +375,34 @@ class MessageRepository extends BaseRepository {
     }
 
     return message;
+  }
+
+  async saveStaffMessage({ conversationId, messageText, waMessageId, staffId } = {}) {
+    this.#assertRequiredString(conversationId, 'conversationId');
+    this.#assertRequiredString(messageText, 'messageText');
+    this.#assertRequiredString(waMessageId, 'waMessageId');
+    this.#assertRequiredString(staffId, 'staffId');
+    const result = await this.query(`
+      INSERT INTO ${this.fullTableName} (
+        conversation_id, wa_message_id, sender_type, message_text, raw_payload
+      ) VALUES ($1, $2, 'staff', $3, $4::jsonb)
+      RETURNING id, conversation_id AS "conversationId",
+        wa_message_id AS "waMessageId", sender_type AS "senderType",
+        message_text AS "messageText", created_at AS "createdAt"
+    `, [conversationId.trim(), waMessageId.trim(), messageText.trim(),
+      JSON.stringify({ staffId })]);
+    return result.rows[0];
+  }
+
+  async findByExternalId(conversationId, waMessageId) {
+    this.#assertRequiredString(conversationId, 'conversationId');
+    this.#assertRequiredString(waMessageId, 'waMessageId');
+    const result = await this.query(`
+      SELECT id FROM ${this.fullTableName}
+      WHERE conversation_id = $1 AND wa_message_id = $2
+      LIMIT 1
+    `, [conversationId.trim(), waMessageId.trim()]);
+    return result.rows[0] || null;
   }
 
   #assertRequiredString(value, fieldName) {

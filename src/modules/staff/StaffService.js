@@ -16,6 +16,11 @@ const {
   isBranchScopedRole,
   hasPermission,
 } = require('../../core/auth');
+const { normalizeSaudiMobile } = require('../../core/validators/saudiMobile');
+const {
+  validatePassword,
+  validatePasswordConfirmation,
+} = require('../../core/validators/password');
 
 class StaffService {
   constructor({
@@ -52,20 +57,22 @@ class StaffService {
     this.tokenService = tokenService;
   }
 
-  async login(email, password) {
-    const normalizedEmail =
-      this.#normalizeEmail(email);
+  async login(identifier, password) {
+    const normalizedIdentifier =
+      this.#normalizeRequiredString(identifier, 'identifier').toLowerCase();
 
-    this.#validatePassword(password);
+    if (typeof password !== 'string' || password.length === 0) {
+      throw new ForbiddenError('Invalid identifier or password.');
+    }
 
     const staff =
-      await this.staffRepository.findAuthByEmail(
-        normalizedEmail
+      await this.staffRepository.findAuthByIdentifier(
+        normalizedIdentifier
       );
 
     if (!staff) {
       throw new ForbiddenError(
-        'Invalid email or password.'
+        'Invalid identifier or password.'
       );
     }
 
@@ -83,7 +90,7 @@ class StaffService {
 
     if (!passwordMatches) {
       throw new ForbiddenError(
-        'Invalid email or password.'
+        'Invalid identifier or password.'
       );
     }
 
@@ -205,20 +212,24 @@ const safeStaff = this.#sanitizeStaff({
 
     const normalizedEmail =
       this.#normalizeEmail(input.email);
+    const normalizedUsername =
+      this.#normalizeUsername(input.username);
 
     const exists =
-      await this.staffRepository.emailExists(
+      await this.staffRepository.identifierConflict(
+        normalizedUsername,
         normalizedEmail
       );
 
     if (exists) {
       throw new ConflictError(
-        'A staff account with this email already exists.'
+        'The username or email conflicts with an existing staff login identifier.'
       );
     }
 
-    const branchId = this.#resolveBranchId(
+    const branchId = await this.#resolveBranchId(
       actor,
+      clinicId,
       input.role,
       input.branchId ?? input.branch_id
     );
@@ -233,10 +244,9 @@ const safeStaff = this.#sanitizeStaff({
         input.fullName ?? input.full_name,
         'fullName'
       ),
+      username: normalizedUsername,
       email: normalizedEmail,
-      phone: this.#normalizeOptionalString(
-        input.phone
-      ),
+      phone: normalizeSaudiMobile(input.phone, 'phone', true),
       passwordHash,
       role: input.role,
       isActive:
@@ -288,28 +298,40 @@ const safeStaff = this.#sanitizeStaff({
         );
     }
 
-    if (input.email !== undefined) {
-      const normalizedEmail =
-        this.#normalizeEmail(input.email);
+    const username =
+      input.username === undefined
+        ? currentStaff.username
+        : this.#normalizeUsername(input.username);
+    const email =
+      input.email === undefined
+        ? currentStaff.email
+        : this.#normalizeEmail(input.email);
 
+    if (input.username !== undefined || input.email !== undefined) {
       const exists =
-        await this.staffRepository.emailExists(
-          normalizedEmail,
+        await this.staffRepository.identifierConflict(
+          username,
+          email,
           staffId
         );
 
       if (exists) {
         throw new ConflictError(
-          'A staff account with this email already exists.'
+          'The username or email conflicts with an existing staff login identifier.'
         );
       }
 
-      updateData.email = normalizedEmail;
+      if (input.username !== undefined) {
+        updateData.username = username;
+      }
+
+      if (input.email !== undefined) {
+        updateData.email = email;
+      }
     }
 
     if (input.phone !== undefined) {
-      updateData.phone =
-        this.#normalizeOptionalString(input.phone);
+      updateData.phone = normalizeSaudiMobile(input.phone, 'phone', true);
     }
 
     const branchProvided =
@@ -324,8 +346,9 @@ const safeStaff = this.#sanitizeStaff({
 
     if (branchProvided) {
       updateData.branchId =
-        this.#resolveBranchId(
+        await this.#resolveBranchId(
           actor,
+          clinicId,
           currentStaff.role,
           input.branchId ?? input.branch_id
         );
@@ -351,7 +374,8 @@ const safeStaff = this.#sanitizeStaff({
     actor,
     clinicId,
     staffId,
-    newRole
+    newRole,
+    requestedBranchId
   ) {
     this.#validateActor(actor);
     this.#validateId(clinicId, 'clinicId');
@@ -402,20 +426,19 @@ const safeStaff = this.#sanitizeStaff({
 
     this.#assertCanManageRole(actor, newRole);
 
-    if (
-      isBranchScopedRole(newRole) &&
-      !currentStaff.branch_id
-    ) {
-      throw new ConflictError(
-        'A branch-scoped role requires a branch assignment.'
-      );
-    }
+    const branchId = await this.#resolveBranchId(
+      actor,
+      clinicId,
+      newRole,
+      requestedBranchId
+    );
 
     const updated =
       await this.staffRepository.updateRole(
         clinicId,
         staffId,
-        newRole
+        newRole,
+        branchId
       );
 
     if (!updated) {
@@ -425,6 +448,36 @@ const safeStaff = this.#sanitizeStaff({
     }
 
     return updated;
+  }
+
+  async remove(actor, clinicId, staffId) {
+    this.#validateActor(actor);
+    this.#validateId(clinicId, 'clinicId');
+    this.#validateId(staffId, 'staffId');
+    this.#assertClinicAccess(actor, clinicId);
+    this.#assertPermission(actor, PERMISSIONS.STAFF_DISABLE);
+
+    const targetStaff = await this.#getManageableStaff(
+      actor,
+      clinicId,
+      staffId
+    );
+
+    if (targetStaff.id === actor.id) {
+      throw new ConflictError('A staff member cannot delete their own account.');
+    }
+    if (isOwner(targetStaff.role)) {
+      throw new ConflictError(
+        'The clinic owner cannot be deleted before ownership is transferred.'
+      );
+    }
+    if (targetStaff.role === ROLES.PLATFORM_ADMIN) {
+      throw new ForbiddenError('Platform administrators cannot be deleted here.');
+    }
+
+    const deleted = await this.staffRepository.deleteStaff(clinicId, staffId);
+    if (!deleted) throw new NotFoundError('Staff member not found.');
+    return deleted;
   }
 
   async setActiveStatus(
@@ -490,61 +543,72 @@ const safeStaff = this.#sanitizeStaff({
     return updated;
   }
 
-  async changePassword(
+  async changeOwnPassword(
+    actor,
+    currentPassword,
+    newPassword,
+    confirmPassword
+  ) {
+    this.#validateActor(actor);
+    validatePassword(currentPassword, 'currentPassword');
+    validatePasswordConfirmation(newPassword, confirmPassword);
+
+    const staff = await this.staffRepository.findAuthById(actor.id);
+    const matches = staff && await this.passwordHasher.verify(
+      currentPassword,
+      staff.password_hash
+    );
+
+    if (!matches) {
+      throw new ForbiddenError(
+        'Current password is incorrect.'
+      );
+    }
+
+    const passwordHash = await this.passwordHasher.hash(newPassword);
+    await this.staffRepository.updatePassword(actor.id, passwordHash);
+
+    return { passwordChanged: true };
+  }
+
+  async resetPassword(
     actor,
     clinicId,
     staffId,
-    newPassword
+    newPassword,
+    confirmPassword
   ) {
     this.#validateActor(actor);
     this.#validateId(clinicId, 'clinicId');
     this.#validateId(staffId, 'staffId');
-    this.#validatePassword(newPassword);
-
+    validatePasswordConfirmation(newPassword, confirmPassword);
     this.#assertClinicAccess(actor, clinicId);
+    this.#assertPermission(actor, PERMISSIONS.STAFF_UPDATE);
 
-    const targetStaff =
-      await this.#getManageableStaff(
-        actor,
-        clinicId,
-        staffId
-      );
-
-    const changingOwnPassword =
-      actor.id === targetStaff.id;
+    const targetStaff = await this.#getManageableStaff(
+      actor,
+      clinicId,
+      staffId
+    );
 
     if (
-      !changingOwnPassword &&
-      !isPlatformAdmin(actor.role) &&
-      !hasPermission(
-        actor.role,
-        PERMISSIONS.STAFF_UPDATE
-      )
+      targetStaff.id === actor.id ||
+      targetStaff.role === ROLES.OWNER ||
+      targetStaff.role === ROLES.PLATFORM_ADMIN
     ) {
       throw new ForbiddenError(
-        'You cannot change this staff member password.'
+        'This password must be changed through the protected account flow.'
       );
     }
 
-    const passwordHash =
-      await this.passwordHasher.hash(newPassword);
-
-    const updated =
-      await this.staffRepository.updatePassword(
-        staffId,
-        passwordHash
-      );
+    const passwordHash = await this.passwordHasher.hash(newPassword);
+    const updated = await this.staffRepository.updatePassword(staffId, passwordHash);
 
     if (!updated) {
-      throw new NotFoundError(
-        'Staff member not found.'
-      );
+      throw new NotFoundError('Staff member not found.');
     }
 
-    return {
-      id: staffId,
-      passwordChanged: true,
-    };
+    return { id: staffId, passwordReset: true };
   }
 
   async transferOwnership(
@@ -622,6 +686,7 @@ const safeStaff = this.#sanitizeStaff({
         clinicId,
         newOwnerStaffId,
         ROLES.OWNER,
+        null,
         client
       );
 
@@ -629,6 +694,7 @@ const safeStaff = this.#sanitizeStaff({
         clinicId,
         actor.id,
         ROLES.CLINIC_ADMIN,
+        null,
         client
       );
 
@@ -718,8 +784,9 @@ const safeStaff = this.#sanitizeStaff({
     );
   }
 
-  #resolveBranchId(
+  async #resolveBranchId(
     actor,
+    clinicId,
     targetRole,
     requestedBranchId
   ) {
@@ -744,10 +811,15 @@ const safeStaff = this.#sanitizeStaff({
       return actor.branchId;
     }
 
-    this.#validateId(
-      requestedBranchId,
-      'branchId'
-    );
+    this.#validateId(requestedBranchId, 'branchId');
+    if (!await this.staffRepository.activeBranchBelongsToClinic(
+      clinicId,
+      requestedBranchId
+    )) {
+      throw new ValidationError(
+        'branchId must identify an active branch in the current clinic.'
+      );
+    }
 
     return requestedBranchId;
   }
@@ -830,6 +902,7 @@ const safeStaff = this.#sanitizeStaff({
     );
 
     this.#normalizeEmail(input.email);
+    this.#normalizeUsername(input.username);
 
     if (!isValidRole(input.role)) {
       throw new ValidationError(
@@ -837,7 +910,7 @@ const safeStaff = this.#sanitizeStaff({
       );
     }
 
-    this.#validatePassword(input.password);
+    validatePassword(input.password);
 
     const isActive =
       input.isActive ?? input.is_active;
@@ -848,17 +921,6 @@ const safeStaff = this.#sanitizeStaff({
     ) {
       throw new ValidationError(
         'isActive must be a boolean.'
-      );
-    }
-  }
-
-  #validatePassword(password) {
-    if (
-      typeof password !== 'string' ||
-      password.length < 8
-    ) {
-      throw new ValidationError(
-        'Password must contain at least 8 characters.'
       );
     }
   }
@@ -876,6 +938,25 @@ const safeStaff = this.#sanitizeStaff({
     if (!emailPattern.test(normalized)) {
       throw new ValidationError(
         'A valid email address is required.'
+      );
+    }
+
+    return normalized;
+  }
+
+  #normalizeUsername(username) {
+    const normalized = this.#normalizeRequiredString(
+      username,
+      'username'
+    ).toLowerCase();
+
+    if (
+      normalized.length < 3 ||
+      normalized.length > 50 ||
+      !/^[a-z0-9][a-z0-9._-]{1,48}[a-z0-9]$/.test(normalized)
+    ) {
+      throw new ValidationError(
+        'username must be 3-50 lowercase letters, numbers, dots, underscores, or hyphens, and start and end with a letter or number.'
       );
     }
 

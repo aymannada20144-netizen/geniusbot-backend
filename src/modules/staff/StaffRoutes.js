@@ -7,7 +7,8 @@ const {
 function registerStaffRoutes(
   app,
   staffController,
-  protect
+  protect,
+  authenticate
 ) {
   if (!app) {
     throw new TypeError('app is required.');
@@ -25,9 +26,19 @@ function registerStaffRoutes(
     );
   }
 
+  if (typeof authenticate !== 'function') {
+    throw new TypeError('authenticate middleware is required.');
+  }
+
   app.post(
     '/api/auth/staff/login',
     staffController.login
+  );
+
+  app.post(
+    '/api/auth/change-password',
+    { preHandler: authenticate },
+    staffController.changeOwnPassword
   );
 
   app.get(
@@ -100,14 +111,24 @@ function registerStaffRoutes(
     staffController.setActiveStatus
   );
 
-  app.patch(
-    '/api/clinics/:clinicId/staff/:staffId/password',
+  app.delete(
+    '/api/clinics/:clinicId/staff/:staffId',
+    {
+      preHandler: protect(
+        PERMISSIONS.STAFF_DISABLE
+      ),
+    },
+    staffController.remove
+  );
+
+  app.post(
+    '/api/clinics/:clinicId/staff/:staffId/reset-password',
     {
       preHandler: protect(
         PERMISSIONS.STAFF_UPDATE
       ),
     },
-    staffController.changePassword
+    staffController.resetPassword
   );
 }
 

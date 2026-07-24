@@ -33,18 +33,48 @@ const navigationGroups: SidebarNavigationGroup[] = [
   {
     label: 'Clinic Management',
     items: [
+      { label: 'Clinics', to: '/dashboard/master-data/clinics' },
+      { label: 'Branches', to: '/dashboard/master-data/branches' },
       {
         label: 'Doctors',
-        to: '/dashboard/doctors',
+        to: '/dashboard/master-data/doctors',
       },
+      { label: 'Specialties', to: '/dashboard/master-data/specialties' },
+      { label: 'Rooms', to: '/dashboard/master-data/rooms' },
       {
         label: 'Services',
-        to: '/dashboard/services',
+        to: '/dashboard/master-data/services',
       },
       {
         label: 'Staff',
         to: '/dashboard/staff',
       },
+    ],
+  },
+  {
+    label: 'Schedules',
+    items: [
+      { label: 'Branch Working Hours', to: '/dashboard/master-data/branch-working-hours' },
+      { label: 'Clinic Holidays', to: '/dashboard/master-data/clinic-holidays' },
+      { label: 'Doctor Working Hours', to: '/dashboard/master-data/doctor-working-hours' },
+      { label: 'Doctor Time Off', to: '/dashboard/master-data/doctor-time-off' },
+      { label: 'Room Time Off', to: '/dashboard/master-data/room-time-off' },
+    ],
+  },
+  {
+    label: 'Assignments',
+    items: [
+      { label: 'Doctor Specialties', to: '/dashboard/master-data/doctor-specialties' },
+      { label: 'Service Assignments', to: '/dashboard/master-data/service-assignments' },
+      { label: 'Service Pre Questions', to: '/dashboard/master-data/service-pre-questions' },
+    ],
+  },
+  {
+    label: 'Billing Setup',
+    items: [
+      { label: 'Payment Methods', to: '/dashboard/master-data/payment-methods' },
+      { label: 'Insurance Companies', to: '/dashboard/master-data/insurance-companies' },
+      { label: 'Insurance Classes', to: '/dashboard/master-data/insurance-classes' },
     ],
   },
   {

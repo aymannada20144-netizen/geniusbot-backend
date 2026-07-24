@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 
 import { useLogin } from '../auth/hooks/useLogin'
+import './LoginPage.css'
 
 export function LoginPage() {
   const navigate = useNavigate()
@@ -10,7 +11,7 @@ export function LoginPage() {
   const { login, isLoading, error, clearError } =
     useLogin()
 
-  const [email, setEmail] = useState('')
+  const [identifier, setIdentifier] = useState('')
   const [password, setPassword] = useState('')
 
   async function handleSubmit(
@@ -22,7 +23,7 @@ export function LoginPage() {
 
     try {
       await login({
-        email,
+        identifier,
         password,
       })
 
@@ -33,7 +34,7 @@ export function LoginPage() {
               pathname?: string
             }
           } | null
-        )?.from?.pathname ?? '/'
+        )?.from?.pathname ?? '/dashboard/appointments'
 
       navigate(redirectTo, {
         replace: true,
@@ -44,28 +45,36 @@ export function LoginPage() {
   }
 
   return (
-    <main>
-      <h1>Login</h1>
+    <main className="login-page">
+      <section className="login-card" aria-labelledby="login-title">
+        <div className="login-brand" aria-label="GeniusBot">
+          <span className="login-brand__mark" aria-hidden="true">G</span>
+          <span>GeniusBot</span>
+        </div>
+        <div className="login-heading">
+          <h1 id="login-title">Welcome back</h1>
+          <p>Sign in to manage your clinic</p>
+        </div>
 
-      <form onSubmit={handleSubmit}>
-        <div>
-          <label htmlFor="email">
-            Email
+        <form className="login-form" onSubmit={handleSubmit}>
+        <div className="login-field">
+          <label htmlFor="identifier">
+            Username or email
           </label>
 
           <input
-            id="email"
-            type="email"
+            id="identifier"
+            type="text"
             autoComplete="username"
-            value={email}
+            value={identifier}
             onChange={(event) =>
-              setEmail(event.target.value)
+              setIdentifier(event.target.value)
             }
             required
           />
         </div>
 
-        <div>
+        <div className="login-field">
           <label htmlFor="password">
             Password
           </label>
@@ -83,12 +92,12 @@ export function LoginPage() {
         </div>
 
         {error && (
-          <p role="alert">
+          <p className="login-error" role="alert">
             {error.message}
           </p>
         )}
 
-        <button
+        <button className="login-submit"
           type="submit"
           disabled={isLoading}
         >
@@ -96,7 +105,9 @@ export function LoginPage() {
             ? 'Signing in...'
             : 'Sign in'}
         </button>
-      </form>
+        </form>
+        <p className="login-footer">GeniusBot Clinic Dashboard</p>
+      </section>
     </main>
   )
 }

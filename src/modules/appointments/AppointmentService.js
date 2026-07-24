@@ -1,6 +1,7 @@
 const {
   NotFoundError,
   ConflictError,
+  ValidationError,
 } = require('../../core/errors');
 
 const {
@@ -15,6 +16,76 @@ class AppointmentService {
     }
 
     this.appointmentRepository = appointmentRepository;
+  }
+
+  async listAppointments(clinicId) {
+    validateUuid(clinicId, 'clinicId');
+
+    const appointments =
+      await this.appointmentRepository.findByClinicId(clinicId);
+
+    return appointments.map((appointment) => ({
+      id: appointment.id,
+      patientName: appointment.patient_name,
+      phoneNumber: appointment.phone_number,
+      serviceName: appointment.service_name,
+      doctorName: appointment.doctor_name ?? null,
+      roomName: appointment.room_name ?? null,
+      appointmentStart: new Date(
+        appointment.appointment_start
+      ).toISOString(),
+      appointmentEnd:
+        appointment.appointment_end == null
+          ? null
+          : new Date(appointment.appointment_end).toISOString(),
+      paymentMethod: appointment.payment_method ?? null,
+      status: appointment.status,
+    }));
+  }
+
+  async updateAppointmentStatus(clinicId, appointmentId, status) {
+    validateUuid(clinicId, 'clinicId');
+    validateUuid(appointmentId, 'appointmentId');
+
+    if (!['confirmed', 'cancelled'].includes(status)) {
+      throw new ValidationError('Invalid appointment status.');
+    }
+
+    const appointment =
+      await this.appointmentRepository.findByIdAndClinic(
+        clinicId,
+        appointmentId
+      );
+
+    if (!appointment) {
+      throw new NotFoundError('Appointment not found.');
+    }
+
+    const allowed =
+      (status === 'confirmed' && appointment.status === 'pending') ||
+      (status === 'cancelled' &&
+        ['pending', 'confirmed'].includes(appointment.status));
+
+    if (!allowed) {
+      throw new ValidationError(
+        'Appointment status transition is not allowed.'
+      );
+    }
+
+    const updated = await this.appointmentRepository.updateStatus(
+      clinicId,
+      appointmentId,
+      status
+    );
+
+    if (!updated) {
+      throw new NotFoundError('Appointment not found.');
+    }
+
+    return {
+      id: updated.id,
+      status: updated.status,
+    };
   }
 
   async getValidatedAppointment(clinicId, appointmentId, options = {}) {

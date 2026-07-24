@@ -29,10 +29,34 @@ class AppointmentRepository extends BaseRepository {
 
   async findByClinicId(clinicId) {
     const sql = `
-      SELECT *
-      FROM ${this.fullTableName}
-      WHERE "clinic_id" = $1
-      ORDER BY "appointment_start" DESC
+      SELECT
+        a."id",
+        p."full_name" AS "patient_name",
+        p."phone_number",
+        s."name" AS "service_name",
+        d."full_name" AS "doctor_name",
+        r."room_name" AS "room_name",
+        a."appointment_start",
+        a."appointment_end",
+        pm."name" AS "payment_method",
+        a."status"
+      FROM ${this.fullTableName} a
+      JOIN "geniusbot"."patients" p
+        ON p."id" = a."patient_id"
+       AND p."clinic_id" = a."clinic_id"
+      JOIN "geniusbot"."services" s
+        ON s."id" = a."service_id"
+       AND s."clinic_id" = a."clinic_id"
+      LEFT JOIN "geniusbot"."doctors" d
+        ON d."id" = a."doctor_id"
+       AND d."clinic_id" = a."clinic_id"
+      LEFT JOIN "geniusbot"."rooms" r
+        ON r."id" = a."room_id"
+      LEFT JOIN "geniusbot"."payment_methods" pm
+        ON pm."id" = a."payment_method_id"
+       AND pm."clinic_id" = a."clinic_id"
+      WHERE a."clinic_id" = $1
+      ORDER BY a."appointment_start" ASC
     `;
 
     const result = await this.query(sql, [clinicId]);
@@ -185,7 +209,23 @@ class AppointmentRepository extends BaseRepository {
   }
 
   async updateStatus(clinicId, appointmentId, status) {
-    return this.updateByIdAndClinic(clinicId, appointmentId, { status });
+    const sql = `
+      UPDATE ${this.fullTableName}
+      SET
+        "status" = $3,
+        "updated_at" = NOW()
+      WHERE "clinic_id" = $1
+        AND "id" = $2
+      RETURNING "id", "status"
+    `;
+
+    const result = await this.query(sql, [
+      clinicId,
+      appointmentId,
+      status,
+    ]);
+
+    return result.rows[0] || null;
   }
 
   async cancelAppointment(clinicId, appointmentId, notes = null) {

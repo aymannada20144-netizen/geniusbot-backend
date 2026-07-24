@@ -7,6 +7,7 @@ const SAFE_COLUMNS = `
   clinic_id,
   branch_id,
   full_name,
+  username,
   email,
   phone,
   role,
@@ -25,7 +26,7 @@ class StaffRepository extends BaseRepository {
     return client || this.db;
   }
 
-  async findAuthByEmail(email, client = null) {
+  async findAuthByIdentifier(identifier, client = null) {
     const executor = this.getExecutor(client);
 
     const sql = `
@@ -34,11 +35,24 @@ class StaffRepository extends BaseRepository {
         password_hash
       FROM ${this.fullTableName}
       WHERE LOWER(email) = LOWER($1)
+         OR LOWER(username) = LOWER($1)
       LIMIT 1
     `;
 
-    const result = await executor.query(sql, [email]);
+    const result = await executor.query(sql, [identifier]);
 
+    return result.rows[0] || null;
+  }
+
+  async findAuthById(staffId, client = null) {
+    const executor = this.getExecutor(client);
+    const result = await executor.query(
+      `SELECT ${SAFE_COLUMNS}, password_hash
+         FROM ${this.fullTableName}
+        WHERE id = $1
+        LIMIT 1`,
+      [staffId]
+    );
     return result.rows[0] || null;
   }
 
@@ -144,6 +158,7 @@ class StaffRepository extends BaseRepository {
         clinic_id,
         branch_id,
         full_name,
+        username,
         email,
         phone,
         password_hash,
@@ -155,10 +170,11 @@ class StaffRepository extends BaseRepository {
         $2,
         $3,
         LOWER($4),
-        $5,
+        LOWER($5),
         $6,
         $7,
-        $8
+        $8,
+        $9
       )
       RETURNING
         ${SAFE_COLUMNS}
@@ -168,6 +184,7 @@ class StaffRepository extends BaseRepository {
       staffData.clinicId,
       staffData.branchId,
       staffData.fullName,
+      staffData.username,
       staffData.email,
       staffData.phone,
       staffData.passwordHash,
@@ -206,6 +223,13 @@ class StaffRepository extends BaseRepository {
 
     if (staffData.fullName !== undefined) {
       addAssignment('full_name', staffData.fullName);
+    }
+
+    if (staffData.username !== undefined) {
+      values.push(staffData.username);
+      assignments.push(
+        `username = LOWER($${values.length})`
+      );
     }
 
     if (staffData.email !== undefined) {
@@ -254,6 +278,7 @@ class StaffRepository extends BaseRepository {
     clinicId,
     staffId,
     role,
+    branchId,
     client = null
   ) {
     const executor = this.getExecutor(client);
@@ -262,11 +287,7 @@ class StaffRepository extends BaseRepository {
       UPDATE ${this.fullTableName}
       SET
         role = $3,
-        branch_id = CASE
-          WHEN $3 IN ('owner', 'clinic_admin')
-            THEN NULL
-          ELSE branch_id
-        END,
+        branch_id = $4,
         updated_at = NOW()
       WHERE clinic_id = $1
         AND id = $2
@@ -278,8 +299,21 @@ class StaffRepository extends BaseRepository {
       clinicId,
       staffId,
       role,
+      branchId,
     ]);
 
+    return result.rows[0] || null;
+  }
+
+  async deleteStaff(clinicId, staffId, client = null) {
+    const executor = this.getExecutor(client);
+    const result = await executor.query(
+      `DELETE FROM ${this.fullTableName}
+       WHERE clinic_id = $1
+         AND id = $2
+       RETURNING ${SAFE_COLUMNS}`,
+      [clinicId, staffId]
+    );
     return result.rows[0] || null;
   }
 
@@ -384,6 +418,50 @@ class StaffRepository extends BaseRepository {
     const result = await executor.query(sql, values);
 
     return result.rows[0].exists;
+  }
+
+  async identifierConflict(
+    username,
+    email,
+    excludeStaffId = null,
+    client = null
+  ) {
+    const executor = this.getExecutor(client);
+    const values = [username, email];
+    let exclusionClause = '';
+
+    if (excludeStaffId) {
+      values.push(excludeStaffId);
+      exclusionClause = `AND id <> $${values.length}`;
+    }
+
+    const result = await executor.query(
+      `SELECT EXISTS (
+         SELECT 1
+           FROM ${this.fullTableName}
+          WHERE (
+            LOWER(username) IN (LOWER($1), LOWER($2))
+            OR LOWER(email) IN (LOWER($1), LOWER($2))
+          )
+          ${exclusionClause}
+       ) AS exists`,
+      values
+    );
+
+    return result.rows[0].exists;
+  }
+
+  async activeBranchBelongsToClinic(clinicId, branchId, client = null) {
+    const executor = this.getExecutor(client);
+    const result = await executor.query(
+      `SELECT 1
+         FROM geniusbot.branches
+        WHERE clinic_id = $1
+          AND id = $2
+          AND is_active = true`,
+      [clinicId, branchId]
+    );
+    return result.rowCount === 1;
   }
 
   async countActiveOwnersByClinic(

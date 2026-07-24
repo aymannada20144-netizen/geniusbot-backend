@@ -109,12 +109,18 @@ class DoctorRepository extends BaseRepository {
   clinicId,
   doctorId,
   branchId,
-  dayOfWeek
+  dayOfWeek,
+  appointmentStartTime,
+  appointmentEndTime
 ) {
   const sql = `
     SELECT
       dwh.start_time,
-      dwh.end_time
+      dwh.end_time,
+      (
+        dwh.start_time <= $5
+        AND dwh.end_time >= $6
+      ) AS matches_requested_time
     FROM geniusbot.doctor_working_hours dwh
     INNER JOIN geniusbot.doctors d
       ON d.id = dwh.doctor_id
@@ -124,6 +130,7 @@ class DoctorRepository extends BaseRepository {
       AND dwh.day_of_week = $4
       AND dwh.is_active = true
       AND d.is_active = true
+    ORDER BY matches_requested_time DESC, dwh.start_time ASC
     LIMIT 1
   `;
 
@@ -132,6 +139,8 @@ class DoctorRepository extends BaseRepository {
     doctorId,
     branchId,
     dayOfWeek,
+    appointmentStartTime,
+    appointmentEndTime,
   ]);
 
   return result.rows[0] || null;

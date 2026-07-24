@@ -14,8 +14,12 @@ async function sendWhatsAppMessage(input) {
   }
 
   const to = requiredString(input, 'to');
-  const templateName = requiredString(input, 'templateName');
-  const language = requiredString(input, 'language');
+  const isTextMessage = Boolean(
+    Object.getOwnPropertyDescriptor(input, 'body')
+  );
+  const body = isTextMessage ? requiredString(input, 'body') : null;
+  const templateName = isTextMessage ? null : requiredString(input, 'templateName');
+  const language = isTextMessage ? null : requiredString(input, 'language');
   const endpoint =
     `https://graph.facebook.com/${GRAPH_API_VERSION}/` +
     `${env.whatsapp.phoneNumberId}/messages`;
@@ -25,7 +29,13 @@ async function sendWhatsAppMessage(input) {
   try {
     response = await axios.post(
       endpoint,
-      {
+      isTextMessage ? {
+        messaging_product: 'whatsapp',
+        recipient_type: 'individual',
+        to,
+        type: 'text',
+        text: { body },
+      } : {
         messaging_product: 'whatsapp',
         recipient_type: 'individual',
         to,
@@ -177,3 +187,7 @@ function isPlainObject(value) {
 }
 
 module.exports = sendWhatsAppMessage;
+
+sendWhatsAppMessage.sendText = async function sendText({ recipientId, body, text } = {}) {
+  return sendWhatsAppMessage({ to: recipientId, body: body ?? text });
+};

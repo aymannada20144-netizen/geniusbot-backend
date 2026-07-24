@@ -1,0 +1,27 @@
+.doctor-hours { display: grid; gap: 20px; color: #172033; }
+.doctor-hours > header { display: flex; justify-content: space-between; gap: 20px; align-items: end; }
+.doctor-hours header p { color: #2455c3; font-size: 12px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
+.doctor-hours h2, .doctor-hours h3, .doctor-hours p { margin: 0; }
+.doctor-hours label { display: grid; gap: 6px; font-size: 13px; font-weight: 600; }
+.doctor-hours input, .doctor-hours select, .doctor-hours button { min-height: 38px; border: 1px solid #d7deea; border-radius: 8px; background: white; padding: 8px 10px; color: inherit; }
+.doctor-hours button { cursor: pointer; }
+.doctor-hours__quick, .doctor-hours__day { background: white; border: 1px solid #dfe5ef; border-radius: 12px; padding: 16px; }
+.doctor-hours__quick { display: grid; gap: 14px; }
+.doctor-hours__days { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 8px; }
+.doctor-hours__days label { display: flex; align-items: center; gap: 5px; }
+.doctor-hours__days input { min-height: auto; }
+.doctor-hours__quick-period, .doctor-hours__period { display: grid; grid-template-columns: minmax(180px, 2fr) repeat(2, minmax(120px, 1fr)) auto; gap: 10px; align-items: end; }
+.doctor-hours__week { display: grid; gap: 12px; }
+.doctor-hours__day { display: grid; gap: 12px; }
+.doctor-hours__day-title { display: flex; justify-content: space-between; align-items: center; }
+.doctor-hours__day > p, .doctor-hours__state { color: #69758a; }
+.doctor-hours__primary { background: #2864dc !important; color: white !important; border-color: #2864dc !important; }
+.doctor-hours__save { display: flex; justify-content: flex-end; }
+.doctor-hours__error { color: #bd2c20; }
+.doctor-hours__overlay { position: fixed; inset: 0; z-index: 1000; display: grid; place-items: center; background: rgb(15 23 42 / 55%); }
+.doctor-hours__dialog { width: min(480px, calc(100vw - 32px)); display: grid; gap: 16px; padding: 22px; border-radius: 14px; background: white; }
+.doctor-hours__dialog div { display: flex; justify-content: flex-end; gap: 8px; }
+@media (max-width: 760px) {
+  .doctor-hours > header { align-items: stretch; flex-direction: column; }
+  .doctor-hours__quick-period, .doctor-hours__period { grid-template-columns: 1fr; }
+}

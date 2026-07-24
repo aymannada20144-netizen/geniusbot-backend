@@ -22,6 +22,30 @@ function registerAppointmentRoutes(
   }
 
   app.get(
+    '/api/clinics/:clinicId/appointments',
+    {
+      preHandler: protect(
+        PERMISSIONS.APPOINTMENT_VIEW
+      ),
+    },
+    appointmentController.listAppointments.bind(
+      appointmentController
+    )
+  );
+
+  app.patch(
+    '/api/clinics/:clinicId/appointments/:appointmentId/status',
+    {
+      preHandler: protect(
+        PERMISSIONS.APPOINTMENT_UPDATE
+      ),
+    },
+    appointmentController.updateAppointmentStatus.bind(
+      appointmentController
+    )
+  );
+
+  app.get(
     '/api/clinics/:clinicId/patients/:patientId/upcoming-appointment',
     {
       preHandler: protect(

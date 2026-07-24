@@ -25,6 +25,61 @@ class ConversationRepository extends BaseRepository {
     this.defaultOrderBy = 'started_at';
   }
 
+  async findActiveByChannelIdentity(input = {}) {
+    return this.findByChannelIdentity({
+      clinicId: input.clinicId,
+      channel: input.channel,
+      channelIdentity: input.channelIdentity || input.senderId,
+    });
+  }
+
+  async findForPatient(clinicId, patientId) {
+    const result = await this.query(`
+      SELECT c.*, p.full_name AS patient_name,
+        p.phone_number AS patient_phone
+      FROM ${this.fullTableName} c
+      JOIN "geniusbot"."patients" p
+        ON p.id = c.patient_id AND p.clinic_id = c.clinic_id
+      WHERE c.clinic_id = $1 AND c.patient_id = $2
+        AND c.status = 'open'
+      ORDER BY c.started_at DESC LIMIT 1
+    `, [clinicId, patientId]);
+    return result.rows[0] || null;
+  }
+
+  async findForClinic(clinicId, conversationId) {
+    const result = await this.query(`
+      SELECT c.*, p.full_name AS patient_name,
+        p.phone_number AS patient_phone,
+        p.whatsapp_id AS patient_whatsapp_id
+      FROM ${this.fullTableName} c
+      JOIN "geniusbot"."patients" p
+        ON p.id = c.patient_id AND p.clinic_id = c.clinic_id
+      WHERE c.clinic_id = $1 AND c.id = $2 LIMIT 1
+    `, [clinicId, conversationId]);
+    return result.rows[0] || null;
+  }
+
+  async setHumanHandling(clinicId, conversationId, staffId) {
+    const result = await this.query(`
+      UPDATE ${this.fullTableName}
+      SET bot_enabled = false, assigned_to_staff_id = $3,
+        handover_at = COALESCE(handover_at, NOW())
+      WHERE clinic_id = $1 AND id = $2 RETURNING *
+    `, [clinicId, conversationId, staffId]);
+    return result.rows[0] || null;
+  }
+
+  async setAiHandling(clinicId, conversationId) {
+    const result = await this.query(`
+      UPDATE ${this.fullTableName}
+      SET bot_enabled = true, assigned_to_staff_id = NULL,
+        handover_at = NULL, handover_reason = NULL
+      WHERE clinic_id = $1 AND id = $2 RETURNING *
+    `, [clinicId, conversationId]);
+    return result.rows[0] || null;
+  }
+
   /**
    * يبحث عن أحدث محادثة مفتوحة لهوية القناة داخل العيادة.
    *

@@ -9,6 +9,7 @@ const {
   PasswordHasher,
   tokenService,
   protect,
+  authenticate,
 } = require('../../core/auth');
 
 function register({ app, db }) {
@@ -36,7 +37,8 @@ function register({ app, db }) {
   registerStaffRoutes(
     app,
     staffController,
-    protect
+    protect,
+    authenticate
   );
 }
 

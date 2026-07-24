@@ -53,7 +53,8 @@ class PatientController {
   async createPatient(request, reply) {
     const patient =
       await this.patientService.createPatient(
-        request.body
+        request.params.clinicId,
+        request.body || {}
       );
 
     return reply.code(201).send({
@@ -105,6 +106,54 @@ class PatientController {
       success: true,
       data: patient,
     });
+  }
+
+  async updatePatient(request, reply) {
+    const { clinicId, patientId } = request.params;
+    const patient = await this.patientService.updatePatient(
+      clinicId,
+      patientId,
+      request.body || {}
+    );
+    return reply.send({ success: true, data: patient });
+  }
+
+  async getAppointments(request, reply) {
+    const { clinicId, patientId } = request.params;
+    const appointments = await this.patientService.getAppointments(
+      clinicId,
+      patientId
+    );
+    return reply.send({
+      success: true,
+      count: appointments.length,
+      data: appointments,
+    });
+  }
+
+  async getConversation(request, reply) {
+    const { clinicId, patientId } = request.params;
+    return reply.send({ success: true, data: await this.patientService.getConversation(clinicId, patientId) });
+  }
+
+  async takeOver(request, reply) {
+    const { clinicId, conversationId } = request.params;
+    return reply.send({ success: true, data: await this.patientService.takeOver(clinicId, conversationId, request.user.id) });
+  }
+
+  async startHumanConversation(request, reply) {
+    const { clinicId, patientId } = request.params;
+    return reply.send({ success: true, data: await this.patientService.startHumanConversation(clinicId, patientId, request.user.id) });
+  }
+
+  async returnToShaden(request, reply) {
+    const { clinicId, conversationId } = request.params;
+    return reply.send({ success: true, data: await this.patientService.returnToShaden(clinicId, conversationId) });
+  }
+
+  async sendHumanMessage(request, reply) {
+    const { clinicId, conversationId } = request.params;
+    return reply.send({ success: true, data: await this.patientService.sendHumanMessage(clinicId, conversationId, request.user.id, request.body?.body) });
   }
 }
 

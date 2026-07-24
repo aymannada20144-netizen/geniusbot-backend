@@ -29,7 +29,8 @@ class WhatsAppWebhookParser {
         waMessageId: msg.id,
         senderType: 'patient', // مطابق لـ DB schema
         timestamp: new Date(parseInt(msg.timestamp) * 1000),
-        metaPhoneNumberId: metadata.phone_number_id, // تصحيح التسمية
+        metaPhoneNumberId: metadata.phone_number_id,
+        receiverPhone: metadata.display_phone_number,
         messageType: msg.type,
         text: null,
         rawPayload: null

@@ -8,9 +8,12 @@ const AUTH_SESSION_STORAGE_KEY =
   'geniusbot.auth.session'
 
 const AUTH_ROLES: readonly AuthRole[] = [
+  'platform_admin',
   'owner',
-  'admin',
+  'clinic_admin',
+  'branch_manager',
   'receptionist',
+  'doctor',
 ]
 
 function isNonEmptyString(
@@ -112,6 +115,10 @@ export function getAuthSession():
 
 export function clearAuthSession(): void {
   sessionStorage.removeItem(
+    AUTH_SESSION_STORAGE_KEY,
+  )
+
+  localStorage.removeItem(
     AUTH_SESSION_STORAGE_KEY,
   )
 }

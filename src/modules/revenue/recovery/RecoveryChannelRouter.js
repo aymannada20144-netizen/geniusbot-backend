@@ -18,7 +18,7 @@ class RecoveryChannelRouter {
    * @param {object} context
    * @returns {Readonly<{provider: object|Function, payload: object}>}
    */
-  route(context = {}) {
+  route(context) {
     this.#assertPlainObject(context, 'context');
     this.#assertPlainObject(context.payload, 'context.payload');
     this.#assertPlainObject(context.providers, 'context.providers');

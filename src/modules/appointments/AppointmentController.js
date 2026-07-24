@@ -7,6 +7,33 @@ class AppointmentController {
         this.appointmentService = appointmentService;
     }
 
+    async listAppointments(request, reply) {
+        const { clinicId } = request.params;
+        const appointments = await this.appointmentService.listAppointments(
+            clinicId
+        );
+
+        return reply.send({
+            success: true,
+            data: appointments
+        });
+    }
+
+    async updateAppointmentStatus(request, reply) {
+        const { clinicId, appointmentId } = request.params;
+        const { status } = request.body || {};
+        const appointment = await this.appointmentService.updateAppointmentStatus(
+            clinicId,
+            appointmentId,
+            status
+        );
+
+        return reply.send({
+            success: true,
+            data: appointment
+        });
+    }
+
     async getUpcomingAppointment(request, reply) {
         const { clinicId, patientId } = request.params;
 

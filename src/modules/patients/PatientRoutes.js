@@ -70,6 +70,34 @@ function patientRoutes(
   );
 
   app.patch(
+    '/api/clinics/:clinicId/patients/:patientId',
+    {
+      preHandler: protect(
+        PERMISSIONS.PATIENT_UPDATE
+      ),
+    },
+    patientController.updatePatient.bind(
+      patientController
+    )
+  );
+
+  app.get('/api/clinics/:clinicId/patients/:patientId/conversation',
+    { preHandler: protect(PERMISSIONS.CONVERSATION_VIEW) },
+    patientController.getConversation.bind(patientController));
+  app.patch('/api/clinics/:clinicId/conversations/:conversationId/takeover',
+    { preHandler: protect(PERMISSIONS.CONVERSATION_REPLY) },
+    patientController.takeOver.bind(patientController));
+  app.patch('/api/clinics/:clinicId/patients/:patientId/takeover',
+    { preHandler: protect(PERMISSIONS.CONVERSATION_REPLY) },
+    patientController.startHumanConversation.bind(patientController));
+  app.patch('/api/clinics/:clinicId/conversations/:conversationId/return-to-shaden',
+    { preHandler: protect(PERMISSIONS.CONVERSATION_REPLY) },
+    patientController.returnToShaden.bind(patientController));
+  app.post('/api/clinics/:clinicId/conversations/:conversationId/messages',
+    { preHandler: protect(PERMISSIONS.CONVERSATION_REPLY) },
+    patientController.sendHumanMessage.bind(patientController));
+
+  app.patch(
     '/api/clinics/:clinicId/patients/:patientId/reactivate',
     {
       preHandler: protect(

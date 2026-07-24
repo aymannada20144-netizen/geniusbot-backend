@@ -40,13 +40,13 @@ class WhatsAppController {
       return; // إذا كان مجرد تحديث حالة (Delivered/Read) نتجاهله
     }
 
-    console.log(`📩 Received message from ${rawMessage.senderPhone}: ${rawMessage.text}`);
-
     // 3. تمرير الرسالة لعقل شادن (بشكل غير متزامن حتى لا نعطل السيرفر)
     // ShadenService سيتولى فهم الرسالة، حفظها، وتوجيهها للخدمة المناسبة
     this.shadenService.processMessage(rawMessage)
       .catch(error => {
-        console.error(`❌ Error processing message from ${rawMessage.senderPhone}:`, error);
+        console.error('WhatsApp message processing failed.', {
+          name: error?.name || 'Error',
+        });
         // مستقبلاً: يمكن إرسال رسالة اعتذار للعميل هنا عبر WhatsAppMessageSender
       });
   }

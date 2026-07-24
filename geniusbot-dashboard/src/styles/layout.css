@@ -194,7 +194,7 @@
 
   color: var(--color-text-secondary);
 
-  font-size: var(--font-size-sm);
+  font-size: var(--font-size-base);
   font-weight: var(--font-weight-medium);
   line-height: var(--line-height-normal);
   text-decoration: none;
@@ -294,7 +294,7 @@
 
   color: var(--color-text-primary);
 
-  font-size: var(--font-size-xl);
+  font-size: var(--font-size-2xl);
   font-weight: var(--font-weight-semibold);
   line-height: var(--line-height-tight);
   text-overflow: ellipsis;
@@ -729,4 +729,22 @@
   .dashboard-home__panel:hover {
     transform: none;
   }
+}
+
+.app-header__logout {
+  min-height: var(--control-height-sm);
+  padding-inline: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-text-secondary);
+  font: inherit;
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  background: var(--color-surface);
+  cursor: pointer;
+}
+
+.app-header__logout:hover {
+  color: var(--color-danger-600);
+  border-color: var(--color-danger-600);
 }

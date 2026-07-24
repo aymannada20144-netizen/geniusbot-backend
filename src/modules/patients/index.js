@@ -4,6 +4,9 @@ const PatientRepository = require('./PatientRepository');
 const PatientService = require('./PatientService');
 const PatientController = require('./PatientController');
 const registerPatientRoutes = require('./PatientRoutes');
+const ConversationRepository = require('../../repositories/ConversationRepository');
+const MessageRepository = require('../../repositories/MessageRepository');
+const sendWhatsAppMessage = require('../../channels/whatsapp/sendWhatsAppMessage');
 
 const {
   protect,
@@ -14,7 +17,11 @@ function register({ app, db }) {
     new PatientRepository(db);
 
   const patientService =
-    new PatientService(patientRepository);
+    new PatientService(patientRepository, {
+      conversationRepository: new ConversationRepository(db),
+      messageRepository: new MessageRepository(db),
+      sendMessage: sendWhatsAppMessage,
+    });
 
   const patientController =
     new PatientController(patientService);

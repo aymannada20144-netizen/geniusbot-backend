@@ -1,0 +1,90 @@
+.dashboard-content__container:has(.appointments-page) {
+  max-width: none;
+}
+
+.appointments-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  width: 100%;
+}
+
+.appointments-page__heading {
+  padding: var(--space-5) var(--space-6);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-xl);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.appointments-page__heading h2 { margin: 0; font-size: var(--font-size-2xl); }
+.appointments-page__heading p:last-child { margin: var(--space-2) 0 0; color: var(--color-text-secondary); }
+.appointments-page__eyebrow { margin: 0 0 var(--space-2); color: var(--color-primary); font-size: var(--font-size-xs); font-weight: var(--font-weight-semibold); letter-spacing: var(--letter-spacing-wide); text-transform: uppercase; }
+.appointments-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--space-3); }
+.appointments-summary article { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-4); border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: var(--color-surface); }
+.appointments-summary span { color: var(--color-text-muted); font-size: var(--font-size-sm); text-transform: capitalize; }
+.appointments-summary strong { font-size: var(--font-size-xl); }
+
+.appointments-toolbar {
+  display: flex;
+  align-items: end;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+}
+
+.appointments-toolbar label { display: flex; flex-direction: column; gap: var(--space-1); color: var(--color-text-muted); font-size: var(--font-size-xs); font-weight: var(--font-weight-semibold); }
+.appointments-toolbar__search { flex: 1; min-width: 12rem; }
+.appointments-toolbar input, .appointments-toolbar select { height: var(--control-height-md); padding: 0 var(--space-3); border: 1px solid var(--color-border-strong); border-radius: var(--radius-md); color: var(--color-text-primary); font: inherit; font-weight: var(--font-weight-regular); background: var(--color-surface); }
+.appointments-toolbar select { min-width: 8.5rem; }
+.appointments-toolbar input:focus, .appointments-toolbar select:focus { border-color: var(--color-primary); outline: var(--focus-ring-width) solid var(--color-focus-ring); }
+
+.appointments-state { padding: var(--space-8); border: 1px solid var(--color-border); border-radius: var(--radius-lg); color: var(--color-text-secondary); text-align: center; background: var(--color-surface); }
+.appointments-state--error, .appointment-row-error { color: var(--color-danger-600); }
+.appointments-table-wrap { width: 100%; overflow-x: auto; border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: var(--color-surface); }
+.appointments-table { width: 100%; table-layout: fixed; border-collapse: collapse; font-size: 0.8125rem; }
+.appointments-table th, .appointments-table td { min-width: 0; padding: var(--space-3) var(--space-2); border-bottom: 1px solid var(--color-border); text-align: left; vertical-align: middle; }
+.appointments-table th { color: var(--color-text-muted); font-size: var(--font-size-xs); letter-spacing: 0.03em; text-transform: uppercase; white-space: nowrap; background: var(--color-surface-muted); }
+.appointments-table td { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.appointments-table th:nth-child(1) { width: 11%; }
+.appointments-table th:nth-child(2) { width: 10%; }
+.appointments-table th:nth-child(3) { width: 11%; }
+.appointments-table th:nth-child(4) { width: 10%; }
+.appointments-table th:nth-child(5) { width: 7%; }
+.appointments-table th:nth-child(6) { width: 8%; }
+.appointments-table th:nth-child(7) { width: 12%; }
+.appointments-table th:nth-child(8) { width: 9%; }
+.appointments-table th:nth-child(9) { width: 9%; }
+.appointments-table th:nth-child(10) { width: 13%; }
+.appointments-table tbody tr:last-child td { border-bottom: 0; }
+.appointment-status { display: inline-flex; padding: var(--space-1) var(--space-2); border-radius: var(--radius-full); font-size: var(--font-size-xs); font-weight: var(--font-weight-semibold); background: var(--color-surface-muted); }
+.appointment-status--confirmed, .appointment-status--completed { color: var(--color-success-text); background: var(--color-success-subtle); }
+.appointment-status--pending { color: var(--color-warning-600); background: var(--color-warning-50); }
+.appointment-status--cancelled, .appointment-status--no_show { color: var(--color-danger-600); background: var(--color-danger-50); }
+.appointment-actions { display: flex; gap: var(--space-1); }
+.appointment-actions .ui-button { min-height: 1.75rem; padding-inline: var(--space-2); font-size: var(--font-size-xs); }
+.appointment-row-error { margin: var(--space-1) 0 0; font-size: var(--font-size-xs); white-space: normal; }
+
+@media (max-width: 75rem) {
+  .dashboard-content:has(.appointments-page) { padding-inline: var(--space-4); }
+  .appointments-table { min-width: 64rem; }
+}
+
+@media (max-width: 62rem) {
+  .appointments-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 48rem) {
+  .appointments-summary { grid-template-columns: 1fr; }
+  .appointments-toolbar { align-items: stretch; flex-direction: column; }
+  .appointments-toolbar__search { min-width: 0; }
+  .appointments-toolbar select { width: 100%; }
+  .appointments-table { min-width: 0; table-layout: auto; }
+  .appointments-table thead { display: none; }
+  .appointments-table, .appointments-table tbody, .appointments-table tr, .appointments-table td { display: block; width: 100%; }
+  .appointments-table tr { padding: var(--space-3); border-bottom: 1px solid var(--color-border); }
+  .appointments-table td { display: flex; justify-content: space-between; gap: var(--space-4); padding: var(--space-2); border: 0; white-space: normal; }
+  .appointments-table td::before { content: attr(data-label); color: var(--color-text-muted); font-weight: var(--font-weight-semibold); }
+}
