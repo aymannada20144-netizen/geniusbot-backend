@@ -21,20 +21,34 @@ const branchTwo = '00000000-0000-0000-0000-000000000004';
 
 function repository(overrides = {}) {
   return {
-    doctorBelongsToClinic: async () => true,
-    branchBelongsToClinic: async () => true,
+    findDoctorScope: async () => ({ id: doctorId, is_active: true }),
+    findBranchScope: async () => ({ id: branchOne, is_active: true }),
     getBranchWorkingHours: async () => ({
       opens_at: '08:00:00',
       closes_at: '23:00:00',
       is_closed: false,
     }),
-    list: async () => [],
-    replace: async (_clinic, _doctor, periods) => periods,
+    getWeeklySchedule: async () => ({ periods: [], version: 'a'.repeat(64) }),
+    replace: async (_clinic, _doctor, periods) => ({
+      periods,
+      version: 'b'.repeat(64),
+    }),
     ...overrides,
   };
 }
 
-const service = (overrides) => new DoctorWorkingHoursService(repository(overrides));
+const service = (overrides) => {
+  const instance = new DoctorWorkingHoursService(repository(overrides));
+  const replace = instance.replaceWeeklySchedule.bind(instance);
+  instance.replaceWeeklySchedule = async (clinic, doctor, body) => {
+    const result = await replace(clinic, doctor, {
+      ...body,
+      version: body.version ?? 'a'.repeat(64),
+    });
+    return result.periods;
+  };
+  return instance;
+};
 const period = (patch = {}) => ({
   branch_id: branchOne,
   day_of_week: 0,
@@ -75,6 +89,16 @@ describe('Doctor weekly working hours', () => {
       }),
       /overlap/
     );
+    await assert.rejects(
+      service().replaceWeeklySchedule(clinicId, doctorId, {
+        periods: [
+          period({ start_time: '10:00', end_time: '20:00' }),
+          period({ start_time: '11:00', end_time: '12:00' }),
+          period({ start_time: '13:00', end_time: '14:00' }),
+        ],
+      }),
+      /overlap/
+    );
   });
 
   test('adjacent periods are allowed', async () => {
@@ -106,12 +130,12 @@ describe('Doctor weekly working hours', () => {
 
   test('cross-clinic branch and doctor are rejected', async () => {
     await assert.rejects(
-      service({ branchBelongsToClinic: async () => false })
+      service({ findBranchScope: async () => null })
         .replaceWeeklySchedule(clinicId, doctorId, { periods: [period()] }),
       ForbiddenError
     );
     await assert.rejects(
-      service({ doctorBelongsToClinic: async () => false })
+      service({ findDoctorScope: async () => null })
         .getWeeklySchedule(clinicId, doctorId),
       /Doctor not found/
     );
@@ -128,12 +152,51 @@ describe('Doctor weekly working hours', () => {
     );
   });
 
+  test('rejects unknown fields, coerced days, seconds, and 24:00 with stable codes', async () => {
+    const strictService = new DoctorWorkingHoursService(repository());
+    const version = 'a'.repeat(64);
+    for (const [body, code] of [
+      [{ periods: [], version, clinic_id: clinicId }, 'DOCTOR_WORKING_HOURS_UNKNOWN_FIELD'],
+      [{ periods: [{ ...period(), extra: true }], version }, 'DOCTOR_WORKING_HOURS_UNKNOWN_FIELD'],
+      [{ periods: [period({ day_of_week: '1' })], version }, 'DOCTOR_WORKING_HOURS_INVALID_DAY'],
+      [{ periods: [period({ start_time: '10:00:30' })], version }, 'DOCTOR_WORKING_HOURS_INVALID_TIME_RANGE'],
+      [{ periods: [period({ end_time: '24:00' })], version }, 'DOCTOR_WORKING_HOURS_INVALID_TIME_RANGE'],
+      [{ periods: [period({ branch_id: 'not-a-uuid' })], version }, 'DOCTOR_WORKING_HOURS_INVALID_UUID'],
+    ]) {
+      await assert.rejects(
+        strictService.replaceWeeklySchedule(clinicId, doctorId, body),
+        (error) => error.code === code,
+      );
+    }
+  });
+
+  test('rejects stale schedule versions with a stable conflict code', async () => {
+    const strictService = new DoctorWorkingHoursService(repository({
+      replace: async () => ({ versionConflict: true, currentVersion: 'b'.repeat(64) }),
+    }));
+    await assert.rejects(
+      strictService.replaceWeeklySchedule(clinicId, doctorId, {
+        periods: [period()],
+        version: 'a'.repeat(64),
+      }),
+      (error) =>
+        error.code === 'DOCTOR_WORKING_HOURS_VERSION_CONFLICT' &&
+        error.statusCode === 409,
+    );
+  });
+
   test('repository replacement is one transaction and rollback is delegated on failure', async () => {
     const statements = [];
     let rolledBack = false;
     const client = {
       query: async (sql) => {
         statements.push(sql.trim().split(/\s+/).slice(0, 2).join(' '));
+        if (sql.includes('SELECT id, clinic_id')) {
+          return {
+            rows: [{ id: doctorId, clinic_id: clinicId, is_active: true }],
+            rowCount: 1,
+          };
+        }
         if (sql.includes('INSERT') && statements.filter((value) => value === 'INSERT INTO').length === 2) {
           throw new Error('insert failed');
         }
@@ -154,10 +217,10 @@ describe('Doctor weekly working hours', () => {
     await assert.rejects(
       repo.replace(clinicId, doctorId, [
         period(), period({ day_of_week: 1 }),
-      ]),
+      ], DoctorWorkingHoursRepository.versionFor([])),
       /insert failed/
     );
-    assert.equal(statements[0], 'DELETE FROM');
+    assert.ok(statements.includes('DELETE FROM'));
     assert.equal(rolledBack, true);
   });
 
@@ -229,7 +292,10 @@ describe('Doctor weekly working hours', () => {
         hasTimeOff: async () => false,
       },
       rooms: {
-        findActiveById: async () => ({ id: branchTwo }),
+        findActiveById: async () => ({
+          id: branchTwo,
+          branch_id: branchTwo,
+        }),
         hasTimeOff: async () => false,
       },
       appointments: {
@@ -282,7 +348,7 @@ describe('Doctor weekly working hours', () => {
     assert.equal(result.reason, 'outside_doctor_working_hours');
   });
 
-  test('frontend provides seven-day editing, Quick Apply conflict choices, and one atomic save', () => {
+  test('frontend provides seven-day editing, Quick Apply conflict choices, versioned save, and toast feedback', () => {
     const source = fs.readFileSync(
       path.join(__dirname, '..', '..', 'geniusbot-dashboard', 'src', 'pages', 'master-data', 'DoctorWorkingHoursPage.tsx'),
       'utf8'
@@ -296,5 +362,11 @@ describe('Doctor weekly working hours', () => {
     assert.match(source, /replaceDoctorWorkingHours/);
     assert.match(source, /Working periods cannot overlap/);
     assert.match(source, /Not Working/);
+    assert.match(source, /schedule\.data\?\.version/);
+    assert.match(source, /Weekly schedule saved successfully/);
+    assert.match(source, /Reload Schedule/);
+    assert.match(source, /DOCTOR_WORKING_HOURS_VERSION_CONFLICT/);
+    assert.match(source, /role=\{toastKind === 'success' \? 'status' : 'alert'\}/);
+    assert.doesNotMatch(source, /â€¦/);
   });
 });

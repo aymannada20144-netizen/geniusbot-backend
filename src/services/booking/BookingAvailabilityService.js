@@ -15,6 +15,8 @@ class BookingAvailabilityService {
     service_id,
     doctor_id,
     room_id,
+    requires_doctor,
+    requires_room,
     appointment_start,
     appointment_end,
   }) {
@@ -25,6 +27,8 @@ class BookingAvailabilityService {
         service_id,
         doctor_id,
         room_id,
+        requires_doctor,
+        requires_room,
         appointment_start,
         appointment_end,
       });

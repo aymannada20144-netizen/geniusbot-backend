@@ -124,7 +124,11 @@ class DoctorRepository extends BaseRepository {
     FROM geniusbot.doctor_working_hours dwh
     INNER JOIN geniusbot.doctors d
       ON d.id = dwh.doctor_id
+    INNER JOIN geniusbot.branches b
+      ON b.id = dwh.branch_id
     WHERE d.clinic_id = $1
+      AND b.clinic_id = $1
+      AND b.is_active = true
       AND dwh.doctor_id = $2
       AND dwh.branch_id = $3
       AND dwh.day_of_week = $4

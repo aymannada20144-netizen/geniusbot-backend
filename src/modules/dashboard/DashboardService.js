@@ -1,12 +1,14 @@
 const {
   NotFoundError,
-  ValidationError,
 } = require('../../core/errors');
 
 const {
   validateUuid,
   validateRequired,
 } = require('../../core/validators/commonValidators');
+const {
+  validateAppointmentTransition,
+} = require('../appointments/appointmentLifecycle');
 
 class DashboardService {
   constructor(dashboardRepository) {
@@ -64,16 +66,16 @@ class DashboardService {
     validateUuid(appointmentId, 'appointmentId');
     validateRequired(status, 'action');
 
-    const allowedStatuses = [
-      'confirmed',
-      'cancelled',
-      'completed',
-      'no_show',
-    ];
+    const current = await this.dashboardRepository.findAppointmentById(
+      clinicId,
+      appointmentId
+    );
 
-    if (!allowedStatuses.includes(status)) {
-      throw new ValidationError('Invalid appointment status.');
+    if (!current) {
+      throw new NotFoundError('Appointment not found.');
     }
+
+    validateAppointmentTransition(current.status, status);
 
     const appointment =
       await this.dashboardRepository.updateAppointmentStatus(

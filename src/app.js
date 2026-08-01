@@ -8,13 +8,22 @@ const env = require('./config/env');
 const errorHandler = require('./core/middlewares/errorHandler');
 const sendWhatsAppMessage = require('./channels/whatsapp/sendWhatsAppMessage');
 const createRecoveryComposition = require('./modules/revenue/recovery/createRecoveryComposition');
-const ClinicRepository = require('./repositories/ClinicRepository');
-const PatientRepository = require('./modules/patients/PatientRepository');
 const ConversationRepository = require('./repositories/ConversationRepository');
 const MessageRepository = require('./repositories/MessageRepository');
-const AiClient = require('./intelligence/AiClient');
-const ShadenService = require('./services/ShadenService');
+const createShadenEngine = require(
+  './services/shaden/createShadenEngine'
+);
+const createRepositories = require('./repositories');
+const MasterDataService = require('./modules/master-data/MasterDataService');
+const MasterDataRepository = require('./modules/master-data/MasterDataRepository');
 const WhatsAppController = require('./channels/whatsapp/WhatsAppController');
+const BookingEngine = require('./modules/bookings/BookingEngine');
+const BookingService = require('./services/BookingService');
+const AvailabilityService = require('./services/availability/AvailabilityService');
+const ClinicService = require('./services/ClinicService');
+const ConversationService = require('./services/ConversationService');
+const PatientService = require('./modules/patients/PatientService');
+const PriceService = require('./services/PriceService');
 
 const appointmentsModule = require('./modules/appointments');
 const dashboardModule = require('./modules/dashboard');
@@ -22,6 +31,9 @@ const patientsModule = require('./modules/patients');
 const bookingsModule = require('./modules/bookings');
 const staffModule = require('./modules/staff');
 const masterDataModule = require('./modules/master-data');
+const reportsModule = require('./modules/reports');
+const assistantIdentityModule = require('./modules/assistant-identity');
+const pricesModule = require('./modules/prices');
 
 const ALLOWED_FRONTEND_ORIGINS = new Set([
   'http://localhost:5173',
@@ -80,16 +92,47 @@ async function buildApp() {
   bookingsModule.register({ app, db });
   staffModule.register({ app, db });
   masterDataModule.register({ app, db });
+  reportsModule.register({ app, db });
+  const assistantIdentity = assistantIdentityModule.register({ app, db });
+  pricesModule.register({ app, db });
 
-  const shadenService = new ShadenService({
-    clinicRepository: new ClinicRepository(db),
-    patientRepository: new PatientRepository(db),
-    conversationRepository: new ConversationRepository(db),
-    messageRepository: new MessageRepository(db),
-    aiClient: new AiClient(),
+  const bookingRepositories = createRepositories(db);
+  const availabilityService = new AvailabilityService(bookingRepositories);
+  const bookingService = new BookingService(
+    bookingRepositories,
+    availabilityService
+  );
+  const bookingEngine = new BookingEngine({ bookingService });
+  const clinicRepository = bookingRepositories.clinics;
+  const conversationRepository = new ConversationRepository(db);
+  const messageRepository = new MessageRepository(db);
+  const clinicService = new ClinicService(
+    clinicRepository,
+    bookingRepositories.branches
+  );
+  const conversationService = new ConversationService(
+    conversationRepository
+  );
+  const patientService = new PatientService(bookingRepositories.patients);
+  const priceService = new PriceService(bookingRepositories.prices);
+  const catalogService = new MasterDataService(
+    new MasterDataRepository(db)
+  );
+  const conversationEngine = createShadenEngine({
+    clinicRepository,
+    conversationRepository,
+    patientRepository: bookingRepositories.patients,
+    clinicService,
+    conversationService,
+    patientService,
+    messageRepository,
+    catalogService,
+    clinicConfigurationSource: assistantIdentity.service,
+    bookingEngine,
+    priceService,
     sendMessage: sendWhatsAppMessage,
   });
-  const whatsappController = new WhatsAppController(shadenService);
+  const whatsappController = new WhatsAppController(conversationEngine);
   app.get('/api/whatsapp/webhook', whatsappController.verifyWebhook.bind(whatsappController));
   app.post('/api/whatsapp/webhook', whatsappController.receiveWebhook.bind(whatsappController));
 

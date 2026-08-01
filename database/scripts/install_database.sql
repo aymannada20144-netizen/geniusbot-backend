@@ -16,35 +16,31 @@
 -- ============================================================================
 
 \echo ''
-\echo '[1/8] Installing required extensions...'
+\echo '[1/7] Installing required extensions...'
 \ir ../schema/001_extensions.sql
 
 \echo ''
-\echo '[2/8] Creating application schema...'
+\echo '[2/7] Creating application schema...'
 \ir ../schema/002_schema.sql
 
 \echo ''
-\echo '[3/8] Creating tables...'
-\ir ../schema/003_tables.sql
-
-\echo ''
-\echo '[4/8] Creating indexes...'
+\echo '[3/7] Creating indexes...'
 \ir ../schema/003_indexes.sql
 
 \echo ''
-\echo '[5/8] Creating constraints...'
+\echo '[4/7] Creating constraints...'
 \ir ../schema/004_constraints.sql
 
 \echo ''
-\echo '[6/8] Creating functions...'
+\echo '[5/7] Creating functions...'
 \ir ../schema/005_functions.sql
 
 \echo ''
-\echo '[7/8] Creating triggers...'
+\echo '[6/7] Creating triggers...'
 \ir ../schema/006_triggers.sql
 
 \echo ''
-\echo '[8/8] Creating views...'
+\echo '[7/7] Creating views...'
 \ir ../schema/007_views.sql
 
 -- ============================================================================

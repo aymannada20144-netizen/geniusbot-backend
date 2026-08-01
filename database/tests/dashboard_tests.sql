@@ -137,6 +137,7 @@ INSERT INTO geniusbot.branches (
     id,
     clinic_id,
     name,
+    city,
     address,
     timezone,
     is_active
@@ -147,6 +148,7 @@ VALUES
         '91000000-0000-0000-0000-000000000001',
         'Dashboard Main Branch',
         'Riyadh',
+        'Riyadh',
         'Asia/Riyadh',
         true
     ),
@@ -154,6 +156,7 @@ VALUES
         '91000000-0000-0000-0000-000000000102',
         '91000000-0000-0000-0000-000000000002',
         'Dashboard Secondary Branch',
+        'Jeddah',
         'Jeddah',
         'Asia/Riyadh',
         true

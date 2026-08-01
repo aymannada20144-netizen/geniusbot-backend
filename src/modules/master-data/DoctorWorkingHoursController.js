@@ -9,18 +9,26 @@ class DoctorWorkingHoursController {
 
   async getWeeklySchedule(request, reply) {
     const { clinicId, doctorId } = request.params;
-    const data = await this.service.getWeeklySchedule(clinicId, doctorId);
-    return reply.code(200).send({ success: true, data });
+    const schedule = await this.service.getWeeklySchedule(clinicId, doctorId);
+    return reply.code(200).send({
+      success: true,
+      data: schedule.periods,
+      meta: { version: schedule.version },
+    });
   }
 
   async replaceWeeklySchedule(request, reply) {
     const { clinicId, doctorId } = request.params;
-    const data = await this.service.replaceWeeklySchedule(
+    const schedule = await this.service.replaceWeeklySchedule(
       clinicId,
       doctorId,
       request.body
     );
-    return reply.code(200).send({ success: true, data });
+    return reply.code(200).send({
+      success: true,
+      data: schedule.periods,
+      meta: { version: schedule.version },
+    });
   }
 }
 

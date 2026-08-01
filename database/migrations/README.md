@@ -32,6 +32,27 @@ The migrations **must always** be executed in the following order.
 
 ---
 
+# Incremental Production Migrations
+
+| Order | File                      | Description                                                                 |
+| ----: | ------------------------- | --------------------------------------------------------------------------- |
+|   007 | `007_rooms_hardening.sql` | Normalizes room types and enforces room lifecycle and branch integrity.     |
+|   008 | `008_reset_test_room_data.sql` | Resets and consistently reseeds the approved test clinic room data.    |
+|   009 | `009_doctor_working_hours_hardening.sql` | Enforces tenant, activity, and active-period overlap integrity for doctor schedules. |
+|   010 | `010_service_assignments_hardening.sql` | Enforces conditional resources, tenant/activity integrity, deterministic defaults, and assignment lookup indexes. |
+|   011 | `011_branch_city_integration.sql` | Separates branch city identity and enforces normalized clinic/city/name uniqueness. |
+|   012 | `012_patient_lifecycle_hardening.sql` | Hardens patient identity, normalized phones, and historical relationships. |
+|   013 | `013_assistant_identity_configuration.sql` | Adds validated clinic-scoped assistant identity settings. |
+|   014 | `014_whatsapp_clinic_resolution.sql` | Hardens WhatsApp clinic resolution by Meta phone-number identity. |
+|   015 | `015_appointment_booking_reference.sql` | Adds stable appointment booking references. |
+|   016 | `016_prices_module_hardening.sql` | Replaces the development prices module with deterministic scope validation, restrictive foreign keys, GiST overlap protection, and the current-prices view. |
+
+Migration 016 assumes the development `prices` table is empty and installs the
+prices module directly from its current definition. After applying it, run
+`database/tests/prices_module_tests.sql`.
+
+---
+
 # Initial Installation
 
 For a new database:
@@ -165,6 +186,10 @@ Before executing any migration:
 # Notes
 
 * Migration files represent the historical evolution of the database.
+* `011_branch_city_integration.sql` separates the reviewed demo branch names from their cities and hardens normalized city/name uniqueness.
+* `012_patient_lifecycle_hardening.sql` enforces normalized phone uniqueness and restrictive patient-history foreign keys.
+* `013_assistant_identity_configuration.sql` validates and backfills clinic-scoped assistant name and gender settings without replacing valid existing identities.
+* `014_whatsapp_clinic_resolution.sql` adds a stable Meta phone-number identifier and unique normalized display-number lookup for fail-closed clinic resolution.
 * Schema files represent the latest complete database definition.
 * Seed files provide deterministic initial data.
 * Scripts automate installation and rebuilding.

@@ -1,42 +1,45 @@
 'use strict';
 
+const crypto = require('node:crypto');
+
 class DoctorWorkingHoursRepository {
   constructor(db) {
     this.db = db;
   }
 
-  async doctorBelongsToClinic(clinicId, doctorId, executor = this.db) {
+  async findDoctorScope(clinicId, doctorId, executor = this.db, lock = false) {
     const result = await executor.query(
-      `SELECT 1
+      `SELECT id, clinic_id, is_active
          FROM geniusbot.doctors
-        WHERE clinic_id = $1
-          AND id = $2
-          AND is_active = true`,
-      [clinicId, doctorId]
+        WHERE id = $2
+          AND clinic_id = $1
+        ${lock ? 'FOR UPDATE' : ''}`,
+      [clinicId, doctorId],
     );
-    return result.rowCount === 1;
+    return result.rows[0] || null;
   }
 
-  async branchBelongsToClinic(clinicId, branchId, executor = this.db) {
+  async findBranchScope(clinicId, branchId, executor = this.db) {
     const result = await executor.query(
-      `SELECT 1
+      `SELECT id, clinic_id, is_active, timezone
          FROM geniusbot.branches
-        WHERE clinic_id = $1
-          AND id = $2
-          AND is_active = true`,
-      [clinicId, branchId]
+        WHERE id = $2
+          AND clinic_id = $1`,
+      [clinicId, branchId],
     );
-    return result.rowCount === 1;
+    return result.rows[0] || null;
   }
 
-  async getBranchWorkingHours(branchId, dayOfWeek, executor = this.db) {
+  async getBranchWorkingHours(clinicId, branchId, dayOfWeek, executor = this.db) {
     const result = await executor.query(
       `SELECT opens_at, closes_at, is_closed
-         FROM geniusbot.branch_working_hours
-        WHERE branch_id = $1
-          AND day_of_week = $2
+         FROM geniusbot.branch_working_hours AS bwh
+         JOIN geniusbot.branches AS b ON b.id = bwh.branch_id
+        WHERE b.clinic_id = $1
+          AND bwh.branch_id = $2
+          AND bwh.day_of_week = $3
         LIMIT 1`,
-      [branchId, dayOfWeek]
+      [clinicId, branchId, dayOfWeek],
     );
     return result.rows[0] || null;
   }
@@ -64,8 +67,50 @@ class DoctorWorkingHoursRepository {
     return result.rows;
   }
 
-  async replace(clinicId, doctorId, periods) {
+  static versionFor(periods) {
+    const canonical = periods
+      .map((period) => [
+        period.branch_id,
+        period.day_of_week,
+        String(period.start_time).slice(0, 8),
+        String(period.end_time).slice(0, 8),
+        period.is_active === true ? '1' : '0',
+      ].join('|'))
+      .sort()
+      .join('\n');
+    return crypto.createHash('sha256').update(canonical).digest('hex');
+  }
+
+  async getWeeklySchedule(clinicId, doctorId, executor = this.db) {
+    const periods = await this.list(clinicId, doctorId, executor);
+    const versionRows = await executor.query(
+      `SELECT dwh.branch_id, dwh.day_of_week, dwh.start_time,
+              dwh.end_time, dwh.is_active
+         FROM geniusbot.doctor_working_hours AS dwh
+         JOIN geniusbot.doctors AS d ON d.id = dwh.doctor_id
+        WHERE d.clinic_id = $1
+          AND dwh.doctor_id = $2
+        ORDER BY dwh.day_of_week, dwh.start_time, dwh.end_time,
+                 dwh.branch_id, dwh.is_active`,
+      [clinicId, doctorId],
+    );
+    return {
+      periods,
+      version: DoctorWorkingHoursRepository.versionFor(versionRows.rows),
+    };
+  }
+
+  async replace(clinicId, doctorId, periods, expectedVersion) {
     return this.db.transaction(async (client) => {
+      const doctor = await this.findDoctorScope(clinicId, doctorId, client, true);
+      if (!doctor) return { doctor: null };
+      if (doctor.is_active !== true) return { doctorInactive: true };
+
+      const current = await this.getWeeklySchedule(clinicId, doctorId, client);
+      if (current.version !== expectedVersion) {
+        return { versionConflict: true, currentVersion: current.version };
+      }
+
       await client.query(
         `DELETE FROM geniusbot.doctor_working_hours dwh
           USING geniusbot.doctors d
@@ -90,7 +135,7 @@ class DoctorWorkingHoursRepository {
         );
       }
 
-      return this.list(clinicId, doctorId, client);
+      return this.getWeeklySchedule(clinicId, doctorId, client);
     });
   }
 }

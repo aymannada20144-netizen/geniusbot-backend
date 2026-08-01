@@ -1,5 +1,7 @@
 'use strict';
 
+const roomTypes = require('./roomTypes');
+
 const configs = {
   clinics: {
     table: 'clinics',
@@ -10,8 +12,8 @@ const configs = {
   },
   branches: {
     table: 'branches',
-    fields: ['name', 'address', 'google_maps_url', 'timezone', 'is_active'],
-    required: ['name', 'timezone'],
+    fields: ['name', 'city', 'address', 'google_maps_url', 'timezone', 'is_active'],
+    required: ['name', 'city', 'timezone'],
     directClinic: true,
   },
   'branch-working-hours': {
@@ -72,10 +74,11 @@ const configs = {
   rooms: {
     table: 'rooms',
     fields: ['branch_id', 'room_number', 'room_name', 'room_type', 'is_active'],
-    required: ['branch_id', 'room_number'],
+    required: ['branch_id', 'room_number', 'room_name', 'room_type'],
     scopeJoin: 'JOIN geniusbot.branches scope_branch ON scope_branch.id = r.branch_id',
     scopeColumn: 'scope_branch.clinic_id',
     parentChecks: { branch_id: 'branches' },
+    roomTypes,
   },
   'room-time-off': {
     table: 'room_time_off',
@@ -93,13 +96,6 @@ const configs = {
     directClinic: true,
     parentChecks: { specialty_id: 'specialties' },
     orderBy: 'r.display_order ASC, r.name ASC',
-  },
-  'service-assignments': {
-    table: 'service_assignments',
-    fields: ['branch_id', 'service_id', 'doctor_id', 'room_id', 'is_default', 'is_active'],
-    required: ['branch_id', 'service_id'],
-    directClinic: true,
-    parentChecks: { branch_id: 'branches', service_id: 'services', doctor_id: 'doctors', room_id: 'rooms' },
   },
   'service-pre-questions': {
     table: 'service_pre_questions',

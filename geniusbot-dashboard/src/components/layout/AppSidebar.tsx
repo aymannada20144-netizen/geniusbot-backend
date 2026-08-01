@@ -1,4 +1,7 @@
 import { NavLink } from 'react-router-dom'
+import { canViewOperationalReports } from '../../auth/reportPermissions'
+import { useAuth } from '../../auth/hooks/useAuth'
+import { canViewPrices } from '../../auth/pricePermissions'
 
 type SidebarNavigationItem = {
   label: string
@@ -75,6 +78,7 @@ const navigationGroups: SidebarNavigationGroup[] = [
       { label: 'Payment Methods', to: '/dashboard/master-data/payment-methods' },
       { label: 'Insurance Companies', to: '/dashboard/master-data/insurance-companies' },
       { label: 'Insurance Classes', to: '/dashboard/master-data/insurance-classes' },
+      { label: 'Prices', to: '/dashboard/prices' },
     ],
   },
   {
@@ -89,6 +93,7 @@ const navigationGroups: SidebarNavigationGroup[] = [
 ]
 
 export function AppSidebar() {
+  const { user } = useAuth()
   return (
     <div className="app-sidebar">
       <div className="app-sidebar__brand">
@@ -114,7 +119,14 @@ export function AppSidebar() {
         className="app-sidebar__navigation"
         aria-label="Dashboard navigation"
       >
-        {navigationGroups.map((group) => (
+        {navigationGroups.map((group) => ({
+          ...group,
+          items: group.items.filter(
+            (item) =>
+              (item.to !== '/dashboard/reports' || canViewOperationalReports(user?.permissions)) &&
+              (item.to !== '/dashboard/prices' || canViewPrices(user?.permissions)),
+          ),
+        })).filter((group) => group.items.length > 0).map((group) => (
           <div
             className="app-sidebar__navigation-group"
             key={group.label}

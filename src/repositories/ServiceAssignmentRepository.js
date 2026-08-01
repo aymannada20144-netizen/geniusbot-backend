@@ -24,6 +24,7 @@ class ServiceAssignmentRepository extends BaseRepository {
    */
   async findAssignments(filters = {}) {
     const {
+      clinicId,
       branchId,
       serviceId,
       doctorId = null,
@@ -39,6 +40,11 @@ class ServiceAssignmentRepository extends BaseRepository {
         'ServiceAssignmentRepository.findAssignments requires branchId'
       );
     }
+    if (!clinicId) {
+      throw new Error(
+        'ServiceAssignmentRepository.findAssignments requires clinicId'
+      );
+    }
 
     if (!serviceId) {
       throw new Error(
@@ -47,11 +53,13 @@ class ServiceAssignmentRepository extends BaseRepository {
     }
 
     const conditions = [
-      'sa."branch_id" = $1',
-      'sa."service_id" = $2',
+      'sa."clinic_id" = $1',
+      'sa."branch_id" = $2',
+      'sa."service_id" = $3',
     ];
 
     const values = [
+      clinicId,
       branchId,
       serviceId,
     ];
@@ -85,13 +93,30 @@ class ServiceAssignmentRepository extends BaseRepository {
         d."is_active" AS "doctor_is_active",
         r."room_number",
         r."room_name",
-        r."is_active" AS "room_is_active"
+        r."is_active" AS "room_is_active",
+        s."requires_doctor",
+        s."requires_room"
       FROM ${this.fullTableName} sa
+      JOIN "geniusbot"."clinics" c
+        ON c."id" = sa."clinic_id" AND c."is_active" = TRUE
+      JOIN "geniusbot"."branches" b
+        ON b."id" = sa."branch_id"
+       AND b."clinic_id" = sa."clinic_id"
+       AND b."is_active" = TRUE
+      JOIN "geniusbot"."services" s
+        ON s."id" = sa."service_id"
+       AND s."clinic_id" = sa."clinic_id"
+       AND s."is_active" = TRUE
+       AND s."is_booking_enabled" = TRUE
       LEFT JOIN "geniusbot"."doctors" d
         ON d."id" = sa."doctor_id"
       LEFT JOIN "geniusbot"."rooms" r
         ON r."id" = sa."room_id"
       WHERE ${conditions.join('\n        AND ')}
+        AND (sa."doctor_id" IS NULL OR d."is_active" = TRUE)
+        AND (sa."room_id" IS NULL OR (
+          r."is_active" = TRUE AND r."branch_id" = sa."branch_id"
+        ))
     `;
 
     if (defaultFirst) {
@@ -164,19 +189,20 @@ class ServiceAssignmentRepository extends BaseRepository {
    * 3. تجميد Booking Engine Core.
    */
   async findDefaultAssignment(
+    clinicId,
     branchId,
     serviceId
   ) {
     const assignments =
       await this.findAssignments({
+        clinicId,
         branchId,
         serviceId,
         activeOnly: true,
         defaultFirst: true,
-        limit: 1,
       });
 
-    return assignments[0] || null;
+    return assignments.find((assignment) => assignment.is_default === true) || null;
   }
 }
 

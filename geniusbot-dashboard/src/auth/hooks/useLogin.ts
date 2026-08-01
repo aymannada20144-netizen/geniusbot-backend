@@ -21,6 +21,7 @@ function mapBackendStaffToAuthUser(
     username: staff.username,
     name: staff.full_name,
     role: staff.role,
+    permissions: staff.permissions,
   }
 }
 

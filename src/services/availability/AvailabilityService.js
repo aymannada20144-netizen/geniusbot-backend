@@ -137,14 +137,16 @@ class AvailabilityService {
       branch_id,
       doctor_id,
       room_id,
+      requires_doctor = Boolean(doctor_id),
+      requires_room = Boolean(room_id),
       appointment_start,
       appointment_end,
     } = data;
 
     validateUuid(clinic_id, 'clinic_id');
     validateUuid(branch_id, 'branch_id');
-    validateUuid(doctor_id, 'doctor_id');
-    validateUuid(room_id, 'room_id');
+    if (requires_doctor || doctor_id) validateUuid(doctor_id, 'doctor_id');
+    if (requires_room || room_id) validateUuid(room_id, 'room_id');
 
     validateRequired(
       appointment_start,
@@ -268,12 +270,19 @@ const clinicHoliday =
      * Step 1:
      * التحقق من ساعات عمل الفرع.
      */
-    const branchWorkingHours =
-      await this.repositories.clinics
-        .findBranchWorkingHours(
-          branch_id,
-          startDateTime.dayOfWeek
-        );
+    const branchWorkingHoursRepository = this.repositories.branches ||
+      this.repositories.clinics;
+    const findWorkingHours = this.repositories.branches
+      ? branchWorkingHoursRepository.findWorkingHours.bind(
+        branchWorkingHoursRepository
+      )
+      : branchWorkingHoursRepository.findBranchWorkingHours.bind(
+        branchWorkingHoursRepository
+      );
+    const branchWorkingHours = await findWorkingHours(
+      branch_id,
+      startDateTime.dayOfWeek
+    );
 
     /*
      * Fail closed:
@@ -356,6 +365,7 @@ const clinicHoliday =
      * Step 2:
      * التحقق من ساعات عمل الطبيب.
      */
+    if (doctor_id) {
     const doctorWorkingHours =
       await this.repositories.doctors
         .getWorkingHours(
@@ -442,10 +452,12 @@ const clinicHoliday =
           'Doctor is unavailable during the requested time',
       };
     }
+    }
         /*
      * Step 5:
      * التحقق من أن الغرفة مفعلة.
      */
+    if (room_id) {
     const room =
       await this.repositories.rooms.findActiveById(
         room_id
@@ -457,6 +469,15 @@ const clinicHoliday =
         reason: 'room_inactive',
         message:
           'Room not found or inactive',
+      };
+    }
+
+    if (room.branch_id !== branch_id) {
+      return {
+        available: false,
+        reason: 'room_branch_mismatch',
+        message:
+          'Room does not belong to the requested branch',
       };
     }
 
@@ -479,13 +500,14 @@ const clinicHoliday =
           'Room is unavailable during the requested time',
       };
     }
-    const doctorConflict =
+    }
+    const doctorConflict = doctor_id ?
       await this.repositories.appointments
         .hasDoctorConflict(
           doctor_id,
           start,
           end
-        );
+        ) : false;
 
     if (doctorConflict) {
       return {
@@ -496,13 +518,13 @@ const clinicHoliday =
       };
     }
 
-    const roomConflict =
+    const roomConflict = room_id ?
       await this.repositories.appointments
         .hasRoomConflict(
           room_id,
           start,
           end
-        );
+        ) : false;
 
     if (roomConflict) {
       return {

@@ -108,6 +108,23 @@ class PatientController {
     });
   }
 
+  async setPatientStatus(request, reply) {
+    const patient = await this.patientService.setActiveStatus(
+      request.params.clinicId,
+      request.params.patientId,
+      request.body
+    );
+    return reply.send({ success: true, data: patient });
+  }
+
+  async deletePatient(request, reply) {
+    const patient = await this.patientService.deletePatient(
+      request.params.clinicId,
+      request.params.patientId
+    );
+    return reply.send({ success: true, data: patient });
+  }
+
   async updatePatient(request, reply) {
     const { clinicId, patientId } = request.params;
     const patient = await this.patientService.updatePatient(

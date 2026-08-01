@@ -1,7 +1,3 @@
-const {
-  ValidationError,
-} = require('../../core/errors');
-
 class BookingAssignmentResolver {
   constructor(
     repositories,
@@ -56,13 +52,8 @@ class BookingAssignmentResolver {
       appointment_end,
     } = data;
 
-    if (room_id && !doctor_id) {
-      throw new ValidationError(
-        'room_id cannot be provided without doctor_id.'
-      );
-    }
-
     const filters = {
+      clinicId: clinic_id,
       branchId: branch_id,
       serviceId: service_id,
       activeOnly: true,
@@ -98,6 +89,8 @@ class BookingAssignmentResolver {
           service_id,
           doctor_id: assignment.doctor_id,
           room_id: assignment.room_id,
+          requires_doctor: assignment.requires_doctor,
+          requires_room: assignment.requires_room,
           appointment_start,
           appointment_end,
         });

@@ -21,6 +21,9 @@ class WhatsAppWebhookParser {
 
       const msg = value.messages[0];
       const metadata = value.metadata;
+      const contact = Array.isArray(value.contacts)
+        ? value.contacts.find((item) => item.wa_id === msg.from) || value.contacts[0]
+        : null;
 
       // البيانات الأساسية المشتركة لجميع أنواع الرسائل
       const rawMessage = {
@@ -32,6 +35,7 @@ class WhatsAppWebhookParser {
         metaPhoneNumberId: metadata.phone_number_id,
         receiverPhone: metadata.display_phone_number,
         messageType: msg.type,
+        contactName: contact?.profile?.name || null,
         text: null,
         rawPayload: null
       };

@@ -497,10 +497,26 @@ VALUES
         '00000000-0000-0000-0000-000000000001',
         'booking_maximum_days_ahead',
         '90'
+    ),
+    (
+        '00000000-0000-0000-0000-000000002009',
+        '00000000-0000-0000-0000-000000000001',
+        'assistant_name',
+        'شادن'
+    ),
+    (
+        '00000000-0000-0000-0000-000000002010',
+        '00000000-0000-0000-0000-000000000001',
+        'assistant_gender',
+        'female'
     )
 ON CONFLICT (clinic_id, setting_key)
 DO UPDATE SET
-    setting_value = EXCLUDED.setting_value,
+    setting_value = CASE
+        WHEN EXCLUDED.setting_key IN ('assistant_name', 'assistant_gender')
+            THEN geniusbot.bot_settings.setting_value
+        ELSE EXCLUDED.setting_value
+    END,
     updated_at = now();
 
 -- ============================================================================

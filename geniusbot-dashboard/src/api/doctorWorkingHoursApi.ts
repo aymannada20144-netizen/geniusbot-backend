@@ -10,7 +10,16 @@ export type DoctorWorkingPeriod = {
   is_active?: boolean
 }
 
-type ApiEnvelope<T> = { success: true; data: T }
+export type DoctorWorkingSchedule = {
+  periods: DoctorWorkingPeriod[]
+  version: string
+}
+
+type ApiEnvelope<T> = {
+  success: true
+  data: T
+  meta: { version: string }
+}
 
 const endpoint = (clinicId: string, doctorId: string) =>
   `/api/clinics/${encodeURIComponent(clinicId)}/doctors/${encodeURIComponent(doctorId)}/working-hours`
@@ -19,17 +28,24 @@ export async function getDoctorWorkingHours(clinicId: string, doctorId: string) 
   const response = await apiClient.get<ApiEnvelope<DoctorWorkingPeriod[]>>(
     endpoint(clinicId, doctorId),
   )
-  return response.data.data
+  return {
+    periods: response.data.data,
+    version: response.data.meta.version,
+  }
 }
 
 export async function replaceDoctorWorkingHours(
   clinicId: string,
   doctorId: string,
   periods: DoctorWorkingPeriod[],
+  version: string,
 ) {
   const response = await apiClient.put<ApiEnvelope<DoctorWorkingPeriod[]>>(
     endpoint(clinicId, doctorId),
-    { periods },
+    { periods, version },
   )
-  return response.data.data
+  return {
+    periods: response.data.data,
+    version: response.data.meta.version,
+  }
 }

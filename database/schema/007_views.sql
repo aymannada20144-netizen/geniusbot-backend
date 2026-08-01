@@ -280,7 +280,7 @@ SELECT
     pm.clinic_id,
     c.name AS clinic_name,
     pm.name,
-    pm.payment_type,
+    pm.code AS payment_method_code,
     pm.created_at,
     pm.updated_at
 FROM geniusbot.payment_methods AS pm
@@ -302,7 +302,7 @@ SELECT
     ic.clinic_id,
     ic.name AS insurance_company_name,
     cls.id AS insurance_class_id,
-    cls.name AS insurance_class_name,
+    cls.class_name AS insurance_class_name,
     ic.created_at AS insurance_company_created_at,
     cls.created_at AS insurance_class_created_at
 FROM geniusbot.insurance_companies AS ic
@@ -318,7 +318,7 @@ COMMENT ON VIEW geniusbot.v_accepted_insurance_classes IS
 -- CURRENT SERVICE PRICES
 -- ============================================================================
 
-CREATE OR REPLACE VIEW geniusbot.v_current_service_prices AS
+CREATE OR REPLACE VIEW geniusbot.vw_current_service_prices AS
 SELECT
     p.id,
     p.clinic_id,
@@ -326,12 +326,12 @@ SELECT
     s.name AS service_name,
     p.payment_method_id,
     pm.name AS payment_method_name,
-    pm.payment_type,
+    pm.code AS payment_method_code,
     p.insurance_company_id,
     ic.name AS insurance_company_name,
     p.insurance_class_id,
-    cls.name AS insurance_class_name,
-    p.amount,
+    cls.class_name AS insurance_class_name,
+    p.price,
     p.currency,
     p.valid_from,
     p.valid_to,
@@ -347,16 +347,14 @@ LEFT JOIN geniusbot.insurance_companies AS ic
 LEFT JOIN geniusbot.insurance_classes AS cls
   ON cls.id = p.insurance_class_id
 WHERE p.is_active = true
-  AND s.is_active = true
-  AND pm.is_active = true
   AND p.valid_from <= CURRENT_DATE
   AND (
       p.valid_to IS NULL
       OR p.valid_to >= CURRENT_DATE
   );
 
-COMMENT ON VIEW geniusbot.v_current_service_prices IS
-    'Currently active service prices for cash, card and insurance payment methods.';
+COMMENT ON VIEW geniusbot.vw_current_service_prices IS
+    'Active service prices whose validity period includes the current date.';
 
 -- ============================================================================
 -- PATIENT SUMMARY
@@ -445,7 +443,7 @@ SELECT
     a.insurance_company_id,
     ic.name AS insurance_company_name,
     a.insurance_class_id,
-    cls.name AS insurance_class_name,
+    cls.class_name AS insurance_class_name,
     a.conversation_id,
     a.appointment_start,
     a.appointment_end,
@@ -499,11 +497,11 @@ CREATE OR REPLACE VIEW geniusbot.v_upcoming_appointments AS
 SELECT
     ad.*
 FROM geniusbot.v_appointment_details AS ad
-WHERE ad.status IN ('pending', 'confirmed')
+WHERE ad.status IN ('pending', 'confirmed', 'checked_in')
   AND ad.appointment_start >= CURRENT_TIMESTAMP;
 
 COMMENT ON VIEW geniusbot.v_upcoming_appointments IS
-    'Upcoming pending and confirmed appointments.';
+    'Upcoming pending, confirmed, and checked-in appointments.';
 
 -- ============================================================================
 -- TODAY SCHEDULE
@@ -515,7 +513,7 @@ SELECT
 FROM geniusbot.v_appointment_details AS ad
 JOIN geniusbot.clinics AS c
   ON c.id = ad.clinic_id
-WHERE ad.status IN ('pending', 'confirmed')
+WHERE ad.status IN ('pending', 'confirmed', 'checked_in')
   AND (
       ad.appointment_start
       AT TIME ZONE c.timezone
@@ -525,7 +523,7 @@ WHERE ad.status IN ('pending', 'confirmed')
   )::date;
 
 COMMENT ON VIEW geniusbot.v_today_schedule IS
-    'Current-day pending and confirmed appointments based on each clinic timezone.';
+    'Current-day pending, confirmed, and checked-in appointments based on each clinic timezone.';
 
 -- ============================================================================
 -- APPOINTMENT STATUS HISTORY
@@ -569,6 +567,9 @@ SELECT
     COUNT(a.id) FILTER (
         WHERE a.status = 'confirmed'
     ) AS confirmed_appointments,
+    COUNT(a.id) FILTER (
+        WHERE a.status = 'checked_in'
+    ) AS checked_in_appointments,
     COUNT(a.id) FILTER (
         WHERE a.status = 'completed'
     ) AS completed_appointments,
@@ -619,6 +620,9 @@ SELECT
         WHERE a.status = 'confirmed'
     ) AS confirmed_appointments,
     COUNT(a.id) FILTER (
+        WHERE a.status = 'checked_in'
+    ) AS checked_in_appointments,
+    COUNT(a.id) FILTER (
         WHERE a.status = 'completed'
     ) AS completed_appointments,
     COUNT(a.id) FILTER (
@@ -657,7 +661,7 @@ SELECT
     p.full_name AS patient_name,
     t.payment_method_id,
     pm.name AS payment_method_name,
-    pm.payment_type,
+    pm.code AS payment_method_code,
     t.amount,
     t.currency,
     t.status,
@@ -868,7 +872,7 @@ DECLARE
         'v_active_service_assignments',
         'v_active_payment_methods',
         'v_accepted_insurance_classes',
-        'v_current_service_prices',
+        'vw_current_service_prices',
         'v_patient_summary',
         'v_appointment_details',
         'v_active_appointments',

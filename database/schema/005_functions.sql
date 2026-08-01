@@ -466,128 +466,6 @@ COMMENT ON FUNCTION geniusbot.validate_service_assignment_integrity() IS
     'Validates clinic and branch ownership for service assignments.';
 
 -- ============================================================================
--- PRICE INTEGRITY
--- ============================================================================
-
-CREATE OR REPLACE FUNCTION geniusbot.validate_price_integrity()
-RETURNS trigger
-LANGUAGE plpgsql
-SET search_path = pg_catalog
-AS $function$
-DECLARE
-    v_service_clinic_id uuid;
-    v_payment_method_clinic_id uuid;
-    v_insurance_company_clinic_id uuid;
-    v_insurance_class_company_id uuid;
-BEGIN
-    SELECT s.clinic_id
-      INTO v_service_clinic_id
-      FROM geniusbot.services AS s
-     WHERE s.id = NEW.service_id;
-
-    IF v_service_clinic_id IS NULL THEN
-        RAISE EXCEPTION
-            USING
-                ERRCODE = '23503',
-                MESSAGE = pg_catalog.format(
-                    'Service "%s" does not exist.',
-                    NEW.service_id
-                );
-    END IF;
-
-    IF v_service_clinic_id IS DISTINCT FROM NEW.clinic_id THEN
-        RAISE EXCEPTION
-            USING
-                ERRCODE = '23514',
-                MESSAGE = 'Price service does not belong to the selected clinic.';
-    END IF;
-
-    SELECT pm.clinic_id
-      INTO v_payment_method_clinic_id
-      FROM geniusbot.payment_methods AS pm
-     WHERE pm.id = NEW.payment_method_id;
-
-    IF v_payment_method_clinic_id IS NULL THEN
-        RAISE EXCEPTION
-            USING
-                ERRCODE = '23503',
-                MESSAGE = pg_catalog.format(
-                    'Payment method "%s" does not exist.',
-                    NEW.payment_method_id
-                );
-    END IF;
-
-    IF v_payment_method_clinic_id IS DISTINCT FROM NEW.clinic_id THEN
-        RAISE EXCEPTION
-            USING
-                ERRCODE = '23514',
-                MESSAGE = 'Price payment method does not belong to the selected clinic.';
-    END IF;
-
-    IF NEW.insurance_company_id IS NOT NULL THEN
-        SELECT ic.clinic_id
-          INTO v_insurance_company_clinic_id
-          FROM geniusbot.insurance_companies AS ic
-         WHERE ic.id = NEW.insurance_company_id;
-
-        IF v_insurance_company_clinic_id IS NULL THEN
-            RAISE EXCEPTION
-                USING
-                    ERRCODE = '23503',
-                    MESSAGE = pg_catalog.format(
-                        'Insurance company "%s" does not exist.',
-                        NEW.insurance_company_id
-                    );
-        END IF;
-
-        IF v_insurance_company_clinic_id IS DISTINCT FROM NEW.clinic_id THEN
-            RAISE EXCEPTION
-                USING
-                    ERRCODE = '23514',
-                    MESSAGE = 'Price insurance company does not belong to the selected clinic.';
-        END IF;
-    END IF;
-
-    IF NEW.insurance_class_id IS NOT NULL THEN
-        IF NEW.insurance_company_id IS NULL THEN
-            RAISE EXCEPTION
-                USING
-                    ERRCODE = '23514',
-                    MESSAGE = 'An insurance class requires an insurance company.';
-        END IF;
-
-        SELECT ic.insurance_company_id
-          INTO v_insurance_class_company_id
-          FROM geniusbot.insurance_classes AS ic
-         WHERE ic.id = NEW.insurance_class_id;
-
-        IF v_insurance_class_company_id IS NULL THEN
-            RAISE EXCEPTION
-                USING
-                    ERRCODE = '23503',
-                    MESSAGE = pg_catalog.format(
-                        'Insurance class "%s" does not exist.',
-                        NEW.insurance_class_id
-                    );
-        END IF;
-
-        IF v_insurance_class_company_id
-           IS DISTINCT FROM NEW.insurance_company_id THEN
-            RAISE EXCEPTION
-                USING
-                    ERRCODE = '23514',
-                    MESSAGE = 'Price insurance class does not belong to the selected insurance company.';
-        END IF;
-    END IF;
-
-    RETURN NEW;
-END;
-$function$;
-
-COMMENT ON FUNCTION geniusbot.validate_price_integrity() IS
-    'Validates clinic ownership and insurance relationships for service prices.';
-
--- ============================================================================
 -- DOCTOR WORKING HOURS INTEGRITY
 -- ============================================================================
 
@@ -598,10 +476,12 @@ SET search_path = pg_catalog
 AS $function$
 DECLARE
     v_doctor_clinic_id uuid;
+    v_doctor_active boolean;
     v_branch_clinic_id uuid;
+    v_branch_active boolean;
 BEGIN
-    SELECT d.clinic_id
-      INTO v_doctor_clinic_id
+    SELECT d.clinic_id, d.is_active
+      INTO v_doctor_clinic_id, v_doctor_active
       FROM geniusbot.doctors AS d
      WHERE d.id = NEW.doctor_id;
 
@@ -609,14 +489,15 @@ BEGIN
         RAISE EXCEPTION
             USING
                 ERRCODE = '23503',
+                CONSTRAINT = 'fk_doctor_working_hours_doctor',
                 MESSAGE = pg_catalog.format(
                     'Doctor "%s" does not exist.',
                     NEW.doctor_id
                 );
     END IF;
 
-    SELECT b.clinic_id
-      INTO v_branch_clinic_id
+    SELECT b.clinic_id, b.is_active
+      INTO v_branch_clinic_id, v_branch_active
       FROM geniusbot.branches AS b
      WHERE b.id = NEW.branch_id;
 
@@ -624,6 +505,7 @@ BEGIN
         RAISE EXCEPTION
             USING
                 ERRCODE = '23503',
+                CONSTRAINT = 'fk_doctor_working_hours_branch',
                 MESSAGE = pg_catalog.format(
                     'Branch "%s" does not exist.',
                     NEW.branch_id
@@ -634,7 +516,24 @@ BEGIN
         RAISE EXCEPTION
             USING
                 ERRCODE = '23514',
+                CONSTRAINT = 'chk_doctor_working_hours_clinic_integrity',
                 MESSAGE = 'Doctor working-hours branch does not belong to the doctor clinic.';
+    END IF;
+
+    IF NEW.is_active IS TRUE AND v_doctor_active IS NOT TRUE THEN
+        RAISE EXCEPTION
+            USING
+                ERRCODE = '23514',
+                CONSTRAINT = 'chk_doctor_working_hours_doctor_active',
+                MESSAGE = 'Active working hours require an active doctor.';
+    END IF;
+
+    IF NEW.is_active IS TRUE AND v_branch_active IS NOT TRUE THEN
+        RAISE EXCEPTION
+            USING
+                ERRCODE = '23514',
+                CONSTRAINT = 'chk_doctor_working_hours_branch_active',
+                MESSAGE = 'Active working hours require an active branch.';
     END IF;
 
     RETURN NEW;
@@ -789,10 +688,23 @@ BEGIN
                 );
     ELSIF OLD.status = 'confirmed'
        AND NEW.status NOT IN (
-            'completed',
+            'checked_in',
             'cancelled',
             'no_show',
             'rescheduled'
+       ) THEN
+        RAISE EXCEPTION
+            USING
+                ERRCODE = '23514',
+                MESSAGE = pg_catalog.format(
+                    'Invalid appointment status transition from "%s" to "%s".',
+                    OLD.status,
+                    NEW.status
+                );
+    ELSIF OLD.status = 'checked_in'
+       AND NEW.status NOT IN (
+            'completed',
+            'cancelled'
        ) THEN
         RAISE EXCEPTION
             USING
@@ -911,6 +823,205 @@ COMMENT ON FUNCTION geniusbot.log_appointment_status_change() IS
     'Creates an immutable audit record when an appointment is created or its status changes.';
 
 -- ============================================================================
+-- Hardened Service Assignment definition. This final definition intentionally
+-- supersedes the earlier baseline definition in this file.
+CREATE OR REPLACE FUNCTION geniusbot.validate_service_assignment_integrity()
+RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = pg_catalog
+AS $function$
+DECLARE
+    v_clinic_active boolean;
+    v_branch_clinic uuid;
+    v_branch_active boolean;
+    v_service_clinic uuid;
+    v_service_active boolean;
+    v_service_bookable boolean;
+    v_requires_doctor boolean;
+    v_requires_room boolean;
+    v_doctor_clinic uuid;
+    v_doctor_active boolean;
+    v_room_clinic uuid;
+    v_room_branch uuid;
+    v_room_active boolean;
+BEGIN
+    SELECT is_active INTO v_clinic_active
+      FROM geniusbot.clinics WHERE id = NEW.clinic_id FOR KEY SHARE;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION USING ERRCODE='23503',
+          CONSTRAINT='fk_service_assignments_clinic',
+          MESSAGE='Service assignment clinic does not exist.';
+    END IF;
+
+    SELECT clinic_id, is_active INTO v_branch_clinic, v_branch_active
+      FROM geniusbot.branches WHERE id = NEW.branch_id FOR KEY SHARE;
+    IF NOT FOUND OR v_branch_clinic IS DISTINCT FROM NEW.clinic_id THEN
+        RAISE EXCEPTION USING ERRCODE='23514',
+          CONSTRAINT='chk_service_assignment_branch_scope',
+          MESSAGE='Service assignment branch is outside the clinic.';
+    END IF;
+
+    SELECT clinic_id, is_active, is_booking_enabled,
+           requires_doctor, requires_room
+      INTO v_service_clinic, v_service_active, v_service_bookable,
+           v_requires_doctor, v_requires_room
+      FROM geniusbot.services WHERE id = NEW.service_id FOR KEY SHARE;
+    IF NOT FOUND OR v_service_clinic IS DISTINCT FROM NEW.clinic_id THEN
+        RAISE EXCEPTION USING ERRCODE='23514',
+          CONSTRAINT='chk_service_assignment_service_scope',
+          MESSAGE='Service assignment service is outside the clinic.';
+    END IF;
+    IF v_requires_doctor AND NEW.doctor_id IS NULL THEN
+        RAISE EXCEPTION USING ERRCODE='23514',
+          CONSTRAINT='chk_service_assignment_doctor_required',
+          MESSAGE='The selected service requires a doctor.';
+    END IF;
+    IF v_requires_room AND NEW.room_id IS NULL THEN
+        RAISE EXCEPTION USING ERRCODE='23514',
+          CONSTRAINT='chk_service_assignment_room_required',
+          MESSAGE='The selected service requires a room.';
+    END IF;
+
+    IF NEW.doctor_id IS NOT NULL THEN
+        SELECT clinic_id, is_active INTO v_doctor_clinic, v_doctor_active
+          FROM geniusbot.doctors WHERE id = NEW.doctor_id FOR KEY SHARE;
+        IF NOT FOUND OR v_doctor_clinic IS DISTINCT FROM NEW.clinic_id THEN
+            RAISE EXCEPTION USING ERRCODE='23514',
+              CONSTRAINT='chk_service_assignment_doctor_scope',
+              MESSAGE='Service assignment doctor is outside the clinic.';
+        END IF;
+    END IF;
+
+    IF NEW.room_id IS NOT NULL THEN
+        SELECT b.clinic_id, r.branch_id, r.is_active
+          INTO v_room_clinic, v_room_branch, v_room_active
+          FROM geniusbot.rooms r
+          JOIN geniusbot.branches b ON b.id = r.branch_id
+         WHERE r.id = NEW.room_id FOR KEY SHARE OF r, b;
+        IF NOT FOUND OR v_room_clinic IS DISTINCT FROM NEW.clinic_id THEN
+            RAISE EXCEPTION USING ERRCODE='23514',
+              CONSTRAINT='chk_service_assignment_room_scope',
+              MESSAGE='Service assignment room is outside the clinic.';
+        END IF;
+        IF v_room_branch IS DISTINCT FROM NEW.branch_id THEN
+            RAISE EXCEPTION USING ERRCODE='23514',
+              CONSTRAINT='chk_service_assignment_room_branch',
+              MESSAGE='Service assignment room is outside the branch.';
+        END IF;
+    END IF;
+
+    IF NEW.is_active THEN
+        IF NOT v_clinic_active THEN
+            RAISE EXCEPTION USING ERRCODE='23514',
+              CONSTRAINT='chk_service_assignment_clinic_active',
+              MESSAGE='Active assignments require an active clinic.';
+        END IF;
+        IF NOT v_branch_active THEN
+            RAISE EXCEPTION USING ERRCODE='23514',
+              CONSTRAINT='chk_service_assignment_branch_active',
+              MESSAGE='Active assignments require an active branch.';
+        END IF;
+        IF NOT v_service_active OR NOT v_service_bookable THEN
+            RAISE EXCEPTION USING ERRCODE='23514',
+              CONSTRAINT='chk_service_assignment_service_bookable',
+              MESSAGE='Active assignments require an active bookable service.';
+        END IF;
+        IF NEW.doctor_id IS NOT NULL AND NOT v_doctor_active THEN
+            RAISE EXCEPTION USING ERRCODE='23514',
+              CONSTRAINT='chk_service_assignment_doctor_active',
+              MESSAGE='Active assignments cannot use an inactive doctor.';
+        END IF;
+        IF NEW.room_id IS NOT NULL AND NOT v_room_active THEN
+            RAISE EXCEPTION USING ERRCODE='23514',
+              CONSTRAINT='chk_service_assignment_room_active',
+              MESSAGE='Active assignments cannot use an inactive room.';
+        END IF;
+        IF v_requires_doctor AND NOT EXISTS (
+            SELECT 1 FROM geniusbot.doctor_working_hours dwh
+             WHERE dwh.doctor_id = NEW.doctor_id
+               AND dwh.branch_id = NEW.branch_id AND dwh.is_active
+        ) THEN
+            RAISE EXCEPTION USING ERRCODE='23514',
+              CONSTRAINT='chk_service_assignment_doctor_working_branch',
+              MESSAGE='The doctor has no active working hours in this branch.';
+        END IF;
+    END IF;
+    RETURN NEW;
+END;
+$function$;
+
+-- ============================================================================
+-- PRICE VALIDATION
+-- ============================================================================
+
+CREATE OR REPLACE FUNCTION geniusbot.prices_validate_before_write()
+RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = pg_catalog
+AS $function$
+DECLARE
+    v_clinic_active boolean;
+    v_service_clinic uuid;
+    v_service_active boolean;
+    v_method_clinic uuid;
+    v_method_active boolean;
+    v_method_code text;
+    v_company_clinic uuid;
+    v_company_active boolean;
+    v_class_company uuid;
+    v_class_accepted boolean;
+BEGIN
+    NEW.currency := upper(btrim(NEW.currency));
+    SELECT is_active INTO v_clinic_active FROM geniusbot.clinics
+     WHERE id = NEW.clinic_id FOR KEY SHARE;
+    IF NOT FOUND THEN RAISE EXCEPTION USING ERRCODE='23503', CONSTRAINT='fk_prices_clinic', MESSAGE='PRICE_CLINIC_NOT_FOUND'; END IF;
+
+    SELECT clinic_id, is_active INTO v_service_clinic, v_service_active
+      FROM geniusbot.services WHERE id = NEW.service_id FOR KEY SHARE;
+    IF NOT FOUND THEN RAISE EXCEPTION USING ERRCODE='23503', CONSTRAINT='fk_prices_service', MESSAGE='PRICE_SERVICE_NOT_FOUND'; END IF;
+    IF v_service_clinic IS DISTINCT FROM NEW.clinic_id THEN RAISE EXCEPTION USING ERRCODE='23514', CONSTRAINT='chk_prices_service_tenant', MESSAGE='PRICE_SERVICE_CLINIC_MISMATCH'; END IF;
+
+    SELECT clinic_id, is_active, lower(btrim(code))
+      INTO v_method_clinic, v_method_active, v_method_code
+      FROM geniusbot.payment_methods WHERE id = NEW.payment_method_id FOR KEY SHARE;
+    IF NOT FOUND THEN RAISE EXCEPTION USING ERRCODE='23503', CONSTRAINT='fk_prices_payment_method', MESSAGE='PRICE_PAYMENT_METHOD_NOT_FOUND'; END IF;
+    IF v_method_clinic IS DISTINCT FROM NEW.clinic_id THEN RAISE EXCEPTION USING ERRCODE='23514', CONSTRAINT='chk_prices_payment_method_tenant', MESSAGE='PRICE_PAYMENT_METHOD_CLINIC_MISMATCH'; END IF;
+    IF v_method_code NOT IN ('cash', 'insurance') THEN RAISE EXCEPTION USING ERRCODE='23514', CONSTRAINT='chk_prices_payment_method_code', MESSAGE='PRICE_PAYMENT_METHOD_UNSUPPORTED'; END IF;
+
+    IF v_method_code = 'cash' THEN
+        IF NEW.insurance_company_id IS NOT NULL OR NEW.insurance_class_id IS NOT NULL THEN
+            RAISE EXCEPTION USING ERRCODE='23514', CONSTRAINT='chk_prices_cash_scope', MESSAGE='PRICE_CASH_REQUIRES_NULL_INSURANCE';
+        END IF;
+    ELSIF NEW.insurance_company_id IS NULL OR NEW.insurance_class_id IS NULL THEN
+        RAISE EXCEPTION USING ERRCODE='23514', CONSTRAINT='chk_prices_insurance_scope', MESSAGE='PRICE_INSURANCE_REQUIRES_COMPANY_AND_CLASS';
+    END IF;
+
+    IF NEW.insurance_company_id IS NOT NULL THEN
+        SELECT clinic_id, is_active INTO v_company_clinic, v_company_active
+          FROM geniusbot.insurance_companies WHERE id = NEW.insurance_company_id FOR KEY SHARE;
+        IF NOT FOUND THEN RAISE EXCEPTION USING ERRCODE='23503', CONSTRAINT='fk_prices_insurance_company', MESSAGE='PRICE_INSURANCE_COMPANY_NOT_FOUND'; END IF;
+        IF v_company_clinic IS DISTINCT FROM NEW.clinic_id THEN RAISE EXCEPTION USING ERRCODE='23514', CONSTRAINT='chk_prices_insurance_company_tenant', MESSAGE='PRICE_INSURANCE_COMPANY_CLINIC_MISMATCH'; END IF;
+    END IF;
+
+    IF NEW.insurance_class_id IS NOT NULL THEN
+        SELECT insurance_company_id, is_accepted INTO v_class_company, v_class_accepted
+          FROM geniusbot.insurance_classes WHERE id = NEW.insurance_class_id FOR KEY SHARE;
+        IF NOT FOUND THEN RAISE EXCEPTION USING ERRCODE='23503', CONSTRAINT='fk_prices_insurance_class', MESSAGE='PRICE_INSURANCE_CLASS_NOT_FOUND'; END IF;
+        IF v_class_company IS DISTINCT FROM NEW.insurance_company_id THEN RAISE EXCEPTION USING ERRCODE='23514', CONSTRAINT='chk_prices_insurance_class_company', MESSAGE='PRICE_INSURANCE_CLASS_COMPANY_MISMATCH'; END IF;
+    END IF;
+
+    IF NOT v_clinic_active THEN RAISE EXCEPTION USING ERRCODE='23514', CONSTRAINT='chk_prices_clinic_active', MESSAGE='PRICE_REQUIRES_ACTIVE_CLINIC'; END IF;
+    IF NOT v_service_active THEN RAISE EXCEPTION USING ERRCODE='23514', CONSTRAINT='chk_prices_service_active', MESSAGE='PRICE_REQUIRES_ACTIVE_SERVICE'; END IF;
+    IF NOT v_method_active THEN RAISE EXCEPTION USING ERRCODE='23514', CONSTRAINT='chk_prices_payment_method_active', MESSAGE='PRICE_REQUIRES_ACTIVE_PAYMENT_METHOD'; END IF;
+    IF NEW.insurance_company_id IS NOT NULL AND NOT v_company_active THEN RAISE EXCEPTION USING ERRCODE='23514', CONSTRAINT='chk_prices_insurance_company_active', MESSAGE='PRICE_REQUIRES_ACTIVE_INSURANCE_COMPANY'; END IF;
+    IF NEW.insurance_class_id IS NOT NULL AND NOT v_class_accepted THEN RAISE EXCEPTION USING ERRCODE='23514', CONSTRAINT='chk_prices_insurance_class_active', MESSAGE='PRICE_REQUIRES_ACTIVE_INSURANCE_CLASS'; END IF;
+    RETURN NEW;
+END;
+$function$;
+
+COMMENT ON FUNCTION geniusbot.prices_validate_before_write() IS
+    'Normalizes price currency and validates resource activity, ownership, and payment scope.';
+
 -- VALIDATION
 -- ============================================================================
 
@@ -920,7 +1031,7 @@ DECLARE
         'set_updated_at',
         'validate_appointment_integrity',
         'validate_service_assignment_integrity',
-        'validate_price_integrity',
+        'prices_validate_before_write',
         'validate_doctor_working_hours_integrity',
         'validate_clinic_holiday_integrity',
         'validate_conversation_integrity',

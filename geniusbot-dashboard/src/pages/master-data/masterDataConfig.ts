@@ -6,6 +6,8 @@ export type FieldConfig = {
   options?: Array<{ value: string; label: string }>
   source?: string
   sourceLabel?: string
+  readOnlyOnEdit?: boolean
+  helper?: string
 }
 
 export type ResourceConfig = {
@@ -32,6 +34,13 @@ const doctor: FieldConfig = { name: 'doctor_id', label: 'Doctor', type: 'select'
 const specialty: FieldConfig = { name: 'specialty_id', label: 'Specialty', type: 'select', source: 'specialties', sourceLabel: 'name' }
 const service: FieldConfig = { name: 'service_id', label: 'Service', type: 'select', required: true, source: 'services', sourceLabel: 'name' }
 const room: FieldConfig = { name: 'room_id', label: 'Room', type: 'select', source: 'rooms', sourceLabel: 'room_number' }
+export const roomTypeOptions = [
+  { value: 'consultation', label: 'كشف / استشارة' },
+  { value: 'laser', label: 'ليزر' },
+  { value: 'peeling', label: 'تقشير' },
+  { value: 'injection', label: 'حقن' },
+  { value: 'skin_care', label: 'عناية بالبشرة' },
+]
 
 export const masterDataConfigs: Record<string, ResourceConfig> = {
   clinics: {
@@ -49,8 +58,8 @@ export const masterDataConfigs: Record<string, ResourceConfig> = {
   },
   branches: {
     title: 'Branches', singular: 'Branch', description: 'Manage clinic locations and their operating status.',
-    fields: [{ name: 'name', label: 'Name', required: true }, { name: 'address', label: 'Address', type: 'textarea' }, { name: 'google_maps_url', label: 'Google Maps URL' }, { name: 'timezone', label: 'Timezone', required: true }, active],
-    columns: ['name', 'address', 'timezone', 'is_active'],
+    fields: [{ name: 'name', label: 'Branch Name', required: true, helper: 'Enter the branch name only, for example “Al Rawdah Branch”.' }, { name: 'city', label: 'City', required: true, helper: 'Choose or enter the city, for example “Jeddah”.' }, { name: 'address', label: 'Address', type: 'textarea' }, { name: 'google_maps_url', label: 'Google Maps URL' }, { name: 'timezone', label: 'Timezone', required: true }, active],
+    columns: ['name', 'city', 'address', 'timezone', 'is_active'],
   },
   'branch-working-hours': {
     title: 'Branch Working Hours', singular: 'Working hour', description: 'Configure the weekly schedule for each branch.',
@@ -89,8 +98,8 @@ export const masterDataConfigs: Record<string, ResourceConfig> = {
   },
   rooms: {
     title: 'Rooms', singular: 'Room', description: 'Manage rooms within active-clinic branches.',
-    fields: [branch, { name: 'room_number', label: 'Room number', required: true }, { name: 'room_name', label: 'Room name' }, { name: 'room_type', label: 'Room type' }, active],
-    columns: ['room_number', 'room_name', 'branch_id', 'room_type', 'is_active'],
+    fields: [{ ...branch, readOnlyOnEdit: true }, { name: 'room_number', label: 'Room number', required: true }, { name: 'room_name', label: 'Room name', required: true }, { name: 'room_type', label: 'Room type', type: 'select', required: true, options: roomTypeOptions }, active],
+    columns: ['room_number', 'room_name', 'branch_id', 'room_type', 'is_active', 'updated_at'],
   },
   'room-time-off': {
     title: 'Room Time Off', singular: 'Room time off', description: 'Record room maintenance and unavailability.',
@@ -101,11 +110,6 @@ export const masterDataConfigs: Record<string, ResourceConfig> = {
     title: 'Services', singular: 'Service', description: 'Manage bookable clinic services and requirements.',
     fields: [{ ...specialty, required: false }, { name: 'name', label: 'Name', required: true }, { name: 'aliases', label: 'Aliases', type: 'array' }, { name: 'description', label: 'Description', type: 'textarea' }, { name: 'duration_minutes', label: 'Duration (minutes)', type: 'number', required: true }, { name: 'requires_doctor', label: 'Requires doctor', type: 'boolean' }, { name: 'requires_room', label: 'Requires room', type: 'boolean' }, { name: 'is_booking_enabled', label: 'Booking enabled', type: 'boolean' }, active, { name: 'display_order', label: 'Display order', type: 'number' }],
     columns: ['name', 'duration_minutes', 'requires_doctor', 'requires_room', 'is_booking_enabled', 'is_active'],
-  },
-  'service-assignments': {
-    title: 'Service Assignments', singular: 'Service assignment', description: 'Connect services to valid branches, doctors, and rooms.',
-    fields: [branch, service, { ...doctor, required: false }, room, { name: 'is_default', label: 'Default', type: 'boolean' }, active],
-    columns: ['service_id', 'branch_id', 'doctor_id', 'room_id', 'is_default', 'is_active'],
   },
   'service-pre-questions': {
     title: 'Service Pre Questions', singular: 'Pre question', description: 'Manage ordered questions shown before booking.',

@@ -1,13 +1,15 @@
 const {
   NotFoundError,
   ConflictError,
-  ValidationError,
 } = require('../../core/errors');
 
 const {
   validateRequired,
   validateUuid,
 } = require('../../core/validators/commonValidators');
+const {
+  validateAppointmentTransition,
+} = require('./appointmentLifecycle');
 
 class AppointmentService {
   constructor(appointmentRepository) {
@@ -47,10 +49,6 @@ class AppointmentService {
     validateUuid(clinicId, 'clinicId');
     validateUuid(appointmentId, 'appointmentId');
 
-    if (!['confirmed', 'cancelled'].includes(status)) {
-      throw new ValidationError('Invalid appointment status.');
-    }
-
     const appointment =
       await this.appointmentRepository.findByIdAndClinic(
         clinicId,
@@ -61,16 +59,7 @@ class AppointmentService {
       throw new NotFoundError('Appointment not found.');
     }
 
-    const allowed =
-      (status === 'confirmed' && appointment.status === 'pending') ||
-      (status === 'cancelled' &&
-        ['pending', 'confirmed'].includes(appointment.status));
-
-    if (!allowed) {
-      throw new ValidationError(
-        'Appointment status transition is not allowed.'
-      );
-    }
+    validateAppointmentTransition(appointment.status, status);
 
     const updated = await this.appointmentRepository.updateStatus(
       clinicId,
@@ -141,17 +130,8 @@ class AppointmentService {
   }
 
   async cancelAppointment(clinicId, appointmentId, reason = null) {
-  const appointment = await this.getValidatedAppointment(
-    clinicId,
-    appointmentId,
-    {
-      blockedStatuses: [
-        'cancelled',
-        'completed',
-        'no_show',
-      ],
-    }
-  );
+  const appointment = await this.getValidatedAppointment(clinicId, appointmentId);
+  validateAppointmentTransition(appointment.status, 'cancelled');
 
   return this.appointmentRepository.cancelAppointment(
     clinicId,
@@ -161,13 +141,8 @@ class AppointmentService {
 }
 
   async completeAppointment(clinicId, appointmentId) {
-    const appointment = await this.getValidatedAppointment(
-      clinicId,
-      appointmentId,
-      {
-        blockedStatuses: ['cancelled', 'completed', 'no_show'],
-      }
-    );
+    const appointment = await this.getValidatedAppointment(clinicId, appointmentId);
+    validateAppointmentTransition(appointment.status, 'completed');
 
     return this.appointmentRepository.completeAppointment(
       clinicId,
@@ -176,13 +151,8 @@ class AppointmentService {
   }
 
   async markAppointmentAsNoShow(clinicId, appointmentId) {
-    const appointment = await this.getValidatedAppointment(
-      clinicId,
-      appointmentId,
-      {
-        blockedStatuses: ['cancelled', 'completed', 'no_show'],
-      }
-    );
+    const appointment = await this.getValidatedAppointment(clinicId, appointmentId);
+    validateAppointmentTransition(appointment.status, 'no_show');
 
     return this.appointmentRepository.markAppointmentAsNoShow(
       clinicId,
@@ -202,13 +172,8 @@ class AppointmentService {
     validateRequired(appointmentStart, 'appointmentStart');
     validateRequired(appointmentEnd, 'appointmentEnd');
 
-    const appointment = await this.getValidatedAppointment(
-      clinicId,
-      appointmentId,
-      {
-        blockedStatuses: ['cancelled', 'completed'],
-      }
-    );
+    const appointment = await this.getValidatedAppointment(clinicId, appointmentId);
+    validateAppointmentTransition(appointment.status, 'rescheduled');
 
     const doctorConflict =
       await this.appointmentRepository.hasDoctorConflict(

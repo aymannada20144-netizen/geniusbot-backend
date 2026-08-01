@@ -156,7 +156,8 @@ class MessageRepository extends BaseRepository {
         stored_message.intent_id AS "intentId",
         stored_message.detected_intent_text AS "detectedIntentText",
         stored_message.raw_payload AS "rawPayload",
-        stored_message.created_at AS "createdAt"
+        stored_message.created_at AS "createdAt",
+        stored_message.inserted AS "inserted"
       FROM (
         SELECT
           inserted_message.id,
@@ -167,7 +168,8 @@ class MessageRepository extends BaseRepository {
           inserted_message.intent_id,
           inserted_message.detected_intent_text,
           inserted_message.raw_payload,
-          inserted_message.created_at
+          inserted_message.created_at,
+          TRUE AS inserted
         FROM inserted_message
 
         UNION ALL
@@ -181,7 +183,8 @@ class MessageRepository extends BaseRepository {
           existing_message.intent_id,
           existing_message.detected_intent_text,
           existing_message.raw_payload,
-          existing_message.created_at
+          existing_message.created_at,
+          FALSE AS inserted
         FROM ${this.fullTableName} AS existing_message
         WHERE existing_message.wa_message_id = $2
           AND NOT EXISTS (

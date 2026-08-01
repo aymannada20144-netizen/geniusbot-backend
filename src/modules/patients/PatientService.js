@@ -10,6 +10,7 @@ const {
   validateRequired,
 } = require('../../core/validators/commonValidators');
 const { normalizeSaudiMobile } = require('../../core/validators/saudiMobile');
+const PatientLifecycleError = require('./PatientLifecycleError');
 
 class PatientService {
   constructor(patientRepository, dependencies = {}) {
@@ -58,7 +59,11 @@ class PatientService {
       normalized.phone_number
     );
     if (duplicate) {
-      throw new ConflictError('A patient with this phone number already exists.');
+      throw new PatientLifecycleError(
+        'PATIENT_PHONE_DUPLICATE',
+        'A patient with this phone number already exists.',
+        409
+      );
     }
     if (normalized.whatsapp_id) {
       const whatsappDuplicate =
@@ -78,6 +83,15 @@ class PatientService {
     });
   }
 
+  async resolveChannelIdentity(clinicId, channelIdentity) {
+    validateRequired(clinicId, 'clinicId');
+    validateRequired(channelIdentity, 'channelIdentity');
+    return this.patientRepository.findByClinicAndChannelIdentity(
+      clinicId,
+      normalizeSaudiMobile(channelIdentity, 'channelIdentity')
+    );
+  }
+
   async updatePatient(clinicId, patientId, data) {
     validateUuid(clinicId, 'clinicId');
     validateUuid(patientId, 'patientId');
@@ -89,7 +103,11 @@ class PatientService {
         normalized.phone_number
       );
       if (duplicate && duplicate.id !== patientId) {
-        throw new ConflictError('A patient with this phone number already exists.');
+        throw new PatientLifecycleError(
+          'PATIENT_PHONE_DUPLICATE',
+          'A patient with this phone number already exists.',
+          409
+        );
       }
     }
     if (normalized.whatsapp_id) {
@@ -252,10 +270,16 @@ class PatientService {
     if (!input || typeof input !== 'object' || Array.isArray(input)) {
       throw new ValidationError('Patient data is required.');
     }
-    const allowed = [
-      'full_name', 'phone_number', 'whatsapp_id', 'email',
-      'gender', 'birth_date', 'source', 'notes', 'is_active',
-    ];
+    const allowed = partial
+      ? ['full_name', 'phone_number', 'whatsapp_id', 'email', 'gender', 'birth_date', 'notes']
+      : ['full_name', 'phone_number', 'whatsapp_id', 'email', 'gender', 'birth_date', 'source', 'notes'];
+    const unknown = Object.keys(input).filter((field) => !allowed.includes(field));
+    if (unknown.length) {
+      throw new PatientLifecycleError(
+        'PATIENT_UNKNOWN_FIELD',
+        `Unsupported patient field: ${unknown[0]}.`
+      );
+    }
     const data = {};
     for (const field of allowed) {
       if (!Object.prototype.hasOwnProperty.call(input, field)) continue;
@@ -267,10 +291,16 @@ class PatientService {
       if (!data.full_name) throw new ValidationError('full_name is required.');
       if (!data.phone_number) throw new ValidationError('phone_number is required.');
       data.source ??= 'unknown';
-      data.is_active ??= true;
+      data.is_active = true;
     }
     if (data.full_name !== undefined && data.full_name === null) {
       throw new ValidationError('full_name cannot be blank.');
+    }
+    if (data.full_name !== undefined && typeof data.full_name !== 'string') {
+      throw new ValidationError('full_name must be a string.');
+    }
+    if (typeof data.full_name === 'string' && data.full_name.length > 255) {
+      throw new ValidationError('full_name must not exceed 255 characters.');
     }
     if (data.phone_number !== undefined) {
       data.phone_number = normalizeSaudiMobile(
@@ -299,16 +329,53 @@ class PatientService {
     ) {
       throw new ValidationError('email is invalid.');
     }
+    if (typeof data.email === 'string' && data.email.length > 255) {
+      throw new ValidationError('email must not exceed 255 characters.');
+    }
     if (
       data.birth_date &&
       new Date(`${data.birth_date}T00:00:00Z`) > new Date()
     ) {
       throw new ValidationError('birth_date cannot be in the future.');
     }
-    if (data.is_active !== undefined && typeof data.is_active !== 'boolean') {
-      throw new ValidationError('is_active must be a boolean.');
-    }
     return data;
+  }
+
+  async setActiveStatus(clinicId, patientId, body) {
+    validateUuid(clinicId, 'clinicId');
+    validateUuid(patientId, 'patientId');
+    if (!body || typeof body !== 'object' || Array.isArray(body) ||
+        Object.keys(body).length !== 1 ||
+        !Object.hasOwn(body, 'is_active') ||
+        typeof body.is_active !== 'boolean') {
+      throw new PatientLifecycleError(
+        'PATIENT_STATUS_INVALID',
+        'is_active must be the only field and must be a boolean.'
+      );
+    }
+    const patient = await this.patientRepository.setActiveStatus(
+      clinicId,
+      patientId,
+      body.is_active
+    );
+    if (!patient) throw new NotFoundError('Patient not found.');
+    return patient;
+  }
+
+  async deletePatient(clinicId, patientId) {
+    validateUuid(clinicId, 'clinicId');
+    validateUuid(patientId, 'patientId');
+    const result = await this.patientRepository.deleteSafely(clinicId, patientId);
+    if (!result.patient) throw new NotFoundError('Patient not found.');
+    if (result.blockers.length) {
+      throw new PatientLifecycleError(
+        'PATIENT_DELETE_BLOCKED',
+        'This patient has historical or operational records. Deactivate the patient instead.',
+        409,
+        { blockers: result.blockers }
+      );
+    }
+    return result.patient;
   }
 
   async updateLastSeen(

@@ -41,16 +41,29 @@ class ClinicRepository extends BaseRepository {
   /**
    * البحث عن عيادة بواسطة رقم الواتساب
    */
-  async findByWhatsAppNumber(whatsappNumber) {
-    const sql = `
-      SELECT *
-      FROM ${this.fullTableName}
-      WHERE whatsapp_number = $1
-      LIMIT 1
-    `;
+  async resolveWhatsAppClinic({ phoneNumberId, displayPhoneNumber } = {}) {
+    const stableId = cleanIdentifier(phoneNumberId);
+    if (stableId) {
+      const byStableId = await this.query(
+        `SELECT * FROM ${this.fullTableName}
+         WHERE whatsapp_phone_number_id = $1 AND is_active = TRUE
+         ORDER BY id`,
+        [stableId]
+      );
+      const resolved = exactlyOne(byStableId.rows, 'WhatsApp phone number ID');
+      if (resolved) return resolved;
+    }
 
-    const result = await this.query(sql, [whatsappNumber]);
-    return result.rows[0] || null;
+    const normalizedNumber = normalizeDisplayNumber(displayPhoneNumber);
+    if (!normalizedNumber) return null;
+    const byDisplayNumber = await this.query(
+      `SELECT * FROM ${this.fullTableName}
+       WHERE regexp_replace(whatsapp_number, '\\D', '', 'g') = $1
+         AND is_active = TRUE
+       ORDER BY id`,
+      [normalizedNumber]
+    );
+    return exactlyOne(byDisplayNumber.rows, 'WhatsApp display number');
   }
 
   /**
@@ -145,3 +158,28 @@ class ClinicRepository extends BaseRepository {
 }
 
 module.exports = ClinicRepository;
+
+function cleanIdentifier(value) {
+  return typeof value === 'string' && /^\d{6,32}$/.test(value.trim())
+    ? value.trim()
+    : null;
+}
+
+function normalizeDisplayNumber(value) {
+  if (typeof value !== 'string') return null;
+  let digits = value.replace(/\D/g, '');
+  if (digits.startsWith('00')) digits = digits.slice(2);
+  return /^\d{8,15}$/.test(digits) ? digits : null;
+}
+
+function exactlyOne(rows, identifierName) {
+  if (rows.length === 0) return null;
+  if (rows.length > 1) {
+    const error = new Error(`${identifierName} maps to multiple active clinics.`);
+    error.code = 'WHATSAPP_CLINIC_AMBIGUOUS';
+    throw error;
+  }
+  return rows[0];
+}
+
+module.exports.normalizeDisplayNumber = normalizeDisplayNumber;

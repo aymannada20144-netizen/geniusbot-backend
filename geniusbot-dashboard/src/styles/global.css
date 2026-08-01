@@ -11,12 +11,17 @@
 }
 
 body {
+  width: 100%;
+  max-width: 100%;
   background-color: var(--color-background);
   color: var(--color-text-primary);
   line-height: var(--line-height-normal);
 }
 
 #root {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
   min-height: 100vh;
 }
 

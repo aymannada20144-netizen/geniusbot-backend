@@ -17,11 +17,77 @@
 .doctor-hours__day > p, .doctor-hours__state { color: #69758a; }
 .doctor-hours__primary { background: #2864dc !important; color: white !important; border-color: #2864dc !important; }
 .doctor-hours__save { display: flex; justify-content: flex-end; }
-.doctor-hours__error { color: #bd2c20; }
+.doctor-hours__toast {
+  position: fixed;
+  top: 20px;
+  left: 50%;
+  z-index: 3000;
+  display: flex;
+  width: min(560px, calc(100vw - 24px));
+  min-height: 64px;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 14px 14px 16px;
+  color: #fff;
+  font-size: 16px;
+  line-height: 1.45;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  box-shadow: 0 14px 38px rgb(15 23 42 / 28%);
+  transform: translateX(-50%);
+}
+.doctor-hours__toast--success { background: #137333; border-color: #0d5c27; }
+.doctor-hours__toast--error { background: #b3261e; border-color: #8f1d17; }
+.doctor-hours__toast--conflict { background: #a64b00; border-color: #7d3900; }
+.doctor-hours__toast-icon {
+  display: inline-grid;
+  flex: 0 0 28px;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  font-size: 19px;
+  font-weight: 800;
+  border: 1px solid rgb(255 255 255 / 58%);
+  border-radius: 50%;
+}
+.doctor-hours__toast-content { display: grid; flex: 1 1 auto; gap: 1px; min-width: 0; }
+.doctor-hours__toast-content strong { font-size: 16px; font-weight: 750; }
+.doctor-hours__toast-content span { overflow-wrap: anywhere; }
+.doctor-hours__toast-action, .doctor-hours__toast-close {
+  color: inherit;
+  font: inherit;
+  border: 1px solid rgb(255 255 255 / 62%);
+  background: rgb(255 255 255 / 12%);
+  cursor: pointer;
+}
+.doctor-hours__toast-action { flex: 0 0 auto; padding: 8px 11px; font-weight: 700; border-radius: 8px; }
+.doctor-hours__toast-close {
+  display: inline-grid;
+  flex: 0 0 34px;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  place-items: center;
+  font-size: 24px;
+  line-height: 1;
+  border-color: transparent;
+  border-radius: 8px;
+}
+.doctor-hours__toast-action:hover:not(:disabled), .doctor-hours__toast-close:hover { background: rgb(255 255 255 / 24%); }
+.doctor-hours__toast-action:focus-visible, .doctor-hours__toast-close:focus-visible { outline: 3px solid #fff; outline-offset: 2px; }
+.doctor-hours__toast-action:disabled { cursor: wait; opacity: .65; }
 .doctor-hours__overlay { position: fixed; inset: 0; z-index: 1000; display: grid; place-items: center; background: rgb(15 23 42 / 55%); }
 .doctor-hours__dialog { width: min(480px, calc(100vw - 32px)); display: grid; gap: 16px; padding: 22px; border-radius: 14px; background: white; }
 .doctor-hours__dialog div { display: flex; justify-content: flex-end; gap: 8px; }
 @media (max-width: 760px) {
   .doctor-hours > header { align-items: stretch; flex-direction: column; }
   .doctor-hours__quick-period, .doctor-hours__period { grid-template-columns: 1fr; }
+  .doctor-hours__toast { top: 12px; width: calc(100vw - 20px); align-items: flex-start; gap: 9px; padding: 12px; font-size: 15px; }
+  .doctor-hours__toast-icon { flex-basis: 26px; width: 26px; height: 26px; }
+  .doctor-hours__toast-action { align-self: center; padding: 7px 9px; }
+  .doctor-hours__toast-close { flex-basis: 30px; width: 30px; height: 30px; }
+}
+@media (max-width: 430px) {
+  .doctor-hours__toast { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; }
+  .doctor-hours__toast-action { grid-column: 2 / -1; justify-self: start; }
 }

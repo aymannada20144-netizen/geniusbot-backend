@@ -8,6 +8,10 @@ const DoctorWorkingHoursRepository = require('./DoctorWorkingHoursRepository');
 const DoctorWorkingHoursService = require('./DoctorWorkingHoursService');
 const DoctorWorkingHoursController = require('./DoctorWorkingHoursController');
 const registerDoctorWorkingHoursRoutes = require('./DoctorWorkingHoursRoutes');
+const ServiceAssignmentRepository = require('./ServiceAssignmentRepository');
+const ServiceAssignmentService = require('./ServiceAssignmentService');
+const ServiceAssignmentController = require('./ServiceAssignmentController');
+const registerServiceAssignmentRoutes = require('./ServiceAssignmentRoutes');
 
 function register({ app, db }) {
   const service = new MasterDataService(new MasterDataRepository(db));
@@ -15,12 +19,19 @@ function register({ app, db }) {
     new DoctorWorkingHoursService(new DoctorWorkingHoursRepository(db))
   );
   registerDoctorWorkingHoursRoutes(app, workingHoursController, protect);
+  registerServiceAssignmentRoutes(
+    app,
+    new ServiceAssignmentController(
+      new ServiceAssignmentService(new ServiceAssignmentRepository(db))
+    ),
+    protect
+  );
   const send = (reply, code, data) => reply.code(code).send({ success: true, data });
   const permissionGroups = {
     [PERMISSIONS.BRANCH_UPDATE]: ['branches', 'branch-working-hours', 'clinic-holidays'],
     [PERMISSIONS.DOCTOR_UPDATE]: ['doctors', 'specialties', 'doctor-specialties', 'doctor-working-hours', 'doctor-time-off'],
     [PERMISSIONS.ROOM_UPDATE]: ['rooms', 'room-time-off'],
-    [PERMISSIONS.SERVICE_UPDATE]: ['services', 'service-assignments', 'service-pre-questions'],
+    [PERMISSIONS.SERVICE_UPDATE]: ['services', 'service-pre-questions'],
     [PERMISSIONS.FINANCIAL_UPDATE]: ['payment-methods', 'insurance-companies', 'insurance-classes'],
   };
   async function authorizeWrite(request) {

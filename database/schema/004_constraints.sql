@@ -68,6 +68,9 @@ SELECT geniusbot.add_constraint_if_missing(
 -- BRANCHES
 -- ============================================================================
 
+ALTER TABLE geniusbot.branches
+    ALTER COLUMN city SET NOT NULL;
+
 SELECT geniusbot.add_constraint_if_missing(
     'branches',
     'fk_branches_clinic',
@@ -85,8 +88,8 @@ SELECT geniusbot.add_constraint_if_missing(
 
 SELECT geniusbot.add_constraint_if_missing(
     'branches',
-    'uq_branches_clinic_name',
-    'UNIQUE (clinic_id, name)'
+    'chk_branches_city_not_blank',
+    'CHECK (btrim(city) <> '''')'
 );
 
 -- ============================================================================
@@ -339,6 +342,20 @@ SELECT geniusbot.add_constraint_if_missing(
     )'
 );
 
+SELECT geniusbot.add_constraint_if_missing(
+    'doctor_working_hours',
+    'excl_doctor_working_hours_active_overlap',
+    'EXCLUDE USING gist (
+        doctor_id geniusbot.gist_uuid_ops WITH =,
+        day_of_week geniusbot.gist_int4_ops WITH =,
+        tsrange(
+            timestamp ''2000-01-01'' + start_time,
+            timestamp ''2000-01-01'' + end_time,
+            ''[)''
+        ) WITH &&
+    ) WHERE (is_active IS TRUE)'
+);
+
 -- ============================================================================
 -- DOCTOR TIME OFF
 -- ============================================================================
@@ -564,14 +581,14 @@ SELECT geniusbot.add_constraint_if_missing(
 
 SELECT geniusbot.add_constraint_if_missing(
     'prices',
-    'chk_prices_amount_non_negative',
-    'CHECK (amount >= 0)'
+    'chk_prices_price_non_negative',
+    'CHECK (price >= 0)'
 );
 
 SELECT geniusbot.add_constraint_if_missing(
     'prices',
     'chk_prices_currency',
-    'CHECK (currency ~ ''^[A-Z]{3}$'')'
+    'CHECK (currency = upper(btrim(currency)) AND currency ~ ''^[A-Z]{3}$'')'
 );
 
 SELECT geniusbot.add_constraint_if_missing(
@@ -582,11 +599,15 @@ SELECT geniusbot.add_constraint_if_missing(
 
 SELECT geniusbot.add_constraint_if_missing(
     'prices',
-    'chk_prices_insurance_pair',
-    'CHECK (
-        insurance_class_id IS NULL
-        OR insurance_company_id IS NOT NULL
-    )'
+    'excl_prices_active_period_overlap',
+    'EXCLUDE USING gist (
+        clinic_id geniusbot.gist_uuid_ops WITH =,
+        service_id geniusbot.gist_uuid_ops WITH =,
+        payment_method_id geniusbot.gist_uuid_ops WITH =,
+        (coalesce(insurance_company_id, ''00000000-0000-0000-0000-000000000000''::uuid)) geniusbot.gist_uuid_ops WITH =,
+        (coalesce(insurance_class_id, ''00000000-0000-0000-0000-000000000000''::uuid)) geniusbot.gist_uuid_ops WITH =,
+        (daterange(valid_from, coalesce(valid_to + 1, ''infinity''::date), ''[)'')) WITH &&
+    ) WHERE (is_active IS TRUE)'
 );
 
 -- ============================================================================
@@ -636,12 +657,6 @@ SELECT geniusbot.add_constraint_if_missing(
      REFERENCES geniusbot.rooms(id)
      ON UPDATE RESTRICT
      ON DELETE RESTRICT'
-);
-
-SELECT geniusbot.add_constraint_if_missing(
-    'service_assignments',
-    'chk_service_assignments_resource',
-    'CHECK (doctor_id IS NOT NULL OR room_id IS NOT NULL)'
 );
 
 -- ============================================================================
@@ -755,7 +770,7 @@ SELECT geniusbot.add_constraint_if_missing(
     'FOREIGN KEY (patient_id)
      REFERENCES geniusbot.patients(id)
      ON UPDATE RESTRICT
-     ON DELETE SET NULL'
+     ON DELETE RESTRICT'
 );
 
 SELECT geniusbot.add_constraint_if_missing(
@@ -932,9 +947,11 @@ SELECT geniusbot.add_constraint_if_missing(
     'CHECK (status IN (
         ''pending'',
         ''confirmed'',
+        ''checked_in'',
         ''completed'',
         ''cancelled'',
-        ''no_show''
+        ''no_show'',
+        ''rescheduled''
     ))'
 );
 
@@ -1028,9 +1045,11 @@ SELECT geniusbot.add_constraint_if_missing(
         OR old_status IN (
             ''pending'',
             ''confirmed'',
+            ''checked_in'',
             ''completed'',
             ''cancelled'',
-            ''no_show''
+            ''no_show'',
+            ''rescheduled''
         )
     )'
 );
@@ -1041,9 +1060,11 @@ SELECT geniusbot.add_constraint_if_missing(
     'CHECK (new_status IN (
         ''pending'',
         ''confirmed'',
+        ''checked_in'',
         ''completed'',
         ''cancelled'',
-        ''no_show''
+        ''no_show'',
+        ''rescheduled''
     ))'
 );
 
@@ -1359,7 +1380,7 @@ SELECT geniusbot.add_constraint_if_missing(
     'FOREIGN KEY (patient_id)
      REFERENCES geniusbot.patients(id)
      ON UPDATE RESTRICT
-     ON DELETE SET NULL'
+     ON DELETE RESTRICT'
 );
 
 SELECT geniusbot.add_constraint_if_missing(
@@ -1465,6 +1486,49 @@ SELECT geniusbot.add_constraint_if_missing(
 );
 
 -- ============================================================================
+-- ASSISTANT IDENTITY SETTINGS
+-- ============================================================================
+
+SELECT geniusbot.add_constraint_if_missing(
+    'bot_settings',
+    'bot_settings_assistant_name_valid',
+    'CHECK (setting_key <> ''assistant_name'' OR (
+        setting_value IS NOT NULL
+        AND btrim(setting_value) <> ''''
+        AND char_length(setting_value) <= 40
+        AND setting_value !~ E''[\\n\\r]''
+        AND setting_value !~ ''[[:cntrl:]]''
+        AND position(U&''\200B'' in setting_value) = 0
+        AND position(U&''\200C'' in setting_value) = 0
+        AND position(U&''\200D'' in setting_value) = 0
+        AND position(U&''\200E'' in setting_value) = 0
+        AND position(U&''\200F'' in setting_value) = 0
+        AND position(U&''\202A'' in setting_value) = 0
+        AND position(U&''\202B'' in setting_value) = 0
+        AND position(U&''\202C'' in setting_value) = 0
+        AND position(U&''\202D'' in setting_value) = 0
+        AND position(U&''\202E'' in setting_value) = 0
+        AND position(U&''\2060'' in setting_value) = 0
+        AND position(U&''\2061'' in setting_value) = 0
+        AND position(U&''\2062'' in setting_value) = 0
+        AND position(U&''\2063'' in setting_value) = 0
+        AND position(U&''\2064'' in setting_value) = 0
+        AND position(U&''\2065'' in setting_value) = 0
+        AND position(U&''\2066'' in setting_value) = 0
+        AND position(U&''\2067'' in setting_value) = 0
+        AND position(U&''\2068'' in setting_value) = 0
+        AND position(U&''\2069'' in setting_value) = 0
+        AND position(U&''\FEFF'' in setting_value) = 0
+    ))'
+);
+
+SELECT geniusbot.add_constraint_if_missing(
+    'bot_settings',
+    'bot_settings_assistant_gender_valid',
+    'CHECK (setting_key <> ''assistant_gender'' OR setting_value IN (''female'', ''male''))'
+);
+
+-- ============================================================================
 -- REMOVE HELPER FUNCTION
 -- ============================================================================
 
@@ -1478,6 +1542,8 @@ DO $validation$
 DECLARE
     v_expected_constraints constant text[] := ARRAY[
         'fk_branches_clinic',
+        'chk_branches_name_not_blank',
+        'chk_branches_city_not_blank',
         'fk_branch_working_hours_branch',
         'fk_clinic_holidays_clinic',
         'fk_clinic_holidays_branch',
@@ -1502,6 +1568,10 @@ DECLARE
         'fk_prices_payment_method',
         'fk_prices_insurance_company',
         'fk_prices_insurance_class',
+        'chk_prices_price_non_negative',
+        'chk_prices_currency',
+        'chk_prices_validity_range',
+        'excl_prices_active_period_overlap',
         'fk_service_assignments_clinic',
         'fk_service_assignments_branch',
         'fk_service_assignments_service',
@@ -1548,7 +1618,9 @@ DECLARE
         'fk_knowledge_base_clinic',
         'fk_knowledge_base_service',
         'fk_message_templates_clinic',
-        'fk_ai_prompts_clinic'
+        'fk_ai_prompts_clinic',
+        'bot_settings_assistant_name_valid',
+        'bot_settings_assistant_gender_valid'
     ];
 
     v_constraint_name text;

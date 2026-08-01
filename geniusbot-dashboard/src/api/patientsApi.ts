@@ -65,9 +65,13 @@ export async function updatePatient(clinicId: string, patientId: string, input: 
 }
 export async function setPatientActive(clinicId: string, patientId: string, isActive: boolean) {
   const response = await apiClient.patch<ApiSuccessResponse<PatientRecord>>(
-    `${base(clinicId)}/patients/${encodeURIComponent(patientId)}/${isActive ? 'reactivate' : 'deactivate'}`,
+    `${base(clinicId)}/patients/${encodeURIComponent(patientId)}/status`,
+    { is_active: isActive },
   )
   return response.data.data
+}
+export async function deletePatient(clinicId: string, patientId: string) {
+  await apiClient.delete(`${base(clinicId)}/patients/${encodeURIComponent(patientId)}`)
 }
 export async function getPatientAppointments(clinicId: string, patientId: string) {
   const response = await apiClient.get<ApiSuccessResponse<PatientAppointment[]>>(

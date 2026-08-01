@@ -48,6 +48,7 @@ const PERMISSIONS = Object.freeze({
   PATIENT_VIEW: 'patient:view',
   PATIENT_CREATE: 'patient:create',
   PATIENT_UPDATE: 'patient:update',
+  PATIENT_DELETE: 'patient:delete',
 
   // Appointments
   APPOINTMENT_VIEW: 'appointment:view',
@@ -132,6 +133,7 @@ const ROLE_PERMISSIONS = Object.freeze({
     PERMISSIONS.PATIENT_VIEW,
     PERMISSIONS.PATIENT_CREATE,
     PERMISSIONS.PATIENT_UPDATE,
+    PERMISSIONS.PATIENT_DELETE,
 
     PERMISSIONS.APPOINTMENT_VIEW,
     PERMISSIONS.APPOINTMENT_CREATE,

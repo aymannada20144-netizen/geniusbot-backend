@@ -6,7 +6,7 @@ const path = require('node:path');
 const { describe, test } = require('node:test');
 
 const PatientService = require('../../src/modules/patients/PatientService');
-const { ConflictError, ValidationError } = require('../../src/core/errors');
+const { ValidationError } = require('../../src/core/errors');
 
 const clinicId = '00000000-0000-0000-0000-000000000001';
 const patientId = '00000000-0000-0000-0000-000000000002';
@@ -23,7 +23,7 @@ function repository(overrides = {}) {
 }
 
 describe('Patient management', () => {
-  test('creates with the authenticated route clinic and ignores body clinic reassignment', async () => {
+  test('creates with the authenticated route clinic and rejects body clinic reassignment', async () => {
     let written;
     const service = new PatientService(repository({
       createPatient: async (data) => {
@@ -32,12 +32,16 @@ describe('Patient management', () => {
       },
     }));
 
-    await service.createPatient(clinicId, {
+    await assert.rejects(() => service.createPatient(clinicId, {
       clinic_id: '00000000-0000-0000-0000-000000000099',
       full_name: '  Sara Patient  ',
       phone_number: '+966500000001',
-    });
+    }), /Unsupported patient field/);
 
+    await service.createPatient(clinicId, {
+      full_name: '  Sara Patient  ',
+      phone_number: '+966500000001',
+    });
     assert.equal(written.clinic_id, clinicId);
     assert.equal(written.full_name, 'Sara Patient');
     assert.equal(written.source, 'unknown');
@@ -96,7 +100,7 @@ describe('Patient management', () => {
         full_name: 'Sara',
         phone_number: '+966500000001',
       }),
-      ConflictError
+      (error) => error.code === 'PATIENT_PHONE_DUPLICATE'
     );
   });
 
@@ -104,10 +108,71 @@ describe('Patient management', () => {
     const service = new PatientService(repository());
     const updated = await service.updatePatient(clinicId, patientId, {
       full_name: ' Updated Name ',
-      clinic_id: '00000000-0000-0000-0000-000000000099',
     });
     assert.equal(updated.clinic_id, clinicId);
     assert.equal(updated.full_name, 'Updated Name');
+  });
+
+  test('rejects unknown update fields and uses a strict status payload', async () => {
+    const service = new PatientService(repository({
+      setActiveStatus: async (_clinicId, id, active) => ({
+        id, clinic_id: clinicId, is_active: active,
+      }),
+    }));
+    await assert.rejects(
+      service.updatePatient(clinicId, patientId, { created_at: 'now' }),
+      /Unsupported patient field/
+    );
+    await assert.rejects(
+      service.setActiveStatus(clinicId, patientId, { is_active: 'false' }),
+      (error) => error.code === 'PATIENT_STATUS_INVALID'
+    );
+    const inactive = await service.setActiveStatus(
+      clinicId, patientId, { is_active: false }
+    );
+    const active = await service.setActiveStatus(
+      clinicId, patientId, { is_active: true }
+    );
+    assert.equal(inactive.id, patientId);
+    assert.equal(inactive.is_active, false);
+    assert.equal(active.id, patientId);
+    assert.equal(active.is_active, true);
+  });
+
+  test('deletes only unused patients and returns a stable blocker error', async () => {
+    const deletable = new PatientService(repository({
+      deleteSafely: async () => ({
+        patient: { id: patientId, clinic_id: clinicId },
+        blockers: [],
+      }),
+    }));
+    assert.equal((await deletable.deletePatient(clinicId, patientId)).id, patientId);
+
+    const blocked = new PatientService(repository({
+      deleteSafely: async () => ({
+        patient: { id: patientId, clinic_id: clinicId },
+        blockers: ['appointments', 'conversations'],
+      }),
+    }));
+    await assert.rejects(
+      blocked.deletePatient(clinicId, patientId),
+      (error) => error.code === 'PATIENT_DELETE_BLOCKED' &&
+        error.statusCode === 409
+    );
+  });
+
+  test('dashboard exposes lifecycle actions, status filtering, and phone confirmation', () => {
+    const page = fs.readFileSync(
+      path.join(__dirname, '../../geniusbot-dashboard/src/pages/dashboard/PatientsPage.tsx'),
+      'utf8'
+    );
+    assert.match(page, /View \/ Edit/);
+    assert.match(page, /Filter by status/);
+    assert.match(page, /Deactivate this patient/);
+    assert.match(page, /Reactivate/);
+    assert.match(page, /Permanently delete this patient/);
+    assert.match(page, /identifies this patient in WhatsApp/);
+    assert.match(page, /disabled=\{save\.isPending\}/);
   });
 
   test('maps Staff, Reports, and Settings to dedicated components', () => {
@@ -116,7 +181,10 @@ describe('Patient management', () => {
       'utf8'
     );
     assert.match(routes, /path="staff" element={<StaffPage \/>}/);
-    assert.match(routes, /path="reports" element={<ReportsPage \/>}/);
+    assert.match(
+      routes,
+      /path="reports" element={<ReportsPermissionGuard><ReportsPage \/><\/ReportsPermissionGuard>}/
+    );
     assert.match(routes, /path="settings" element={<SettingsPage \/>}/);
     assert.doesNotMatch(routes, /path="(?:staff|reports|settings)" element={<DashboardHomePage \/>}/);
   });

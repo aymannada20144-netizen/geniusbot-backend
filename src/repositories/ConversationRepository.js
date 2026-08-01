@@ -1,6 +1,27 @@
 'use strict';
 
 const BaseRepository = require('../core/BaseRepository');
+const {
+  normalizeSaudiMobile,
+  normalizeSaudiMobileDigits,
+} = require('../core/validators/saudiMobile');
+const PatientIdentityConflictError = require(
+  '../core/errors/PatientIdentityConflictError'
+);
+
+const NORMALIZED_PHONE_SQL = (column) => `
+  CASE
+    WHEN regexp_replace(${column}, '\\D', '', 'g') ~ '^009665[0-9]{8}$'
+      THEN substring(regexp_replace(${column}, '\\D', '', 'g') FROM 3)
+    WHEN regexp_replace(${column}, '\\D', '', 'g') ~ '^05[0-9]{8}$'
+      THEN '966' || substring(regexp_replace(${column}, '\\D', '', 'g') FROM 2)
+    WHEN regexp_replace(${column}, '\\D', '', 'g') ~ '^5[0-9]{8}$'
+      THEN '966' || regexp_replace(${column}, '\\D', '', 'g')
+    WHEN regexp_replace(${column}, '\\D', '', 'g') ~ '^9665[0-9]{8}$'
+      THEN regexp_replace(${column}, '\\D', '', 'g')
+    ELSE NULL
+  END
+`;
 
 /**
  * ConversationRepository
@@ -103,6 +124,15 @@ class ConversationRepository extends BaseRepository {
     this.#requireString(channel, 'channel');
     this.#requireString(channelIdentity, 'channelIdentity');
 
+    const normalizedIdentity = normalizeSaudiMobile(
+      channelIdentity,
+      'channelIdentity'
+    );
+    const patientId = await this.#findPatientIdByChannelIdentity({
+      clinicId,
+      channelIdentity: normalizedIdentity,
+    });
+
     const sql = `
       SELECT
         c.id,
@@ -119,24 +149,24 @@ class ConversationRepository extends BaseRepository {
         c.started_at,
         c.ended_at
       FROM ${this.fullTableName} AS c
-      INNER JOIN "geniusbot"."patients" AS p
-        ON p.id = c.patient_id
-       AND p.clinic_id = c.clinic_id
       WHERE c.clinic_id = $1
         AND c.channel = $2
         AND c.status = 'open'
         AND (
-          p.whatsapp_id = $3
-          OR p.phone_number = $3
+          c.state_payload ->> 'channelIdentity' = $3
+          OR ($4::uuid IS NOT NULL AND c.patient_id = $4::uuid)
         )
-      ORDER BY c.started_at DESC
+      ORDER BY
+        (c.state_payload ->> 'channelIdentity' = $3) DESC,
+        c.started_at DESC
       LIMIT 1
     `;
 
     const result = await this.query(sql, [
       clinicId.trim(),
       channel.trim().toLowerCase(),
-      channelIdentity.trim(),
+      normalizedIdentity,
+      patientId,
     ]);
 
     return result.rows[0]
@@ -171,7 +201,10 @@ class ConversationRepository extends BaseRepository {
 
     const normalizedClinicId = clinicId.trim();
     const normalizedChannel = channel.trim().toLowerCase();
-    const normalizedChannelIdentity = channelIdentity.trim();
+    const normalizedChannelIdentity = normalizeSaudiMobile(
+      channelIdentity,
+      'channelIdentity'
+    );
 
     const patientId = await this.#findPatientIdByChannelIdentity({
       clinicId: normalizedClinicId,
@@ -185,7 +218,9 @@ class ConversationRepository extends BaseRepository {
       status: 'open',
       bot_enabled: true,
       current_state: null,
-      state_payload: {},
+      state_payload: {
+        channelIdentity: normalizedChannelIdentity,
+      },
     });
 
     return this.#mapConversation(row);
@@ -393,24 +428,22 @@ class ConversationRepository extends BaseRepository {
       WHERE clinic_id = $1
         AND is_active = true
         AND (
-          whatsapp_id = $2
-          OR phone_number = $2
+          (${NORMALIZED_PHONE_SQL('whatsapp_id')}) = $2
+          OR (${NORMALIZED_PHONE_SQL('phone_number')}) = $2
         )
-      ORDER BY
-        CASE
-          WHEN whatsapp_id = $2 THEN 0
-          ELSE 1
-        END,
-        last_seen_at DESC
-      LIMIT 1
+      ORDER BY created_at ASC, id ASC
     `;
 
     const result = await this.query(sql, [
       clinicId,
-      channelIdentity,
+      normalizeSaudiMobileDigits(channelIdentity),
     ]);
 
-    return result.rows[0]?.id ?? null;
+    const patientIds = [...new Set(result.rows.map((row) => row.id))];
+    if (patientIds.length > 1) {
+      throw new PatientIdentityConflictError();
+    }
+    return patientIds[0] ?? null;
   }
 
   /**

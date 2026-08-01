@@ -4,6 +4,7 @@ import type { ApiSuccessResponse } from './apiTypes'
 export type AppointmentStatus =
   | 'pending'
   | 'confirmed'
+  | 'checked_in'
   | 'cancelled'
   | 'completed'
   | 'no_show'
@@ -34,7 +35,7 @@ export async function getAppointments(
 export async function updateAppointmentStatus(
   clinicId: string,
   appointmentId: string,
-  status: 'confirmed' | 'cancelled',
+  status: 'confirmed' | 'checked_in' | 'completed' | 'cancelled',
 ): Promise<{ id: string; status: AppointmentStatus }> {
   const response = await apiClient.patch<
     ApiSuccessResponse<{ id: string; status: AppointmentStatus }>

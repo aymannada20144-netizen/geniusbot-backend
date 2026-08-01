@@ -378,13 +378,12 @@ SELECT pg_temp.assert_true(
 SELECT pg_temp.assert_true(
     EXISTS (
         SELECT 1
-        FROM information_schema.table_constraints
-        WHERE constraint_schema = 'geniusbot'
-          AND table_name = 'branches'
-          AND constraint_name = 'branches_clinic_id_name_key'
-          AND constraint_type = 'UNIQUE'
+        FROM pg_indexes
+        WHERE schemaname = 'geniusbot'
+          AND tablename = 'branches'
+          AND indexname = 'uq_branches_clinic_city_name_normalized'
     ),
-    'Branch name uniqueness per clinic is missing.'
+    'Normalized branch name uniqueness per clinic and city is missing.'
 );
 
 SELECT pg_temp.assert_true(
@@ -591,6 +590,7 @@ SELECT pg_temp.assert_true(
         WHERE status NOT IN (
             'pending',
             'confirmed',
+            'checked_in',
             'cancelled',
             'completed',
             'no_show',

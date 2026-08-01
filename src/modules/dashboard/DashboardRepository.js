@@ -15,6 +15,10 @@ class DashboardRepository extends BaseRepository {
         )::int AS confirmed_appointments,
 
         COUNT(*) FILTER (
+          WHERE status = 'checked_in'
+        )::int AS checked_in_appointments,
+
+        COUNT(*) FILTER (
           WHERE status = 'pending'
         )::int AS pending_appointments,
 
@@ -193,7 +197,7 @@ class DashboardRepository extends BaseRepository {
       WHERE a.clinic_id = $1
         AND a.appointment_start >= CURRENT_DATE
         AND a.appointment_start < CURRENT_DATE + INTERVAL '1 day'
-        AND a.status IN ('pending', 'confirmed')
+        AND a.status IN ('pending', 'confirmed', 'checked_in')
 
       ORDER BY a.appointment_start ASC
     `;
@@ -232,6 +236,17 @@ class DashboardRepository extends BaseRepository {
       status,
     ]);
 
+    return result.rows[0] || null;
+  }
+
+  async findAppointmentById(clinicId, appointmentId) {
+    const result = await this.query(
+      `SELECT id, status
+         FROM geniusbot.appointments
+        WHERE clinic_id = $1 AND id = $2
+        LIMIT 1`,
+      [clinicId, appointmentId]
+    );
     return result.rows[0] || null;
   }
 }

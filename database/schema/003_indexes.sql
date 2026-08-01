@@ -331,6 +331,24 @@ CREATE INDEX IF NOT EXISTS idx_patients_whatsapp_id
     )
     WHERE whatsapp_id IS NOT NULL;
 
+CREATE UNIQUE INDEX IF NOT EXISTS uq_patients_clinic_normalized_phone
+    ON geniusbot.patients (
+        clinic_id,
+        (
+            CASE
+                WHEN regexp_replace(phone_number, '\D', '', 'g') ~ '^009665[0-9]{8}$'
+                    THEN substring(regexp_replace(phone_number, '\D', '', 'g') FROM 3)
+                WHEN regexp_replace(phone_number, '\D', '', 'g') ~ '^05[0-9]{8}$'
+                    THEN '966' || substring(regexp_replace(phone_number, '\D', '', 'g') FROM 2)
+                WHEN regexp_replace(phone_number, '\D', '', 'g') ~ '^5[0-9]{8}$'
+                    THEN '966' || regexp_replace(phone_number, '\D', '', 'g')
+                WHEN regexp_replace(phone_number, '\D', '', 'g') ~ '^9665[0-9]{8}$'
+                    THEN regexp_replace(phone_number, '\D', '', 'g')
+                ELSE NULL
+            END
+        )
+    );
+
 CREATE INDEX IF NOT EXISTS idx_patient_activity_logs_patient_created
     ON geniusbot.patient_activity_logs (
         patient_id,
@@ -387,22 +405,6 @@ CREATE INDEX IF NOT EXISTS idx_prices_active_lookup
         valid_to
     )
     WHERE is_active = true;
-
-CREATE UNIQUE INDEX IF NOT EXISTS unique_service_price_start
-    ON geniusbot.prices (
-        clinic_id,
-        service_id,
-        payment_method_id,
-        COALESCE(
-            insurance_company_id,
-            '00000000-0000-0000-0000-000000000000'::uuid
-        ),
-        COALESCE(
-            insurance_class_id,
-            '00000000-0000-0000-0000-000000000000'::uuid
-        ),
-        valid_from
-    );
 
 -- ============================================================================
 -- ROOMS
@@ -468,6 +470,7 @@ CREATE INDEX IF NOT EXISTS idx_service_assignments_room
 
 CREATE UNIQUE INDEX IF NOT EXISTS unique_service_assignment_scope
     ON geniusbot.service_assignments (
+        clinic_id,
         branch_id,
         service_id,
         COALESCE(
@@ -482,11 +485,45 @@ CREATE UNIQUE INDEX IF NOT EXISTS unique_service_assignment_scope
 
 CREATE UNIQUE INDEX IF NOT EXISTS unique_default_service_assignment
     ON geniusbot.service_assignments (
+        clinic_id,
         branch_id,
         service_id
     )
     WHERE is_default = true
       AND is_active = true;
+
+CREATE INDEX IF NOT EXISTS idx_service_assignments_booking_lookup
+    ON geniusbot.service_assignments (
+        clinic_id, branch_id, service_id, is_default DESC, created_at, id
+    )
+    WHERE is_active = true;
+
+CREATE INDEX IF NOT EXISTS idx_service_assignments_admin_lookup
+    ON geniusbot.service_assignments (
+        clinic_id, is_active, branch_id, service_id
+    );
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_branches_clinic_city_name_normalized
+    ON geniusbot.branches (
+        clinic_id,
+        lower(btrim(city)),
+        lower(btrim(name))
+    );
+
+CREATE INDEX IF NOT EXISTS idx_branches_clinic_active_city
+    ON geniusbot.branches (
+        clinic_id,
+        is_active,
+        lower(btrim(city))
+    );
+
+CREATE INDEX IF NOT EXISTS idx_branches_clinic_city_name
+    ON geniusbot.branches (
+        clinic_id,
+        lower(btrim(city)),
+        lower(btrim(name)),
+        is_active
+    );
 
 CREATE INDEX IF NOT EXISTS idx_service_pre_questions_lookup
     ON geniusbot.service_pre_questions (
@@ -596,6 +633,9 @@ DECLARE
         'idx_appointments_service_time',
         'idx_appointments_conversation',
         'idx_branches_clinic_active',
+        'uq_branches_clinic_city_name_normalized',
+        'idx_branches_clinic_active_city',
+        'idx_branches_clinic_city_name',
         'idx_branch_working_hours_lookup',
         'unique_clinic_holiday_scope_date',
         'idx_clinic_holidays_lookup',
@@ -621,6 +661,7 @@ DECLARE
         'idx_patients_clinic_last_seen',
         'idx_patients_clinic_name',
         'idx_patients_whatsapp_id',
+        'uq_patients_clinic_normalized_phone',
         'idx_patient_activity_logs_patient_created',
         'idx_patient_activity_logs_clinic_created',
         'idx_patient_pre_answers_appointment',
@@ -628,7 +669,6 @@ DECLARE
         'idx_payment_methods_clinic_active',
         'idx_prices_lookup',
         'idx_prices_active_lookup',
-        'unique_service_price_start',
         'idx_rooms_branch_active',
         'idx_room_time_off_lookup',
         'idx_services_clinic_active_booking',

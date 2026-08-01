@@ -34,6 +34,13 @@ function isAuthRole(
   )
 }
 
+function isPermissionList(value: unknown): value is string[] {
+  return (
+    Array.isArray(value) &&
+    value.every(isNonEmptyString)
+  )
+}
+
 function isAuthUser(
   value: unknown,
 ): value is AuthUser {
@@ -52,7 +59,8 @@ function isAuthUser(
     ) &&
     isNonEmptyString(user.email) &&
     isNonEmptyString(user.name) &&
-    isAuthRole(user.role)
+    isAuthRole(user.role) &&
+    isPermissionList(user.permissions)
   )
 }
 

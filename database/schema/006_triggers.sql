@@ -219,14 +219,6 @@ SELECT geniusbot.create_trigger_if_table_exists(
 );
 
 SELECT geniusbot.create_trigger_if_table_exists(
-    'prices',
-    'trg_prices_set_updated_at',
-    'BEFORE',
-    'UPDATE',
-    'set_updated_at'
-);
-
-SELECT geniusbot.create_trigger_if_table_exists(
     'service_assignments',
     'trg_service_assignments_set_updated_at',
     'BEFORE',
@@ -364,10 +356,10 @@ SELECT geniusbot.create_trigger_if_table_exists(
 
 SELECT geniusbot.create_trigger_if_table_exists(
     'prices',
-    'trg_prices_validate_integrity',
+    'trg_prices_validate_before_write',
     'BEFORE',
     'INSERT OR UPDATE',
-    'validate_price_integrity'
+    'prices_validate_before_write'
 );
 
 -- ============================================================================
@@ -462,7 +454,6 @@ DECLARE
         'trg_payment_methods_set_updated_at',
         'trg_insurance_companies_set_updated_at',
         'trg_insurance_classes_set_updated_at',
-        'trg_prices_set_updated_at',
         'trg_service_assignments_set_updated_at',
         'trg_patients_set_updated_at',
         'trg_staff_set_updated_at',
@@ -478,7 +469,7 @@ DECLARE
         'trg_clinic_holidays_validate_integrity',
         'trg_doctor_working_hours_validate_integrity',
         'trg_service_assignments_validate_integrity',
-        'trg_prices_validate_integrity',
+        'trg_prices_validate_before_write',
         'trg_conversations_validate_integrity',
         'trg_appointments_validate_integrity',
         'trg_appointments_validate_status_transition',

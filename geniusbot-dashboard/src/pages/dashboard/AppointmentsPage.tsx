@@ -15,6 +15,7 @@ import './AppointmentsPage.css'
 const STATUS_LABELS: Record<AppointmentStatus, string> = {
   pending: 'Pending',
   confirmed: 'Confirmed',
+  checked_in: 'Checked In',
   cancelled: 'Cancelled',
   completed: 'Completed',
   no_show: 'No show',
@@ -92,13 +93,6 @@ export function AppointmentsPage() {
     }
   }, [user])
 
-  const summary = useMemo(() => ({
-    total: appointments.length,
-    pending: appointments.filter((item) => item.status === 'pending').length,
-    confirmed: appointments.filter((item) => item.status === 'confirmed').length,
-    cancelled: appointments.filter((item) => item.status === 'cancelled').length,
-  }), [appointments])
-
   const filteredAppointments = useMemo(() => {
     const normalizedSearch = search.trim().toLocaleLowerCase()
     const today = new Date()
@@ -123,9 +117,18 @@ export function AppointmentsPage() {
     })
   }, [appointments, dateFilter, search, statusFilter])
 
+  const summary = useMemo(() => ({
+    pending: filteredAppointments.filter((item) => item.status === 'pending').length,
+    confirmed: filteredAppointments.filter((item) => item.status === 'confirmed').length,
+    checkedIn: filteredAppointments.filter((item) => item.status === 'checked_in').length,
+    completed: filteredAppointments.filter((item) => item.status === 'completed').length,
+    cancelled: filteredAppointments.filter((item) => item.status === 'cancelled').length,
+    noShow: filteredAppointments.filter((item) => item.status === 'no_show').length,
+  }), [filteredAppointments])
+
   async function changeStatus(
     appointmentId: string,
-    status: 'confirmed' | 'cancelled',
+    status: 'confirmed' | 'checked_in' | 'completed' | 'cancelled',
   ) {
     if (updatingIdsRef.current.has(appointmentId)) return
 
@@ -194,6 +197,7 @@ export function AppointmentsPage() {
               <option value="all">All</option>
               <option value="pending">Pending</option>
               <option value="confirmed">Confirmed</option>
+              <option value="checked_in">Checked In</option>
               <option value="cancelled">Cancelled</option>
               <option value="completed">Completed</option>
               <option value="no_show">No show</option>
@@ -240,8 +244,11 @@ export function AppointmentsPage() {
               {filteredAppointments.map((appointment) => {
                 const updating = updatingIds.has(appointment.id)
                 const canConfirm = appointment.status === 'pending'
+                const canCheckIn = appointment.status === 'confirmed'
+                const canComplete = appointment.status === 'checked_in'
                 const canCancel = appointment.status === 'pending' ||
-                  appointment.status === 'confirmed'
+                  appointment.status === 'confirmed' ||
+                  appointment.status === 'checked_in'
 
                 return (
                   <tr key={appointment.id}>
@@ -257,6 +264,8 @@ export function AppointmentsPage() {
                     <td data-label="Actions">
                       <div className="appointment-actions">
                         {canConfirm && <Button size="sm" isLoading={updating} disabled={updating} onClick={() => changeStatus(appointment.id, 'confirmed')}>Confirm</Button>}
+                        {canCheckIn && <Button size="sm" isLoading={updating} disabled={updating} onClick={() => changeStatus(appointment.id, 'checked_in')}>Check In</Button>}
+                        {canComplete && <Button size="sm" isLoading={updating} disabled={updating} onClick={() => changeStatus(appointment.id, 'completed')}>Complete</Button>}
                         {canCancel && <Button size="sm" variant="danger" disabled={updating} onClick={() => changeStatus(appointment.id, 'cancelled')}>Cancel</Button>}
                       </div>
                       {rowErrors[appointment.id] && <p className="appointment-row-error" role="alert">{rowErrors[appointment.id]}</p>}

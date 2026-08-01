@@ -58,13 +58,13 @@ function patientRoutes(
   );
 
   app.patch(
-    '/api/clinics/:clinicId/patients/:patientId/deactivate',
+    '/api/clinics/:clinicId/patients/:patientId/status',
     {
       preHandler: protect(
         PERMISSIONS.PATIENT_UPDATE
       ),
     },
-    patientController.deactivatePatient.bind(
+    patientController.setPatientStatus.bind(
       patientController
     )
   );
@@ -97,14 +97,14 @@ function patientRoutes(
     { preHandler: protect(PERMISSIONS.CONVERSATION_REPLY) },
     patientController.sendHumanMessage.bind(patientController));
 
-  app.patch(
-    '/api/clinics/:clinicId/patients/:patientId/reactivate',
+  app.delete(
+    '/api/clinics/:clinicId/patients/:patientId',
     {
       preHandler: protect(
-        PERMISSIONS.PATIENT_UPDATE
+        PERMISSIONS.PATIENT_DELETE
       ),
     },
-    patientController.reactivatePatient.bind(
+    patientController.deletePatient.bind(
       patientController
     )
   );

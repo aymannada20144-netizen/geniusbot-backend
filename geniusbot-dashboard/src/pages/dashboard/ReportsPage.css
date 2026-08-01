@@ -1,0 +1,129 @@
+.reports-page {
+  display: grid;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  gap: 1.25rem;
+}
+
+.reports-page,
+.reports-page *,
+.reports-page *::before,
+.reports-page *::after {
+  box-sizing: border-box;
+}
+
+.reports-page > *,
+.reports-page section,
+.reports-header,
+.reports-filters,
+.reports-panel {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.reports-header h2 { margin: .25rem 0; }
+.reports-header p { margin: 0; color: #536170; }
+
+.reports-filters,
+.reports-panel {
+  width: 100%;
+  border: 1px solid #dce3e8;
+  border-radius: 14px;
+  background: #fff;
+  padding: 1rem;
+}
+
+.reports-filters__grid {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  grid-template-columns: repeat(auto-fit, minmax(min(10rem, 100%), 1fr));
+  gap: .75rem;
+}
+
+.reports-filters label {
+  display: grid;
+  min-width: 0;
+  max-width: 100%;
+  gap: .35rem;
+  font-weight: 600;
+  font-size: .9rem;
+}
+
+.reports-filters input,
+.reports-filters select {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  min-height: 42px;
+  border: 1px solid #b9c5ce;
+  border-radius: 8px;
+  padding: .45rem .6rem;
+  background: #fff;
+  color: inherit;
+}
+
+.reports-actions { display: flex; min-width: 0; gap: .65rem; margin-top: 1rem; flex-wrap: wrap; }
+.reports-actions button, .reports-retry { border: 0; border-radius: 8px; padding: .65rem 1rem; cursor: pointer; background: #116b5b; color: #fff; font-weight: 700; }
+.reports-actions button:last-child { background: #e8edef; color: #24313a; }
+
+.reports-summary,
+.reports-mini-grid {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  grid-template-columns: repeat(auto-fit, minmax(min(10.625rem, 100%), 1fr));
+  gap: .75rem;
+}
+
+.reports-card { min-width: 0; max-width: 100%; border: 1px solid #dce3e8; border-radius: 12px; padding: 1rem; background: #fff; overflow-wrap: anywhere; }
+.reports-card span { color: #586773; display: block; }
+.reports-card strong { display: block; font-size: 1.7rem; margin-top: .4rem; }
+.reports-panel h3 { margin-top: 0; }
+.reports-panel > label { display: grid; width: min(100%, 16rem); min-width: 0; gap: .35rem; }
+.reports-panel > label select { width: 100%; max-width: 100%; min-width: 0; }
+.reports-state { min-width: 0; max-width: 100%; padding: 1rem; border-radius: 8px; background: #f4f7f8; }
+.reports-state--error { display: flex; align-items: center; gap: .75rem; flex-wrap: wrap; background: #fff0ef; color: #8b1e17; overflow-wrap: anywhere; }
+
+.reports-chart {
+  display: flex;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  align-items: end;
+  gap: .45rem;
+  min-height: 190px;
+  overflow-x: auto;
+  overflow-y: visible;
+  overscroll-behavior-inline: contain;
+  padding: 1rem .125rem;
+}
+
+.reports-bar { min-width: 42px; flex: 1 0 42px; display: grid; align-content: end; gap: .25rem; text-align: center; height: 170px; }
+.reports-bar__columns { height: 130px; display: flex; align-items: end; justify-content: center; gap: 3px; }
+.reports-bar__appointments, .reports-bar__bookings { width: 12px; min-height: 2px; border-radius: 4px 4px 0 0; }
+.reports-bar__appointments { background: #116b5b; }
+.reports-bar__bookings { background: #b36b00; }
+.reports-bar small { white-space: nowrap; font-size: .7rem; }
+.reports-legend { display: flex; min-width: 0; gap: 1rem; flex-wrap: wrap; }
+.reports-legend span::before { content: ""; display: inline-block; width: .75rem; height: .75rem; margin-inline-end: .35rem; background: #116b5b; }
+.reports-legend span:last-child::before { background: #b36b00; }
+
+.reports-table-wrap {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: visible;
+  overscroll-behavior-inline: contain;
+}
+
+.reports-table { width: 100%; min-width: 720px; border-collapse: collapse; }
+.reports-table th, .reports-table td { padding: .7rem; text-align: start; border-bottom: 1px solid #e4e9ec; }
+.reports-fixed-scope { min-width: 0; max-width: 100%; padding: .65rem; background: #eef6f4; border-radius: 8px; overflow-wrap: anywhere; }
+
+@media (max-width: 600px) {
+  .reports-filters, .reports-panel { padding: .8rem; }
+  .reports-summary, .reports-mini-grid { grid-template-columns: repeat(auto-fit, minmax(min(9rem, 100%), 1fr)); }
+}

@@ -8,6 +8,10 @@ This document defines the core business rules enforced or expected by the Genius
 - A clinic must be active before accepting bookings.
 - Inactive clinics must not allow new appointments.
 - Clinic-level holidays apply to all branches when `branch_id` is `NULL`.
+- `branches.city` is the only official source for a branch city; `branches.name` stores the branch name only.
+- Branch names are unique per clinic and normalized city, so the same name may be used in different cities.
+- Patient records are deactivated by default when used; hard delete is allowed only when no operational or historical relationship exists.
+- Patient phone identity is unique per clinic after Saudi-mobile normalization, and patient history never cascades on patient deletion.
 
 ## 2. Branch Rules
 
@@ -35,6 +39,13 @@ Example:
 - A doctor must be active before being assigned to services.
 - A doctor may have one or more specialties.
 - A doctor may work in one or more branches.
+- Doctor working hours are recurring weekly local-time periods.
+- Weekdays use integers from `0` (Sunday) through `6` (Saturday).
+- Multiple periods per day and adjacent periods are allowed.
+- Active periods for one doctor must not overlap, including across branches.
+- A closed doctor day is represented by having no active period.
+- Overnight periods are not supported.
+- Doctor periods must fit within the selected branch working hours.
 - Doctor availability depends on:
   - Doctor working hours
   - Doctor time off
@@ -64,15 +75,20 @@ Example:
 
 ## 7. Service Assignment Rules
 
-- A service assignment links:
-  - Clinic
-  - Branch
-  - Service
-  - Doctor
-  - Room
-- Booking uses the default active assignment for the selected branch and service.
+- A service assignment links a clinic, branch, and service to the doctor and
+  room required by that service. `doctor_id` is required only when
+  `services.requires_doctor` is true, and `room_id` is required only when
+  `services.requires_room` is true.
+- Active assignments require active, same-clinic resources, a bookable
+  service, a same-branch room, and branch working hours for a required doctor.
+- Booking tries the active default assignment first, then the remaining active
+  assignments in deterministic creation order.
 - A service must have at least one active assignment before it can be booked.
 - Only one default assignment should exist per branch and service combination.
+- Only an active default participates in the one-default rule. Deactivating an
+  assignment prevents new bookings but does not change existing appointments.
+- Hard deletion is conservative: an assignment matching any appointment is
+  retained and must be deactivated instead.
 
 ## 8. Patient Rules
 
@@ -86,6 +102,27 @@ Example:
 - Patient phone numbers should be unique per clinic.
 
 ## 9. Appointment Rules
+
+### Price history
+
+- A price scope is `clinic_id`, `service_id`, `payment_method_id`,
+  `insurance_company_id`, `insurance_class_id`, `valid_from`, and `valid_to`.
+- Cash prices require both insurance identifiers to be `NULL`.
+- Insurance prices require both insurance identifiers, and the insurance class
+  must belong to the selected insurance company.
+- Every referenced clinic, service, payment method, insurance company, and
+  insurance class must be active and must belong to the same clinic.
+- `price` must be greater than or equal to zero.
+- Currency defaults to `SAR`, is trimmed and normalized to uppercase, and must
+  be a three-letter uppercase ISO code.
+- `valid_to` is inclusive, must not precede `valid_from`, and may be `NULL` for
+  an open-ended period.
+- Active periods in the same complete scope cannot overlap. Adjacent periods
+  are allowed.
+- Historical price rows remain stored. Every price foreign key uses
+  `ON DELETE RESTRICT`.
+- `vw_current_service_prices` returns only active prices whose validity period
+  includes the current date.
 
 - Every appointment belongs to:
   - Clinic
@@ -147,19 +184,17 @@ Booking must fail safely if:
 
 ## 12. Availability Rules
 
-Availability currently checks:
+Availability checks:
 
+- Active clinic and configured clinic timezone
+- Clinic and branch holidays
+- Branch working hours
+- Doctor working hours
+- Doctor time off
+- Active room and room time off
 - Doctor conflict
 - Room conflict
 - Valid appointment start and end
-
-Availability should eventually also check:
-
-- Branch working hours
-- Clinic holidays
-- Doctor working hours
-- Doctor time off
-- Room time off
 
 ## 13. Waitlist Rules
 
@@ -191,10 +226,13 @@ Availability should eventually also check:
 
 ## 16. Pricing Rules
 
-- Prices belong to a clinic and service.
-- Prices may depend on payment method and insurance data.
-- Only active prices should be used.
-- Historical prices must not be deleted if they are linked to previous appointments or invoices.
+- Price writes are normalized and validated by
+  `prices_validate_before_write()` through
+  `trg_prices_validate_before_write`.
+- Overlap protection is enforced by the
+  `excl_prices_active_period_overlap` GiST exclusion constraint, not by trigger
+  code.
+- Current price reads use `vw_current_service_prices`.
 
 ## 17. Dashboard Rules
 

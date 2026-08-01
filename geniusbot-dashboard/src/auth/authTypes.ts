@@ -14,6 +14,7 @@ export interface AuthUser {
   username: string
   name: string
   role: AuthRole
+  permissions: string[]
 }
 
 export interface BackendStaff {
@@ -24,6 +25,7 @@ export interface BackendStaff {
   username: string
   full_name: string
   role: AuthRole
+  permissions: string[]
   phone?: string | null
   is_active?: boolean
   last_login_at?: string | null

@@ -17,6 +17,7 @@ function errorHandler(error, request, reply) {
       success: false,
       error: {
         name: error.name,
+        code: error.code,
         message: error.message,
         statusCode: error.statusCode,
       },
@@ -25,9 +26,10 @@ function errorHandler(error, request, reply) {
 
   return reply.code(500).send({
     success: false,
-    error: {
-      name: 'InternalServerError',
-      message: 'An unexpected error occurred.',
+      error: {
+        name: 'InternalServerError',
+        code: 'INTERNAL_SERVER_ERROR',
+        message: 'An unexpected error occurred.',
       statusCode: 500,
     },
   });

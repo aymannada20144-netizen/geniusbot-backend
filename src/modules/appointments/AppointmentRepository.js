@@ -6,7 +6,7 @@ class AppointmentRepository extends BaseRepository {
   }
 
   async createAppointment(data) {
-    return this.create({
+    const created = await this.create({
       clinic_id: data.clinic_id,
       branch_id: data.branch_id,
       patient_id: data.patient_id,
@@ -25,6 +25,57 @@ class AppointmentRepository extends BaseRepository {
       source: data.source || 'whatsapp_direct',
       notes: data.notes || null,
     });
+
+    return this.findPresentationById(data.clinic_id, created.id);
+  }
+
+  async findPresentationById(clinicId, appointmentId) {
+    const sql = `
+      SELECT
+        a.*,
+        p."full_name" AS "patient_name",
+        p."phone_number" AS "patient_phone",
+        s."name" AS "service_name",
+        b."name" AS "branch_name",
+        d."full_name" AS "doctor_name",
+        r."room_name",
+        r."room_number",
+        pm."name" AS "payment_method_name",
+        pm."code" AS "payment_method_code",
+        ic."name" AS "insurance_company_name",
+        cls."class_name" AS "insurance_class_name"
+      FROM ${this.fullTableName} a
+      JOIN "geniusbot"."patients" p
+        ON p."id" = a."patient_id"
+       AND p."clinic_id" = a."clinic_id"
+      JOIN "geniusbot"."services" s
+        ON s."id" = a."service_id"
+       AND s."clinic_id" = a."clinic_id"
+      JOIN "geniusbot"."branches" b
+        ON b."id" = a."branch_id"
+       AND b."clinic_id" = a."clinic_id"
+      LEFT JOIN "geniusbot"."doctors" d
+        ON d."id" = a."doctor_id"
+       AND d."clinic_id" = a."clinic_id"
+      LEFT JOIN "geniusbot"."rooms" r
+       ON r."id" = a."room_id"
+       AND r."branch_id" = a."branch_id"
+      LEFT JOIN "geniusbot"."payment_methods" pm
+        ON pm."id" = a."payment_method_id"
+       AND pm."clinic_id" = a."clinic_id"
+      LEFT JOIN "geniusbot"."insurance_companies" ic
+        ON ic."id" = a."insurance_company_id"
+       AND ic."clinic_id" = a."clinic_id"
+      LEFT JOIN "geniusbot"."insurance_classes" cls
+        ON cls."id" = a."insurance_class_id"
+       AND cls."insurance_company_id" = a."insurance_company_id"
+      WHERE a."clinic_id" = $1
+        AND a."id" = $2
+      LIMIT 1
+    `;
+
+    const result = await this.query(sql, [clinicId, appointmentId]);
+    return result.rows[0] || null;
   }
 
   async findByClinicId(clinicId) {
@@ -94,7 +145,7 @@ class AppointmentRepository extends BaseRepository {
       WHERE a."clinic_id" = $1
         AND a."patient_id" = $2
         AND a."appointment_start" >= NOW()
-        AND a."status" IN ('pending', 'confirmed')
+        AND a."status" IN ('pending', 'confirmed', 'checked_in')
       ORDER BY a."appointment_start" ASC
       LIMIT 1
     `;
@@ -152,7 +203,7 @@ class AppointmentRepository extends BaseRepository {
       SELECT "id"
       FROM ${this.fullTableName}
       WHERE "doctor_id" = $1
-        AND "status" IN ('pending', 'confirmed')
+        AND "status" IN ('pending', 'confirmed', 'checked_in')
         AND "appointment_start" < $3
         AND "appointment_end" > $2
     `;
@@ -186,7 +237,7 @@ class AppointmentRepository extends BaseRepository {
       SELECT "id"
       FROM ${this.fullTableName}
       WHERE "room_id" = $1
-        AND "status" IN ('pending', 'confirmed')
+        AND "status" IN ('pending', 'confirmed', 'checked_in')
         AND "appointment_start" < $3
         AND "appointment_end" > $2
     `;

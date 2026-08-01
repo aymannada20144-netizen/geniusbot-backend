@@ -65,12 +65,14 @@ class BookingAppointmentFactory {
       );
     }
 
-    if (
-      !assignment.doctor_id ||
-      !assignment.room_id
-    ) {
+    if (service.requires_doctor && !assignment.doctor_id) {
       throw new Error(
-        'Resolved assignment must contain doctor_id and room_id'
+        'Resolved assignment must contain the service-required doctor_id'
+      );
+    }
+    if (service.requires_room && !assignment.room_id) {
+      throw new Error(
+        'Resolved assignment must contain the service-required room_id'
       );
     }
 
@@ -103,10 +105,10 @@ class BookingAppointmentFactory {
           data.insurance_class_id || null,
 
         quoted_price:
-          data.quoted_price || null,
+          data.quoted_price ?? null,
 
         currency:
-          data.currency || 'SAR',
+          data.currency ?? 'SAR',
 
         status: 'pending',
 

@@ -12,20 +12,20 @@ const page = fs.readFileSync(
 
 describe('Master Data delete UI', () => {
   test('confirms and sends the selected record id', () => {
-    assert.match(page, /window\.confirm\(`Delete this \$\{config\.singular\.toLowerCase\(\)\}\?`\)/);
+    assert.match(page, /window\.confirm\(resource === 'rooms'/);
     assert.match(page, /remove\.mutate\(record\.id\)/);
   });
 
   test('invalidates the shared list so deleted rows disappear', () => {
     assert.match(
       page,
-      /onSuccess: \(\) => queryClient\.invalidateQueries\(\{ queryKey: \['master-data', clinicId\] \}\)/
+      /invalidateQueries\(\{ queryKey: \['master-data', clinicId\] \}\)/
     );
   });
 
   test('shows conflict and other delete errors instead of failing silently', () => {
     assert.match(page, /remove\.isError/);
-    assert.match(page, /remove\.error\.message/);
+    assert.match(page, /remove\.error \?\? statusMutation\.error/);
     assert.match(page, /role="alert"/);
   });
 

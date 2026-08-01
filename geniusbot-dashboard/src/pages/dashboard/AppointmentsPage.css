@@ -20,7 +20,7 @@
 .appointments-page__heading h2 { margin: 0; font-size: var(--font-size-2xl); }
 .appointments-page__heading p:last-child { margin: var(--space-2) 0 0; color: var(--color-text-secondary); }
 .appointments-page__eyebrow { margin: 0 0 var(--space-2); color: var(--color-primary); font-size: var(--font-size-xs); font-weight: var(--font-weight-semibold); letter-spacing: var(--letter-spacing-wide); text-transform: uppercase; }
-.appointments-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--space-3); }
+.appointments-summary { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: var(--space-3); }
 .appointments-summary article { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-4); border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: var(--color-surface); }
 .appointments-summary span { color: var(--color-text-muted); font-size: var(--font-size-sm); text-transform: capitalize; }
 .appointments-summary strong { font-size: var(--font-size-xl); }
@@ -60,7 +60,7 @@
 .appointments-table th:nth-child(10) { width: 13%; }
 .appointments-table tbody tr:last-child td { border-bottom: 0; }
 .appointment-status { display: inline-flex; padding: var(--space-1) var(--space-2); border-radius: var(--radius-full); font-size: var(--font-size-xs); font-weight: var(--font-weight-semibold); background: var(--color-surface-muted); }
-.appointment-status--confirmed, .appointment-status--completed { color: var(--color-success-text); background: var(--color-success-subtle); }
+.appointment-status--confirmed, .appointment-status--checked_in, .appointment-status--completed { color: var(--color-success-text); background: var(--color-success-subtle); }
 .appointment-status--pending { color: var(--color-warning-600); background: var(--color-warning-50); }
 .appointment-status--cancelled, .appointment-status--no_show { color: var(--color-danger-600); background: var(--color-danger-50); }
 .appointment-actions { display: flex; gap: var(--space-1); }

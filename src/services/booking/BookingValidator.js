@@ -19,6 +19,13 @@ class BookingValidator {
       data.preferred_start,
       'preferred_start'
     );
+    validateUuid(data.payment_method_id, 'payment_method_id');
+
+    if (data.confirmed !== true) {
+      throw new ValidationError(
+        'Explicit booking confirmation is required.'
+      );
+    }
 
     if (data.patient_id) {
       validateUuid(data.patient_id, 'patient_id');

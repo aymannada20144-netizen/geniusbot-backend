@@ -14,6 +14,11 @@ const mapPostgresError = require('../../src/core/errors/postgresErrorMapper');
 
 function repository(overrides = {}) {
   return {
+    findBranch: async () => ({
+      id: 'branch-1',
+      clinic_id: 'clinic-1',
+      is_active: true,
+    }),
     parentBelongsToClinic: async () => true,
     create: async (_config, _clinicId, data) => ({ id: 'created', ...data }),
     update: async (_config, _clinicId, id, data) => ({ id, ...data }),
@@ -41,6 +46,12 @@ describe('MasterDataService', () => {
       [
         'GET /api/clinics/:clinicId/doctors/:doctorId/working-hours',
         'PUT /api/clinics/:clinicId/doctors/:doctorId/working-hours',
+        'GET /api/clinics/:clinicId/master-data/service-assignments',
+        'GET /api/clinics/:clinicId/master-data/service-assignments/options',
+        'POST /api/clinics/:clinicId/master-data/service-assignments',
+        'PATCH /api/clinics/:clinicId/master-data/service-assignments/:id',
+        'PATCH /api/clinics/:clinicId/master-data/service-assignments/:id/status',
+        'DELETE /api/clinics/:clinicId/master-data/service-assignments/:id',
         'GET /api/clinics/:clinicId/master-data/:resource',
         'GET /api/clinics/:clinicId/master-data/:resource/:id',
         'POST /api/clinics/:clinicId/master-data/:resource',
@@ -101,7 +112,7 @@ describe('MasterDataService', () => {
       await repo.list(config, 'clinic-1', {});
     }
 
-    assert.equal(calls.length, 17);
+    assert.equal(calls.length, 16);
     for (const call of calls) {
       assert.match(call.sql, /WHERE .+ = \$1/);
       assert.deepEqual(call.values, ['clinic-1']);
@@ -122,8 +133,10 @@ describe('MasterDataService', () => {
       service.create('rooms', 'clinic-1', {
         branch_id: 'other-clinic-branch',
         room_number: '101',
+        room_name: 'Room 101',
+        room_type: 'consultation',
       }),
-      ForbiddenError
+      (error) => error.code === 'ROOM_BRANCH_NOT_FOUND'
     );
     assert.equal(creates, 0);
   });
@@ -152,24 +165,70 @@ describe('MasterDataService', () => {
 
     await service.create('branches', 'clinic-1', {
       name: '  Main Branch  ',
+      city: '  Riyadh  ',
       timezone: ' Asia/Riyadh ',
-      clinic_id: 'other-clinic',
-      unexpected: 'ignored',
     });
 
     assert.deepEqual(written, {
       name: 'Main Branch',
+      city: 'Riyadh',
       timezone: 'Asia/Riyadh',
     });
+  });
+
+  test('enforces the branch city contract and clinic-safe filtering', async () => {
+    const service = new MasterDataService(repository());
+    await assert.rejects(
+      service.create('branches', 'clinic-1', {
+        name: 'Main Branch',
+        timezone: 'Asia/Riyadh',
+      }),
+      (error) => error.code === 'VALIDATION_ERROR'
+    );
+    for (const city of [null, 7, [], {}, '   ', 'x'.repeat(81)]) {
+      await assert.rejects(
+        service.create('branches', 'clinic-1', {
+          name: 'Main Branch',
+          city,
+          timezone: 'Asia/Riyadh',
+        }),
+        (error) => ['VALIDATION_ERROR', 'BRANCH_CITY_INVALID'].includes(error.code)
+      );
+    }
+    await assert.rejects(
+      service.create('branches', 'clinic-1', {
+        name: 'Main Branch',
+        city: 'Riyadh',
+        timezone: 'Asia/Riyadh',
+        clinic_id: 'other-clinic',
+      }),
+      /Unsupported branch field/
+    );
+
+    const calls = [];
+    const repo = new MasterDataRepository({
+      query: async (sql, values) => {
+        calls.push({ sql, values });
+        return { rows: [{ city: 'Riyadh' }] };
+      },
+    });
+    const rows = await repo.list(configs.branches, 'clinic-1', {
+      city: ' Riyadh ',
+      search: 'Main',
+    });
+    assert.equal(rows[0].city, 'Riyadh');
+    assert.match(calls[0].sql, /lower\(btrim\(r\.city\)\)/);
+    assert.match(calls[0].sql, /r\.address::text ILIKE/);
+    assert.deepEqual(calls[0].values, ['clinic-1', '%Main%', 'Riyadh']);
   });
 
   test('maps exact live constraint names to specific safe messages', () => {
     assert.equal(
       mapPostgresError({
         code: '23505',
-        constraint: 'branches_clinic_id_name_key',
+        constraint: 'uq_branches_clinic_city_name_normalized',
       }).message,
-      'This branch name already exists.'
+      'This branch name already exists in the selected city.'
     );
     assert.equal(
       mapPostgresError({

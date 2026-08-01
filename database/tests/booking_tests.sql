@@ -118,6 +118,7 @@ INSERT INTO geniusbot.branches (
     id,
     clinic_id,
     name,
+    city,
     address,
     timezone,
     is_active
@@ -126,6 +127,7 @@ VALUES (
     '90000000-0000-0000-0000-000000000101',
     '90000000-0000-0000-0000-000000000001',
     'Booking Test Branch',
+    'Riyadh',
     'Riyadh',
     'Asia/Riyadh',
     true

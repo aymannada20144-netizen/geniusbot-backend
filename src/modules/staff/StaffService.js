@@ -15,6 +15,7 @@ const {
   isOwner,
   isBranchScopedRole,
   hasPermission,
+  getPermissions,
 } = require('../../core/auth');
 const { normalizeSaudiMobile } = require('../../core/validators/saudiMobile');
 const {
@@ -107,7 +108,10 @@ const safeStaff = this.#sanitizeStaff({
 });
 
     return {
-      staff: safeStaff,
+      staff: {
+        ...safeStaff,
+        permissions: [...getPermissions(staff.role)],
+      },
       accessToken:
         this.tokenService.createAccessToken(staff),
     };
