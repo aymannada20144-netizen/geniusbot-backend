@@ -427,7 +427,11 @@ function handleBookingStep({
         booking.paymentMethodId = paymentMethod.id;
         if (isInsurancePayment(paymentMethod, policy)) {
           booking.step = 'insurance_company';
-          return policy.bookingChooseInsuranceCompany(data.insuranceCompanies);
+          return insuranceCompanyReply(
+            policy.bookingChooseInsuranceCompany(data.insuranceCompanies),
+            data.insuranceCompanies,
+            policy
+          );
         }
         booking.step = 'confirmation';
         return bookingSummary(policy, data, booking);
@@ -450,7 +454,11 @@ function handleBookingStep({
         policy
       );
       if (!company) {
-        return policy.bookingChooseInsuranceCompany(data.insuranceCompanies);
+        return insuranceCompanyReply(
+          policy.bookingChooseInsuranceCompany(data.insuranceCompanies),
+          data.insuranceCompanies,
+          policy
+        );
       }
       booking.insuranceCompanyId = company.id;
       booking.insuranceClassId = null;
@@ -548,7 +556,11 @@ function bookingSummary(policy, data, booking) {
     booking.step = 'insurance_company';
     booking.insuranceCompanyId = null;
     booking.insuranceClassId = null;
-    return policy.bookingChooseInsuranceCompany(data.insuranceCompanies);
+    return insuranceCompanyReply(
+      policy.bookingChooseInsuranceCompany(data.insuranceCompanies),
+      data.insuranceCompanies,
+      policy
+    );
   }
   if (insurance && !insuranceClass) {
     booking.step = 'insurance_class';
@@ -810,6 +822,38 @@ function paymentMethodReply(reply, paymentMethods, policy) {
       mode: 'reply_buttons',
       purpose: 'select_payment_method',
       displayText: '💳 اختاري طريقة الدفع.',
+      options,
+    },
+  };
+}
+
+function insuranceCompanyReply(reply, insuranceCompanies, policy) {
+  if (!Array.isArray(insuranceCompanies)) return reply;
+  const options = insuranceCompanies.map((insuranceCompany) => ({
+    id: String(insuranceCompany?.id ?? ''),
+    label: policy.display(insuranceCompany?.name),
+  }));
+  const ids = new Set(options.map((option) => option.id));
+  if (
+    options.length < 1 ||
+    options.length > 10 ||
+    ids.size !== options.length ||
+    options.some((option) =>
+      !option.id.trim() ||
+      option.id.length > 200 ||
+      !option.label.trim() ||
+      option.label.length > 24
+    )
+  ) return reply;
+
+  return {
+    reply,
+    interaction: {
+      version: 1,
+      mode: 'list',
+      purpose: 'select_insurance_company',
+      displayText: '🛡️ اختاري شركة التأمين.',
+      listPrompt: 'عرض الشركات',
       options,
     },
   };

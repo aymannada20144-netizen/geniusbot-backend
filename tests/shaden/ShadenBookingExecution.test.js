@@ -101,7 +101,21 @@ describe('Shaden confirmed booking execution', () => {
 
     let result = await turn(engine, state, 'تأمين');
     assert.equal(result.nextState.booking.step, 'insurance_company');
-    assert.equal(result.interaction, undefined);
+    assert.equal(typeof result.reply, 'string');
+    assert.equal(result.interaction.version, 1);
+    assert.equal(result.interaction.mode, 'list');
+    assert.equal(result.interaction.purpose, 'select_insurance_company');
+    assert.equal(result.interaction.displayText, '🛡️ اختاري شركة التأمين.');
+    assert.equal(result.interaction.listPrompt, 'عرض الشركات');
+    assert.deepEqual(result.interaction.options, [
+      { id: 'company-1', label: 'شركة ألف' },
+      { id: 'company-2', label: 'بوبا' },
+      { id: 'company-3', label: 'التعاونية' },
+    ]);
+    assert.equal(
+      result.interaction.options.some((option) => 'description' in option),
+      false
+    );
     state = result.nextState;
 
     result = await turn(engine, state, 'شركة ألف');
@@ -137,6 +151,61 @@ describe('Shaden confirmed booking execution', () => {
       result.interaction.options.map((option) => option.label),
       ['كاش', 'تأمين']
     );
+  });
+
+  test('invalid insurance company selection repeats the list', async () => {
+    const result = await turn(
+      createEngine(async () => successfulServiceResult()),
+      bookingState({
+        step: 'insurance_company',
+        paymentMethodId: 'insurance-1',
+      }),
+      'شركة غير موجودة'
+    );
+    assert.equal(result.nextState.booking.step, 'insurance_company');
+    assert.equal(typeof result.reply, 'string');
+    assert.equal(result.interaction.purpose, 'select_insurance_company');
+    assert.deepEqual(result.interaction.options.map(({ id }) => id), [
+      'company-1', 'company-2', 'company-3',
+    ]);
+  });
+
+  test('invalid insurance company option sets preserve text fallback', async () => {
+    const invalidSets = [
+      [],
+      Array.from({ length: 11 }, (_, index) => ({
+        id: `company-${index}`, name: `شركة ${index}`,
+      })),
+      [{ id: '', name: 'بوبا' }],
+      [{ id: 'company-1', name: '' }],
+      [{ id: 'duplicate', name: 'بوبا' }, { id: 'duplicate', name: 'التعاونية' }],
+    ];
+    for (const insuranceCompanies of invalidSets) {
+      const data = clinicData();
+      data.insuranceCompanies = insuranceCompanies;
+      const result = await new ShadenEngine().handle({
+        message: { text: 'تأمين' },
+        currentState: bookingState({
+          step: 'payment_method',
+          paymentMethodId: null,
+        }),
+        clinicData: data,
+        bookingContext: bookingContext(),
+      });
+      assert.equal(typeof result.reply, 'string');
+      assert.equal(result.interaction, undefined);
+      assert.equal(result.nextState.booking.step, 'insurance_company');
+    }
+  });
+
+  test('general insurance company inquiry remains text only', async () => {
+    const result = await new ShadenEngine().handle({
+      message: { text: 'ما شركات التأمين؟' },
+      currentState: null,
+      clinicData: clinicData(),
+    });
+    assert.equal(typeof result.reply, 'string');
+    assert.equal(result.interaction, undefined);
   });
 
   test('invalid payment option counts preserve the text response', async () => {
@@ -289,7 +358,11 @@ function clinicData() {
       { id: 'cash-1', name: 'Cash', code: 'cash' },
       { id: 'insurance-1', name: 'Insurance', code: 'insurance' },
     ],
-    insuranceCompanies: [{ id: 'company-1', name: 'شركة ألف' }],
+    insuranceCompanies: [
+      { id: 'company-1', name: 'شركة ألف' },
+      { id: 'company-2', name: 'بوبا' },
+      { id: 'company-3', name: 'التعاونية' },
+    ],
     insuranceClasses: [
       {
         id: 'class-a',
