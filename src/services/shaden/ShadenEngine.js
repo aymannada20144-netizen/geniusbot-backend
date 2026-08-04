@@ -463,9 +463,12 @@ function handleBookingStep({
       booking.insuranceCompanyId = company.id;
       booking.insuranceClassId = null;
       booking.step = 'insurance_class';
-      return policy.bookingChooseInsuranceClass(
-        data.insuranceClasses.filter((item) =>
-          item.insuranceCompanyId === company.id && item.isAccepted)
+      const classes = data.insuranceClasses.filter((item) =>
+        item.insuranceCompanyId === company.id && item.isAccepted);
+      return insuranceClassReply(
+        policy.bookingChooseInsuranceClass(classes),
+        classes,
+        policy
       );
     }
 
@@ -485,10 +488,13 @@ function handleBookingStep({
         policy
       );
       if (!insuranceClass) {
-        return policy.bookingChooseInsuranceClass(
-          data.insuranceClasses.filter((item) =>
-            item.insuranceCompanyId === booking.insuranceCompanyId &&
-            item.isAccepted)
+        const classes = data.insuranceClasses.filter((item) =>
+          item.insuranceCompanyId === booking.insuranceCompanyId &&
+          item.isAccepted);
+        return insuranceClassReply(
+          policy.bookingChooseInsuranceClass(classes),
+          classes,
+          policy
         );
       }
       if (!insuranceClass.isAccepted) {
@@ -565,9 +571,12 @@ function bookingSummary(policy, data, booking) {
   if (insurance && !insuranceClass) {
     booking.step = 'insurance_class';
     booking.insuranceClassId = null;
-    return policy.bookingChooseInsuranceClass(
-      data.insuranceClasses.filter((item) =>
-        item.insuranceCompanyId === insuranceCompany.id && item.isAccepted)
+    const classes = data.insuranceClasses.filter((item) =>
+      item.insuranceCompanyId === insuranceCompany.id && item.isAccepted);
+    return insuranceClassReply(
+      policy.bookingChooseInsuranceClass(classes),
+      classes,
+      policy
     );
   }
   return policy.bookingConfirmationSummary({
@@ -854,6 +863,37 @@ function insuranceCompanyReply(reply, insuranceCompanies, policy) {
       purpose: 'select_insurance_company',
       displayText: '🛡️ اختاري شركة التأمين.',
       listPrompt: 'عرض الشركات',
+      options,
+    },
+  };
+}
+
+function insuranceClassReply(reply, insuranceClasses, policy) {
+  if (!Array.isArray(insuranceClasses)) return reply;
+  const options = insuranceClasses.map((insuranceClass) => ({
+    id: String(insuranceClass?.id ?? ''),
+    label: policy.display(insuranceClass?.name),
+  }));
+  const ids = new Set(options.map((option) => option.id));
+  if (
+    options.length < 1 ||
+    options.length > 3 ||
+    ids.size !== options.length ||
+    options.some((option) =>
+      !option.id.trim() ||
+      option.id.length > 256 ||
+      !option.label.trim() ||
+      option.label.length > 20
+    )
+  ) return reply;
+
+  return {
+    reply,
+    interaction: {
+      version: 1,
+      mode: 'reply_buttons',
+      purpose: 'select_insurance_class',
+      displayText: '✨ اختاري فئة التأمين.',
       options,
     },
   };

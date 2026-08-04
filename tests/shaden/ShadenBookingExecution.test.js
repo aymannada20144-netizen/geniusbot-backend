@@ -120,7 +120,19 @@ describe('Shaden confirmed booking execution', () => {
 
     result = await turn(engine, state, 'شركة ألف');
     assert.equal(result.nextState.booking.step, 'insurance_class');
-    assert.equal(result.interaction, undefined);
+    assert.equal(typeof result.reply, 'string');
+    assert.equal(result.interaction.version, 1);
+    assert.equal(result.interaction.mode, 'reply_buttons');
+    assert.equal(result.interaction.purpose, 'select_insurance_class');
+    assert.equal(result.interaction.displayText, '✨ اختاري فئة التأمين.');
+    assert.deepEqual(result.interaction.options, [
+      { id: 'class-a', label: 'فئة A' },
+      { id: 'class-vip', label: 'VIP' },
+    ]);
+    assert.equal(
+      result.interaction.options.some((option) => 'description' in option),
+      false
+    );
     state = result.nextState;
 
     result = await turn(engine, state, 'فئة A');
@@ -196,6 +208,86 @@ describe('Shaden confirmed booking execution', () => {
       assert.equal(result.interaction, undefined);
       assert.equal(result.nextState.booking.step, 'insurance_company');
     }
+  });
+
+  test('invalid insurance class selection repeats the reply buttons', async () => {
+    const result = await turn(
+      createEngine(async () => successfulServiceResult()),
+      bookingState({
+        step: 'insurance_class',
+        paymentMethodId: 'insurance-1',
+        insuranceCompanyId: 'company-1',
+      }),
+      'فئة غير موجودة'
+    );
+    assert.equal(typeof result.reply, 'string');
+    assert.equal(result.nextState.booking.step, 'insurance_class');
+    assert.equal(result.interaction.purpose, 'select_insurance_class');
+    assert.deepEqual(result.interaction.options.map(({ id }) => id), [
+      'class-a', 'class-vip',
+    ]);
+  });
+
+  test('valid insurance class labels still use the existing matching', async () => {
+    for (const [label, id] of [['فئة A', 'class-a'], ['VIP', 'class-vip']]) {
+      const result = await turn(
+        createEngine(async () => successfulServiceResult()),
+        bookingState({
+          step: 'insurance_class',
+          paymentMethodId: 'insurance-1',
+          insuranceCompanyId: 'company-1',
+        }),
+        label
+      );
+      assert.equal(result.nextState.booking.step, 'confirmation');
+      assert.equal(result.nextState.booking.insuranceClassId, id);
+      assert.equal(typeof result.reply, 'string');
+      assert.equal(result.interaction, undefined);
+    }
+  });
+
+  test('invalid insurance class option sets preserve text fallback', async () => {
+    const invalidSets = [
+      [],
+      Array.from({ length: 4 }, (_, index) => ({
+        id: `class-${index}`,
+        insuranceCompanyId: 'company-1',
+        name: `فئة ${index}`,
+        isAccepted: true,
+      })),
+      [{ id: '', insuranceCompanyId: 'company-1', name: 'A', isAccepted: true }],
+      [{ id: 'class-a', insuranceCompanyId: 'company-1', name: '', isAccepted: true }],
+      [
+        { id: 'duplicate', insuranceCompanyId: 'company-1', name: 'A', isAccepted: true },
+        { id: 'duplicate', insuranceCompanyId: 'company-1', name: 'VIP', isAccepted: true },
+      ],
+    ];
+    for (const insuranceClasses of invalidSets) {
+      const data = clinicData();
+      data.insuranceClasses = insuranceClasses;
+      const result = await new ShadenEngine().handle({
+        message: { text: 'شركة ألف' },
+        currentState: bookingState({
+          step: 'insurance_company',
+          paymentMethodId: 'insurance-1',
+        }),
+        clinicData: data,
+        bookingContext: bookingContext(),
+      });
+      assert.equal(typeof result.reply, 'string');
+      assert.equal(result.interaction, undefined);
+      assert.equal(result.nextState.booking.step, 'insurance_class');
+    }
+  });
+
+  test('general insurance class inquiry remains text only', async () => {
+    const result = await new ShadenEngine().handle({
+      message: { text: 'ما فئات التأمين؟' },
+      currentState: null,
+      clinicData: clinicData(),
+    });
+    assert.equal(typeof result.reply, 'string');
+    assert.equal(result.interaction, undefined);
   });
 
   test('general insurance company inquiry remains text only', async () => {
@@ -375,6 +467,12 @@ function clinicData() {
         insuranceCompanyId: 'company-1',
         name: 'فئة C',
         isAccepted: false,
+      },
+      {
+        id: 'class-vip',
+        insuranceCompanyId: 'company-1',
+        name: 'VIP',
+        isAccepted: true,
       },
     ],
     specialties: [],
