@@ -4,6 +4,12 @@ const DashboardRepository = require('./DashboardRepository');
 const DashboardService = require('./DashboardService');
 const DashboardController = require('./DashboardController');
 const registerDashboardRoutes = require('./DashboardRoutes');
+const AppointmentRepository = require(
+  '../appointments/AppointmentRepository'
+);
+const AppointmentService = require(
+  '../appointments/AppointmentService'
+);
 
 const ServicesDashboardRepository = require(
   './services-dashboard/ServicesDashboardRepository'
@@ -22,12 +28,17 @@ const {
   protect,
 } = require('../../core/auth');
 
-function register({ app, db }) {
+function register({ app, db, appointmentService = null }) {
   const dashboardRepository =
     new DashboardRepository(db);
 
   const dashboardService =
-    new DashboardService(dashboardRepository);
+    new DashboardService(
+      dashboardRepository,
+      appointmentService || new AppointmentService(
+        new AppointmentRepository(db)
+      )
+    );
 
   const dashboardController =
     new DashboardController(dashboardService);

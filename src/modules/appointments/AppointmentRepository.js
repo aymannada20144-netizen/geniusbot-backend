@@ -43,8 +43,11 @@ class AppointmentRepository extends BaseRepository {
         pm."name" AS "payment_method_name",
         pm."code" AS "payment_method_code",
         ic."name" AS "insurance_company_name",
-        cls."class_name" AS "insurance_class_name"
+        cls."class_name" AS "insurance_class_name",
+        c."timezone" AS "clinic_timezone"
       FROM ${this.fullTableName} a
+      JOIN "geniusbot"."clinics" c
+        ON c."id" = a."clinic_id"
       JOIN "geniusbot"."patients" p
         ON p."id" = a."patient_id"
        AND p."clinic_id" = a."clinic_id"
@@ -259,7 +262,15 @@ class AppointmentRepository extends BaseRepository {
     return result.rows.length > 0;
   }
 
-  async updateStatus(clinicId, appointmentId, status) {
+  // Appointment status changes must go through
+  // AppointmentService.updateAppointmentStatus() so lifecycle validation and
+  // post-confirmation communication always execute from one central path.
+  async updateStatus(
+    clinicId,
+    appointmentId,
+    status,
+    expectedStatus = null
+  ) {
     const sql = `
       UPDATE ${this.fullTableName}
       SET
@@ -267,6 +278,7 @@ class AppointmentRepository extends BaseRepository {
         "updated_at" = NOW()
       WHERE "clinic_id" = $1
         AND "id" = $2
+        AND ($4::text IS NULL OR "status" = $4)
       RETURNING "id", "status"
     `;
 
@@ -274,6 +286,7 @@ class AppointmentRepository extends BaseRepository {
       clinicId,
       appointmentId,
       status,
+      expectedStatus,
     ]);
 
     return result.rows[0] || null;

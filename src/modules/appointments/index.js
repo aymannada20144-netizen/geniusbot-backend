@@ -9,12 +9,11 @@ const {
   protect,
 } = require('../../core/auth');
 
-function register({ app, db }) {
-  const repository =
-    new AppointmentRepository(db);
-
-  const service =
-    new AppointmentService(repository);
+function register({ app, db, appointmentService = null }) {
+  const service = appointmentService ||
+    new AppointmentService(
+      new AppointmentRepository(db)
+    );
 
   const controller =
     new AppointmentController(service);

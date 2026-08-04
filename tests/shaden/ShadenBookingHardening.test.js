@@ -77,7 +77,7 @@ describe('Shaden early availability validation', () => {
 });
 
 describe('Booking room confirmation', () => {
-  test('actual persisted room number and name are rendered without UUID', async () => {
+  test('pending creation omits the duplicated persisted room summary', async () => {
     const bookingEngine = new BookingEngine({ bookingService: {
       bookAppointment: async () => ({
         success: true,
@@ -99,8 +99,9 @@ describe('Booking room confirmation', () => {
       message: { text: 'نعم' }, currentState: state,
       clinicData: clinicData(), bookingContext: bookingContext(),
     }));
-    assert.match(result.reply, /\*الغرفة:\*/);
-    assert.match(result.reply, /غرفة ليزر/);
+    assert.match(result.reply, /تم تسجيل طلب حجزك بنجاح/);
+    assert.match(result.reply, /ستصلك رسالة منفصلة بعد التأكيد/);
+    assert.doesNotMatch(result.reply, /\*الغرفة:\*|غرفة ليزر/);
     assert.doesNotMatch(result.reply, /room-uuid/);
   });
 
@@ -166,4 +167,3 @@ function clinicData() {
 function bookingContext() {
   return { clinicId: 'clinic-1', conversationId: 'conversation-1', channel: 'whatsapp', channelIdentity: '+966500000001', patientId: 'patient-1' };
 }
-

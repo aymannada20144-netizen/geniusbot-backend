@@ -25,7 +25,7 @@ describe('NotificationService', () => {
 
     assert.deepEqual(
       scheduled.map((item) => item.reminderType),
-      ['confirmation', 'day_before', 'same_day']
+      ['day_before', 'same_day']
     );
   });
 
@@ -48,7 +48,6 @@ describe('NotificationService', () => {
     });
     assert.deepEqual(events, [
       'cancel',
-      'confirmation',
       'day_before',
       'same_day',
     ]);

@@ -150,6 +150,15 @@ function formatBookingSummary(input = {}) {
 }
 
 function formatBookingSuccess(input = {}) {
+  const pending = cleanValue(input.appointmentStatus) === 'pending';
+  if (pending) {
+    return [
+      rtl('✅ تم تسجيل طلب حجزك بنجاح'),
+      '',
+      rtl('طلبك بانتظار تأكيد العيادة، وستصلك رسالة منفصلة بعد التأكيد 🌸'),
+    ].join('\n');
+  }
+
   const sections = [];
   addSection(sections, null, [
     field('الاسم', input.customerName),
@@ -158,9 +167,8 @@ function formatBookingSuccess(input = {}) {
   addSection(sections, 'تفاصيل الزيارة', resourceFields(input, true));
   addSection(sections, 'الموعد', [field('التاريخ', input.dateText), field('الوقت', input.timeText)]);
   addSection(sections, 'طريقة الدفع', paymentFields(input, true));
-  const pending = cleanValue(input.appointmentStatus) === 'pending';
-  const title = pending ? '✅ *تم تسجيل طلب حجزك بنجاح*' : '✅ *تم تأكيد حجزك بنجاح*';
-  const ending = pending ? 'طلبك بانتظار تأكيد العيادة 🌸' : 'ننتظرك في الموعد 🌸';
+  const title = '✅ *تم تأكيد حجزك بنجاح*';
+  const ending = 'ننتظرك في الموعد 🌸';
   const lines = [rtl(title), '', ...joinSections(sections)];
   const reference = cleanValue(input.bookingReference);
   if (reference) lines.push('', rtl(LIST_DIVIDER), '', rtl('🎫 *رقم الحجز*'), `\`${LRI}${reference}${PDI}\``);

@@ -24,6 +24,21 @@ const ClinicService = require('./services/ClinicService');
 const ConversationService = require('./services/ConversationService');
 const PatientService = require('./modules/patients/PatientService');
 const PriceService = require('./services/PriceService');
+const CommunicationService = require(
+  './communication/services/CommunicationService'
+);
+const CommunicationJob = require(
+  './communication/jobs/CommunicationJob'
+);
+const WhatsAppTransport = require(
+  './communication/transports/WhatsAppTransport'
+);
+const AppointmentRepository = require(
+  './modules/appointments/AppointmentRepository'
+);
+const AppointmentService = require(
+  './modules/appointments/AppointmentService'
+);
 
 const appointmentsModule = require('./modules/appointments');
 const dashboardModule = require('./modules/dashboard');
@@ -69,6 +84,16 @@ async function buildApp() {
 
   app.setErrorHandler(errorHandler);
 
+  const communicationService = new CommunicationService({
+    job: new CommunicationJob({
+      transport: new WhatsAppTransport(),
+    }),
+  });
+  const appointmentService = new AppointmentService(
+    new AppointmentRepository(db),
+    communicationService
+  );
+
   app.get('/health', async () => {
     try {
       await db.query('SELECT 1');
@@ -86,8 +111,8 @@ async function buildApp() {
     }
   });
 
-  appointmentsModule.register({ app, db });
-  dashboardModule.register({ app, db });
+  appointmentsModule.register({ app, db, appointmentService });
+  dashboardModule.register({ app, db, appointmentService });
   patientsModule.register({ app, db });
   bookingsModule.register({ app, db });
   staffModule.register({ app, db });

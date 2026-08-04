@@ -52,11 +52,6 @@ class NotificationService {
     return Promise.all([
       this.schedule({
         appointmentId: appointment.id,
-        reminderType: 'confirmation',
-        scheduledAt: new Date(),
-      }),
-      this.schedule({
-        appointmentId: appointment.id,
         reminderType: 'day_before',
         scheduledAt: dayBefore,
       }),

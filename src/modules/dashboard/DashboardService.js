@@ -1,22 +1,23 @@
 const {
-  NotFoundError,
-} = require('../../core/errors');
-
-const {
   validateUuid,
-  validateRequired,
 } = require('../../core/validators/commonValidators');
-const {
-  validateAppointmentTransition,
-} = require('../appointments/appointmentLifecycle');
 
 class DashboardService {
-  constructor(dashboardRepository) {
+  constructor(dashboardRepository, appointmentService) {
     if (!dashboardRepository) {
       throw new Error('DashboardService requires dashboardRepository');
     }
+    if (
+      !appointmentService ||
+      typeof appointmentService.updateAppointmentStatus !== 'function'
+    ) {
+      throw new Error(
+        'DashboardService requires appointmentService'
+      );
+    }
 
     this.dashboardRepository = dashboardRepository;
+    this.appointmentService = appointmentService;
   }
 
   async getAppointmentStats(clinicId) {
@@ -62,33 +63,11 @@ class DashboardService {
     appointmentId,
     status
   ) {
-    validateUuid(clinicId, 'clinicId');
-    validateUuid(appointmentId, 'appointmentId');
-    validateRequired(status, 'action');
-
-    const current = await this.dashboardRepository.findAppointmentById(
+    return this.appointmentService.updateAppointmentStatus(
       clinicId,
-      appointmentId
+      appointmentId,
+      status
     );
-
-    if (!current) {
-      throw new NotFoundError('Appointment not found.');
-    }
-
-    validateAppointmentTransition(current.status, status);
-
-    const appointment =
-      await this.dashboardRepository.updateAppointmentStatus(
-        clinicId,
-        appointmentId,
-        status
-      );
-
-    if (!appointment) {
-      throw new NotFoundError('Appointment not found.');
-    }
-
-    return appointment;
   }
 }
 

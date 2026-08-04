@@ -39,7 +39,7 @@ describe('WhatsApp booking message formatting', () => {
     assert.match(formatter.formatBookingSummary({ service: requiredService, room: { number: '301', name: 'غرفة العلاج' } }), /— غرفة العلاج/);
   });
 
-  test('success restores authoritative patient, reference, price, and insurance fields', () => {
+  test('pending success returns only the approved waiting message', () => {
     const text = formatter.formatBookingSuccess({
       customerName: 'منة',
       bookingReference: '25DD4527',
@@ -56,14 +56,11 @@ describe('WhatsApp booking message formatting', () => {
       currency: 'SAR',
       appointmentStatus: 'pending',
     });
-    for (const expected of [
-      'منة', '25DD4527', 'فيلر', 'فرع الصالحية', 'د. سارة الشمري',
-      'غرفة حقن', 'بوبا',
-    ]) assert.match(text, new RegExp(expected));
-    assert.match(text, new RegExp(`${LRI}250${PDI} ريال`));
-    assert.doesNotMatch(text, /SAR|00\.250/);
-    assert.match(text, /فئة التأمين/);
-    assert.match(text, /بانتظار تأكيد العيادة/);
+    assert.equal(
+      text.replaceAll(RLM, ''),
+      '✅ تم تسجيل طلب حجزك بنجاح\n\n' +
+      'طلبك بانتظار تأكيد العيادة، وستصلك رسالة منفصلة بعد التأكيد 🌸'
+    );
   });
 
   test('cash success omits absent optional and insurance labels and UUIDs', () => {
@@ -265,7 +262,7 @@ describe('booking insurance, persisted status, and official reference', () => {
     assert.doesNotMatch(text, /شركة التأمين|فئة التأمين/u);
   });
 
-  test('pending success uses persisted insurance, full public reference, and pending wording', () => {
+  test('pending success omits the duplicated completion summary', () => {
     const text = formatter.formatBookingSuccess({
       service: requiredService,
       branch,
@@ -281,9 +278,8 @@ describe('booking insurance, persisted status, and official reference', () => {
     });
     assert.match(text, /تم تسجيل طلب حجزك بنجاح/u);
     assert.match(text, /طلبك بانتظار تأكيد العيادة/u);
-    assert.match(text, /شركة التأمين:\* بوبا/u);
-    assert.match(text, new RegExp(`فئة التأمين:\\* ${LRI}VIP${PDI}`));
-    assert.match(text, new RegExp(`\\\`${LRI}25DD4527${PDI}\\\``));
+    assert.match(text, /ستصلك رسالة منفصلة بعد التأكيد/u);
+    assert.doesNotMatch(text, /شركة التأمين|فئة التأمين|25DD4527/u);
     assert.doesNotMatch(text, /تم تأكيد حجزك|[0-9a-f]{8}-[0-9a-f]{4}-/iu);
   });
 

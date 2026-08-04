@@ -279,6 +279,21 @@ describe('Shaden Phase 1.2 public runtime', () => {
     assert.equal(booking.state.data.shaden.mode, 'idle');
     assert.equal('serviceId' in booking.state.data.shaden, false);
     assert.equal('bookingSelection' in booking.state.data.shaden, false);
+    assert.equal(session.harness.lastSentInput.interaction.purpose, 'select_service');
+    assert.equal(session.harness.lastSentInput.interaction.mode, 'list');
+    assert.equal(
+      session.harness.lastOutgoing.messageText,
+      booking.replyText
+    );
+    assert.match(session.harness.lastOutgoing.waMessageId, /^out-\d+$/);
+    assert.deepEqual(
+      session.harness.lastOutgoing.rawPayload.interaction.optionIds,
+      ['service:service-1', 'service:service-2']
+    );
+    assert.equal(
+      session.harness.lastOutgoing.rawPayload.delivery.messageId,
+      session.harness.lastOutgoing.waMessageId
+    );
     assert.equal(session.harness.aiCalls, 0);
   });
 });
@@ -456,6 +471,9 @@ function createHarness(initialShadenState) {
     id: 'conversation-1',
     botEnabled: true,
   };
+  let lastSentInput = null;
+  let lastOutgoing = null;
+  let outboundNumber = 0;
   const resources = {
     branches: [
       { ...active('branch-1', 'فرع العليا'), city: 'Riyadh' },
@@ -485,6 +503,12 @@ function createHarness(initialShadenState) {
   return {
     messageNumber: 0,
     aiCalls: 0,
+    get lastSentInput() {
+      return reload(lastSentInput);
+    },
+    get lastOutgoing() {
+      return reload(lastOutgoing);
+    },
     persisted: () => reload(storedState),
     reload: () => {
       storedState = JSON.parse(JSON.stringify(storedState));
@@ -512,7 +536,10 @@ function createHarness(initialShadenState) {
       messageRepository: {
         findByExternalId: async () => null,
         saveIncomingMessage: async () => ({}),
-        saveOutgoingMessage: async () => ({}),
+        saveOutgoingMessage: async (input) => {
+          lastOutgoing = reload(input);
+          return {};
+        },
       },
       catalogService: {
         list: async (resource) => reload(resources[resource] || []),
@@ -520,7 +547,11 @@ function createHarness(initialShadenState) {
       clinicConfigurationSource: {
         get: async () => ({ assistantName: 'شادن', assistantGender: 'female' }),
       },
-      sendMessage: async () => ({ messageId: 'out-1' }),
+      sendMessage: async (input) => {
+        lastSentInput = reload(input);
+        outboundNumber += 1;
+        return { messageId: `out-${outboundNumber}` };
+      },
     },
   };
 }

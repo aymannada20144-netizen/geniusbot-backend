@@ -206,39 +206,6 @@ class DashboardRepository extends BaseRepository {
     return result.rows;
   }
 
-  async updateAppointmentStatus(clinicId, appointmentId, status) {
-    const sql = `
-      UPDATE geniusbot.appointments
-      SET
-        status = $3,
-        updated_at = NOW()
-      WHERE clinic_id = $1
-        AND id = $2
-      RETURNING
-        id,
-        clinic_id,
-        branch_id,
-        patient_id,
-        service_id,
-        doctor_id,
-        room_id,
-        appointment_start,
-        appointment_end,
-        status,
-        notes,
-        created_at,
-        updated_at
-    `;
-
-    const result = await this.query(sql, [
-      clinicId,
-      appointmentId,
-      status,
-    ]);
-
-    return result.rows[0] || null;
-  }
-
   async findAppointmentById(clinicId, appointmentId) {
     const result = await this.query(
       `SELECT id, status

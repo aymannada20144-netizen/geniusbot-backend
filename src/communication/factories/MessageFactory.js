@@ -1,0 +1,141 @@
+'use strict';
+
+/**
+ * ============================================================================
+ * GeniusBot Communication Platform
+ * MessageFactory
+ * ----------------------------------------------------------------------------
+ * Central entry point for building communication messages.
+ *
+ * Responsibilities:
+ * - Resolve the registered builder for a message type.
+ * - Validate the required payload fields.
+ * - Return the standard immutable message object.
+ *
+ * This factory does NOT:
+ * - Send messages.
+ * - Access the database.
+ * - Call external APIs.
+ * - Execute queue jobs.
+ * ============================================================================
+ */
+
+const MessageTypes = require('../types/MessageTypes');
+
+const validateRequiredFields = require(
+    './validators/validateRequiredFields'
+);
+
+const buildAppointmentConfirmation = require(
+    '../templates/appointmentConfirmation'
+);
+
+const buildAppointmentReminder = require(
+    '../templates/appointmentReminder'
+);
+
+const buildThankYou = require(
+    '../templates/thankYou'
+);
+
+const buildGoogleReview = require(
+    '../templates/googleReview'
+);
+
+const UnknownMessageTypeError = require(
+    '../../shared/errors/UnknownMessageTypeError'
+);
+
+const APPOINTMENT_REQUIRED_FIELDS = Object.freeze([
+    'phone',
+    'patientName',
+    'doctorName',
+    'branchName',
+    'appointmentDate',
+    'appointmentTime',
+    'appointmentId',
+    'patientId',
+    'clinicId'
+]);
+
+const THANK_YOU_REQUIRED_FIELDS = Object.freeze([
+    'phone',
+    'patientName',
+    'clinicName',
+    'doctorName',
+    'appointmentId',
+    'patientId',
+    'clinicId'
+]);
+
+const GOOGLE_REVIEW_REQUIRED_FIELDS = Object.freeze([
+    'phone',
+    'patientName',
+    'clinicName',
+    'reviewUrl',
+    'appointmentId',
+    'patientId',
+    'clinicId'
+]);
+
+const MESSAGE_REGISTRY = Object.freeze({
+
+    [MessageTypes.APPOINTMENT_CONFIRMATION]: Object.freeze({
+        requiredFields: APPOINTMENT_REQUIRED_FIELDS,
+        build: buildAppointmentConfirmation
+    }),
+
+    [MessageTypes.APPOINTMENT_REMINDER]: Object.freeze({
+        requiredFields: APPOINTMENT_REQUIRED_FIELDS,
+        build: buildAppointmentReminder
+    }),
+
+    [MessageTypes.THANK_YOU]: Object.freeze({
+        requiredFields: THANK_YOU_REQUIRED_FIELDS,
+        build: buildThankYou
+    }),
+
+    [MessageTypes.GOOGLE_REVIEW]: Object.freeze({
+        requiredFields: GOOGLE_REVIEW_REQUIRED_FIELDS,
+        build: buildGoogleReview
+    })
+
+});
+
+class MessageFactory {
+
+    /**
+     * Builds a communication message.
+     *
+     * @param {string} type
+     * @param {Object} payload
+     * @returns {Readonly<Object>}
+     *
+     * @throws {UnknownMessageTypeError}
+     * @throws {ValidationError}
+     */
+    static build(type, payload) {
+
+        const registration = MESSAGE_REGISTRY[type];
+
+        if (!registration) {
+            throw new UnknownMessageTypeError(
+                `Unsupported message type: ${String(type)}`,
+                {
+                    messageType: type
+                }
+            );
+        }
+
+        validateRequiredFields(
+            payload,
+            registration.requiredFields,
+            type
+        );
+
+        return registration.build(payload);
+    }
+
+}
+
+module.exports = MessageFactory;

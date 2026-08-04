@@ -78,6 +78,73 @@ describe('booking intent runtime behavior', () => {
     assert.equal(result.nextState.booking.step, 'service');
     assert.match(result.reply, /الخدمات المتاحة/u);
     assert.doesNotMatch(result.reply, /لم أفهم/u);
+    assert.equal(result.interaction.version, 1);
+    assert.equal(result.interaction.mode, 'list');
+    assert.equal(result.interaction.purpose, 'select_service');
+    assert.equal(
+      result.interaction.displayText,
+      '✨ اختاري الخدمة المناسبة من القائمة.'
+    );
+    assert.equal(
+      result.interaction.options.some((option) => 'description' in option),
+      false
+    );
+    assert.deepEqual(
+      result.interaction.options.map((option) => option.id),
+      ['service:service-filler', 'service:service-laser']
+    );
+  });
+
+  test('large service selection paginates deterministically without losing services', () => {
+    const engine = new ShadenEngine();
+    const data = clinicData();
+    data.services = Array.from({ length: 18 }, (_, index) => ({
+      id: `service-${index + 1}`,
+      name: `خدمة ${String(index + 1).padStart(2, '0')}`,
+    }));
+
+    const first = engine.handle({
+      message: { text: 'ابغى حجز' },
+      currentState: idleState(),
+      clinicData: data,
+    });
+    assert.equal(first.interaction.listPrompt, 'عرض الخدمات');
+    assert.equal(first.interaction.options.length, 9);
+    assert.equal(first.interaction.options.at(-1).label, 'عرض المزيد');
+
+    const second = engine.handle({
+      message: { text: 'عرض المزيد' },
+      currentState: first.nextState,
+      clinicData: data,
+    });
+    assert.equal(second.nextState.booking.step, 'service');
+    assert.equal(second.interaction.options.length, 10);
+    assert.equal(second.interaction.options.at(-2).label, 'السابق');
+    assert.equal(second.interaction.options.at(-1).label, 'عرض المزيد');
+
+    const third = engine.handle({
+      message: { text: 'عرض المزيد' },
+      currentState: second.nextState,
+      clinicData: data,
+    });
+    assert.equal(third.interaction.options.length, 3);
+    assert.equal(third.interaction.options.at(-1).label, 'السابق');
+
+    const serviceIds = [first, second, third].flatMap((result) =>
+      result.interaction.options
+        .filter((option) => option.id.startsWith('service:'))
+        .map((option) => option.id)
+    );
+    assert.deepEqual(serviceIds, data.services.map(({ id }) => `service:${id}`));
+
+    const selected = engine.handle({
+      message: { text: 'خدمة 10' },
+      currentState: second.nextState,
+      clinicData: data,
+    });
+    assert.equal(selected.nextState.booking.serviceId, 'service-10');
+    assert.equal(selected.nextState.booking.step, 'city');
+    assert.deepEqual(selected.nextState.options, []);
   });
 
   for (const [phrase, serviceId] of [
@@ -90,6 +157,13 @@ describe('booking intent runtime behavior', () => {
       assert.equal(result.nextState.booking.step, 'city');
       assert.match(result.reply, /المدن المتاحة/u);
       assert.doesNotMatch(result.reply, /الخدمات المتاحة/u);
+      assert.equal(result.interaction.mode, 'list');
+      assert.equal(result.interaction.purpose, 'select_city');
+      assert.equal(result.interaction.displayText, '🏙️ اختاري المدينة المناسبة.');
+      assert.equal(
+        result.interaction.options.some((option) => 'description' in option),
+        false
+      );
     });
   }
 
@@ -105,6 +179,17 @@ describe('booking intent runtime behavior', () => {
     assert.equal(result.nextState.booking.step, 'branch');
     assert.equal(result.nextState.booking.serviceId, 'service-filler');
     assert.match(result.reply, /الفروع المتاحة/u);
+    assert.equal(result.interaction.mode, 'list');
+    assert.equal(result.interaction.purpose, 'select_branch');
+    assert.equal(result.interaction.displayText, '📍 اختاري الفرع المناسب.');
+    assert.equal(
+      result.interaction.options.some((option) => 'description' in option),
+      false
+    );
+    assert.deepEqual(
+      result.interaction.options.map((option) => option.id),
+      ['branch:branch-jeddah']
+    );
   });
 
   test('cancellation phrase at confirmation cancels instead of starting a new booking', () => {
@@ -115,6 +200,81 @@ describe('booking intent runtime behavior', () => {
     const result = new ShadenEngine().handle({ message: { text: 'إلغاء الحجز' }, currentState: current, clinicData: clinicData() });
     assert.equal(result.nextState.booking, undefined);
     assert.match(result.reply, /تم إلغاء طلب الحجز/u);
+  });
+});
+
+describe('unified interactive presentation', () => {
+  test('general inquiries with structured options use the shared interaction contract', () => {
+    const engine = new ShadenEngine();
+    const data = clinicData();
+    data.specialties = [
+      { id: 'specialty-derma', name: 'الجلدية' },
+      { id: 'specialty-dental', name: 'الأسنان' },
+    ];
+
+    for (const [text, purpose, mode] of [
+      ['ما الخدمات', 'view_services', 'list'],
+      ['ما التخصصات', 'view_specialties', 'list'],
+      ['ما الفروع', 'view_branches', 'list'],
+      ['ما طرق الدفع', 'view_payment_methods', 'reply_buttons'],
+      ['ما شركات التأمين', 'view_insurance_companies', 'list'],
+      ['ما فئات التأمين', 'view_insurance_classes', 'reply_buttons'],
+    ]) {
+      const result = engine.handle({
+        message: { text },
+        currentState: idleState(),
+        clinicData: data,
+      });
+      assert.equal(result.interaction.version, 1, text);
+      assert.equal(result.interaction.purpose, purpose, text);
+      assert.equal(result.interaction.mode, mode, text);
+      assert.ok(result.interaction.displayText, text);
+      assert.ok(result.reply, text);
+      assert.equal(result.nextState.booking, undefined, text);
+    }
+  });
+
+  test('informational responses without options remain text', () => {
+    const result = new ShadenEngine().handle({
+      message: { text: 'شكرا' },
+      currentState: idleState(),
+      clinicData: clinicData(),
+    });
+    assert.equal(typeof result.reply, 'string');
+    assert.equal(result.interaction, undefined);
+  });
+
+  test('general service pagination is navigation and never starts booking', () => {
+    const engine = new ShadenEngine();
+    const data = clinicData();
+    data.services = Array.from({ length: 18 }, (_, index) => ({
+      id: `general-service-${index + 1}`,
+      name: `خدمة عامة ${String(index + 1).padStart(2, '0')}`,
+    }));
+
+    const first = engine.handle({
+      message: { text: 'ما الخدمات' },
+      currentState: idleState(),
+      clinicData: data,
+    });
+    const second = engine.handle({
+      message: { text: 'عرض المزيد' },
+      currentState: first.nextState,
+      clinicData: data,
+    });
+    const previous = engine.handle({
+      message: { text: 'السابق' },
+      currentState: second.nextState,
+      clinicData: data,
+    });
+
+    assert.equal(first.interaction.purpose, 'view_services');
+    assert.equal(second.interaction.purpose, 'view_services');
+    assert.equal(previous.interaction.purpose, 'view_services');
+    assert.equal(second.nextState.booking, undefined);
+    assert.equal(previous.nextState.booking, undefined);
+    assert.equal(second.interaction.options.length <= 10, true);
+    assert.equal(previous.interaction.options[0].id, first.interaction.options[0].id);
   });
 });
 
@@ -158,7 +318,7 @@ describe('incomplete insurance summary fails closed', () => {
 });
 
 describe('persisted insurance success through Shaden runtime', () => {
-  test('success uses the appointment presentation reference, status, company, and class', async () => {
+  test('pending success omits presentation details and keeps the waiting state', async () => {
     const current = activeBooking('confirmation');
     current.booking.branchId = 'branch-jeddah';
     current.booking.preferredStart = '2026-08-05T08:00:00.000Z';
@@ -190,11 +350,9 @@ describe('persisted insurance success through Shaden runtime', () => {
     const result = await engine.handle({ message: { text: 'نعم' }, currentState: current, clinicData: clinicData() });
     assert.match(result.reply, /تم تسجيل طلب حجزك بنجاح/u);
     assert.match(result.reply, /بانتظار تأكيد العيادة/u);
-    assert.match(result.reply, /شركة التأمين:\* بوبا/u);
-    assert.match(result.reply, /فئة التأمين:/u);
-    assert.match(result.reply, /25DD4527/u);
+    assert.match(result.reply, /ستصلك رسالة منفصلة بعد التأكيد/u);
+    assert.doesNotMatch(result.reply, /شركة التأمين|فئة التأمين|25DD4527/u);
     assert.doesNotMatch(result.reply, /00000000-0000-4000/u);
     assert.equal(result.nextState.booking, undefined);
   });
 });
-
