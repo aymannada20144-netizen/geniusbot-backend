@@ -145,9 +145,11 @@ class ShadenEngine {
       });
       if (bookingReply) {
         if (typeof bookingReply.then === 'function') {
-          return bookingReply.then((reply) => ({ reply, nextState }));
+          return bookingReply.then((result) =>
+            normalizeEngineReply(result, nextState)
+          );
         }
-        return { reply: bookingReply, nextState };
+        return normalizeEngineReply(bookingReply, nextState);
       }
     }
 
@@ -413,7 +415,7 @@ function handleBookingStep({
     }
 
     case 'patient':
-      return policy.bookingChoosePaymentMethod(data.paymentMethods);
+      return paymentMethodReply(policy.bookingChoosePaymentMethod(data.paymentMethods), data.paymentMethods, policy);
 
     case 'payment_method': {
       const paymentMethod = findNamedSelection(
@@ -430,7 +432,7 @@ function handleBookingStep({
         booking.step = 'confirmation';
         return bookingSummary(policy, data, booking);
       }
-      return bookingKnowledgeOrReminder({
+      return paymentMethodReply(bookingKnowledgeOrReminder({
         inquiry,
         data,
         state,
@@ -438,7 +440,7 @@ function handleBookingStep({
         replyFor,
         customerName,
         reminder: policy.bookingChoosePaymentMethod(data.paymentMethods),
-      });
+      }), data.paymentMethods, policy);
     }
 
     case 'insurance_company': {
@@ -596,7 +598,11 @@ async function validateEarlyAvailability({
       return bookingSummary(policy, data, booking);
     }
     booking.step = 'payment_method';
-    return policy.bookingChoosePaymentMethod(data.paymentMethods);
+    return paymentMethodReply(
+      policy.bookingChoosePaymentMethod(data.paymentMethods),
+      data.paymentMethods,
+      policy
+    );
   }
   const reason = result.metadata?.reasonCode || result.reason || 'technical_failure';
   booking.step = 'availability';
@@ -768,6 +774,45 @@ function bookingKnowledgeOrReminder({
   if (!isKnowledgeInquiry(inquiry?.type)) return reminder;
   const answer = replyFor(inquiry, data, customerName);
   return `${answer}\n\n${reminder}`;
+}
+
+function normalizeEngineReply(result, nextState) {
+  if (
+    result &&
+    typeof result === 'object' &&
+    !Array.isArray(result) &&
+    typeof result.reply === 'string'
+  ) {
+    return {
+      reply: result.reply,
+      nextState,
+      ...(result.interaction ? { interaction: result.interaction } : {}),
+    };
+  }
+  return { reply: result, nextState };
+}
+
+function paymentMethodReply(reply, paymentMethods, policy) {
+  const options = paymentMethods.map((paymentMethod) => ({
+    id: String(paymentMethod?.id ?? ''),
+    label: policy.display(paymentMethod?.name),
+  }));
+  if (
+    options.length < 1 ||
+    options.length > 3 ||
+    options.some((option) => !option.id.trim() || !option.label.trim())
+  ) return reply;
+
+  return {
+    reply,
+    interaction: {
+      version: 1,
+      mode: 'reply_buttons',
+      purpose: 'select_payment_method',
+      displayText: '💳 اختاري طريقة الدفع.',
+      options,
+    },
+  };
 }
 
 function isKnowledgeInquiry(type) {

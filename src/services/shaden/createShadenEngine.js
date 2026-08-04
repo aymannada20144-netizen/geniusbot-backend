@@ -95,7 +95,7 @@ function createShadenEngine({
       });
       console.info('Shaden patient identity trace.', identityTrace);
       const clinicData = await dataProvider.load(clinic);
-      const { reply, nextState } = await engine.handle({
+      const { reply, nextState, interaction } = await engine.handle({
         message,
         currentState: preservedData.shaden,
         clinicData,
@@ -130,17 +130,25 @@ function createShadenEngine({
 
       // 2. طباعة الرد للتأكد من محتواه قبل الإرسال
       console.log(`📤 Sending reply to ${maskPhone(message.senderId)}: ${reply.substring(0, 50)}...`);
-
-      // 3. تعديل طريقة الإرسال (جرب تغيير 'body' إلى 'text' إذا استمر الخطأ)
-            const delivery = await sendMessage({
+            // 3. تعديل طريقة الإرسال (جرب تغيير 'body' إلى 'text' إذا استمر الخطأ)
+      const delivery = await sendMessage({
         to: message.senderId,
-        body: reply, // تم العودة إلى body لأنها الكلمة المفتاحية التي تتوقعها دالة الإرسال
+        body: reply,
+        ...(interaction ? { interaction } : {}),
       });
       await messageRepository.saveOutgoingMessage({
         conversationId: conversation.id,
         messageText: reply,
         waMessageId: delivery?.messageId || null,
-        rawPayload: { delivery: delivery || null },
+        rawPayload: {
+          delivery: delivery || null,
+          interaction: interaction ? {
+            version: interaction.version,
+            mode: interaction.mode,
+            purpose: interaction.purpose,
+            optionIds: interaction.options.map((option) => option.id),
+          } : null,
+        },
       });
       return {
         replyText: reply,

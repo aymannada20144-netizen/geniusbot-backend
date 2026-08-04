@@ -15,13 +15,26 @@ async function sendWhatsAppMessage(input, runtime = {}) {
   }
 
   const to = requiredString(input, 'to');
-  const isTextMessage = Boolean(
+  const hasTemplateName = Boolean(
+    Object.getOwnPropertyDescriptor(input, 'templateName')
+  );
+  const hasBody = Boolean(
     Object.getOwnPropertyDescriptor(input, 'body')
   );
+  const isTemplateMessage = hasTemplateName || !hasBody;
+  const isTextMessage = !isTemplateMessage;
   const body = isTextMessage ? requiredString(input, 'body') : null;
-  const templateName = isTextMessage ? null : requiredString(input, 'templateName');
-  const language = isTextMessage ? null : requiredString(input, 'language');
-  const endpoint =
+  const templateName = isTemplateMessage
+    ? requiredString(input, 'templateName')
+    : null;
+  const language = isTemplateMessage ? requiredString(input, 'language') : null;
+  const interaction = isTextMessage
+    ? ownDataValue(input, 'interaction')
+    : undefined;
+  const interactivePayload = interaction === undefined
+    ? null
+    : buildInteractivePayload({ to, interaction });
+      const endpoint =
     `https://graph.facebook.com/${GRAPH_API_VERSION}/` +
     `${env.whatsapp.phoneNumberId}/messages`;
   const diagnostics = safeRuntimeDiagnostics({ endpoint, recipient: to });
@@ -31,7 +44,7 @@ async function sendWhatsAppMessage(input, runtime = {}) {
   try {
     response = await (runtime.httpClient || axios).post(
       endpoint,
-      isTextMessage ? {
+      interactivePayload || (isTextMessage ? {
         messaging_product: 'whatsapp',
         recipient_type: 'individual',
         to,
@@ -48,7 +61,7 @@ async function sendWhatsAppMessage(input, runtime = {}) {
             code: language,
           },
         },
-      },
+      }),
       {
         headers: {
           Authorization: `Bearer ${env.whatsapp.token}`,
@@ -106,6 +119,116 @@ async function sendWhatsAppMessage(input, runtime = {}) {
   return Object.freeze({
     messageId,
   });
+}
+
+function buildInteractivePayload({ to, interaction }) {
+  if (!validInteraction(interaction)) return null;
+
+  if (interaction.mode === 'reply_buttons') {
+    if (
+      interaction.displayText.length > 1024 ||
+      interaction.options.length > 3 ||
+      interaction.options.some((option) =>
+        option.label.length > 20 ||
+        option.id.length > 256 ||
+        option.description !== undefined
+      )
+    ) return null;
+
+    return {
+      messaging_product: 'whatsapp',
+      recipient_type: 'individual',
+      to,
+      type: 'interactive',
+      interactive: {
+        type: 'button',
+        body: { text: interaction.displayText },
+        action: {
+          buttons: interaction.options.map((option) => ({
+            type: 'reply',
+            reply: { id: option.id, title: option.label },
+          })),
+        },
+      },
+    };
+  }
+
+  if (
+    interaction.displayText.length > 4096 ||
+    interaction.listPrompt.length > 20 ||
+    interaction.options.length > 10 ||
+    interaction.options.some((option) =>
+      option.label.length > 24 ||
+      option.id.length > 200 ||
+      (option.description !== undefined && option.description.length > 72)
+    )
+  ) return null;
+
+  return {
+    messaging_product: 'whatsapp',
+    recipient_type: 'individual',
+    to,
+    type: 'interactive',
+    interactive: {
+      type: 'list',
+      body: { text: interaction.displayText },
+      action: {
+        button: interaction.listPrompt,
+        sections: [{
+          title: 'الخيارات',
+          rows: interaction.options.map((option) => ({
+            id: option.id,
+            title: option.label,
+            ...(option.description === undefined
+              ? {}
+              : { description: option.description }),
+          })),
+        }],
+      },
+    },
+  };
+}
+
+function validInteraction(interaction) {
+  if (!isPlainObject(interaction)) return false;
+  if (interaction.version !== 1) return false;
+  if (!['reply_buttons', 'list'].includes(interaction.mode)) return false;
+  if (!nonEmptyString(interaction.purpose)) return false;
+  if (!nonEmptyString(interaction.displayText)) return false;
+  if (!Array.isArray(interaction.options) || interaction.options.length === 0) {
+    return false;
+  }
+  if (interaction.mode === 'list' && !nonEmptyString(interaction.listPrompt)) {
+    return false;
+  }
+  if (
+    interaction.mode === 'reply_buttons' &&
+    interaction.listPrompt !== undefined
+  ) return false;
+
+  const ids = new Set();
+  for (const option of interaction.options) {
+    if (!isPlainObject(option)) return false;
+    if (!nonEmptyString(option.id) || !nonEmptyString(option.label)) return false;
+    if (
+      option.description !== undefined &&
+      !nonEmptyString(option.description)
+    ) return false;
+    if (ids.has(option.id)) return false;
+    ids.add(option.id);
+  }
+  return true;
+}
+
+function ownDataValue(object, propertyName) {
+  const descriptor = Object.getOwnPropertyDescriptor(object, propertyName);
+  return descriptor && Object.prototype.hasOwnProperty.call(descriptor, 'value')
+    ? descriptor.value
+    : undefined;
+}
+
+function nonEmptyString(value) {
+  return typeof value === 'string' && value.trim().length > 0;
 }
 
 function requiredString(object, propertyName) {

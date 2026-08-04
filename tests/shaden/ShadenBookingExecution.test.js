@@ -101,42 +101,19 @@ describe('Shaden confirmed booking execution', () => {
 
     let result = await turn(engine, state, 'تأمين');
     assert.equal(result.nextState.booking.step, 'insurance_company');
-    assert.equal(result.interaction.mode, 'list');
-    assert.equal(result.interaction.purpose, 'select_insurance_company');
-    assert.equal(result.interaction.displayText, '🛡️ اختاري شركة التأمين.');
-    assert.deepEqual(result.interaction.options, [
-      { id: 'insurance_company:company-1', label: 'شركة ألف' },
-    ]);
+    assert.equal(result.interaction, undefined);
     state = result.nextState;
 
     result = await turn(engine, state, 'شركة ألف');
     assert.equal(result.nextState.booking.step, 'insurance_class');
-    assert.equal(result.interaction.mode, 'reply_buttons');
-    assert.equal(result.interaction.purpose, 'select_insurance_class');
-    assert.equal(result.interaction.displayText, '✨ اختاري فئة التأمين.');
-    assert.deepEqual(result.interaction.options, [
-      { id: 'insurance_class:class-a', label: 'فئة A' },
-    ]);
+    assert.equal(result.interaction, undefined);
     state = result.nextState;
 
     result = await turn(engine, state, 'فئة A');
     assert.equal(result.nextState.booking.step, 'confirmation');
     assert.equal(result.nextState.booking.insuranceCompanyId, 'company-1');
     assert.equal(result.nextState.booking.insuranceClassId, 'class-a');
-    assert.equal(result.interaction.mode, 'reply_buttons');
-    assert.equal(result.interaction.purpose, 'confirm_booking');
-    assert.equal(result.interaction.displayText, result.reply);
-    assert.match(result.interaction.displayText, /الخدمة/u);
-    assert.match(result.interaction.displayText, /الفرع/u);
-    assert.match(result.interaction.displayText, /التاريخ/u);
-    assert.match(result.interaction.displayText, /الوقت/u);
-    assert.match(result.interaction.displayText, /طريقة الدفع/u);
-    assert.match(result.interaction.displayText, /شركة التأمين/u);
-    assert.match(result.interaction.displayText, /فئة التأمين/u);
-    assert.deepEqual(result.interaction.options, [
-      { id: 'booking:confirm', label: 'نعم' },
-      { id: 'booking:cancel', label: 'إلغاء' },
-    ]);
+    assert.equal(result.interaction, undefined);
   });
 
   test('payment selection exposes the active methods as reply buttons', async () => {
@@ -154,8 +131,81 @@ describe('Shaden confirmed booking execution', () => {
     assert.equal(result.interaction.displayText, '💳 اختاري طريقة الدفع.');
     assert.deepEqual(
       result.interaction.options.map((option) => option.id),
-      ['payment_method:cash-1', 'payment_method:insurance-1']
+      ['cash-1', 'insurance-1']
     );
+    assert.deepEqual(
+      result.interaction.options.map((option) => option.label),
+      ['كاش', 'تأمين']
+    );
+  });
+
+  test('invalid payment option counts preserve the text response', async () => {
+    const data = clinicData();
+    data.paymentMethods = [];
+    const result = await new ShadenEngine().handle({
+      message: { text: 'اختيار غير صالح' },
+      currentState: bookingState({
+        step: 'payment_method',
+        paymentMethodId: null,
+      }),
+      clinicData: data,
+      bookingContext: bookingContext(),
+    });
+    assert.equal(typeof result.reply, 'string');
+    assert.equal(result.interaction, undefined);
+  });
+
+  test('more than three payment methods preserve the text response', async () => {
+    const data = clinicData();
+    data.paymentMethods.push(
+      { id: 'card-1', name: 'Card', code: 'card' },
+      { id: 'transfer-1', name: 'Transfer', code: 'transfer' }
+    );
+    const result = await new ShadenEngine().handle({
+      message: { text: 'اختيار غير صالح' },
+      currentState: bookingState({
+        step: 'payment_method', paymentMethodId: null,
+      }),
+      clinicData: data,
+      bookingContext: bookingContext(),
+    });
+    assert.equal(typeof result.reply, 'string');
+    assert.equal(result.interaction, undefined);
+  });
+
+  test('async availability transition preserves the payment interaction', async () => {
+    const engine = new ShadenEngine({
+      bookingEngine: new BookingEngine({
+        bookingService: {
+          bookAppointment: async () => successfulServiceResult(),
+          checkAvailability: async () => ({
+            success: true,
+            availability: { available: true },
+            assignment: { doctor_id: 'doctor-17' },
+          }),
+        },
+      }),
+    });
+    const initialState = bookingState({
+      step: 'availability',
+      preferredStart: null,
+      paymentMethodId: null,
+    });
+    const originalBooking = structuredClone(initialState.booking);
+    const result = await turn(engine, initialState, '2026-08-10 11:00');
+
+    assert.equal(typeof result.reply, 'string');
+    assert.ok(result.nextState);
+    assert.equal(result.nextState.booking.step, 'payment_method');
+    assert.equal(result.nextState.booking.serviceId, originalBooking.serviceId);
+    assert.equal(result.nextState.booking.branchId, originalBooking.branchId);
+    assert.equal(result.interaction.version, 1);
+    assert.equal(result.interaction.mode, 'reply_buttons');
+    assert.equal(result.interaction.purpose, 'select_payment_method');
+    assert.equal(result.interaction.displayText, '💳 اختاري طريقة الدفع.');
+    assert.deepEqual(result.interaction.options.map(({ id }) => id), [
+      'cash-1', 'insurance-1',
+    ]);
   });
 
   test('rejected insurance class can continue with cash without restarting', async () => {

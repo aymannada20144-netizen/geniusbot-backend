@@ -279,27 +279,65 @@ describe('Shaden Phase 1.2 public runtime', () => {
     assert.equal(booking.state.data.shaden.mode, 'idle');
     assert.equal('serviceId' in booking.state.data.shaden, false);
     assert.equal('bookingSelection' in booking.state.data.shaden, false);
-    assert.equal(session.harness.lastSentInput.interaction.purpose, 'select_service');
-    assert.equal(session.harness.lastSentInput.interaction.mode, 'list');
+    assert.equal(session.harness.lastSentInput.interaction, undefined);
     assert.equal(
       session.harness.lastOutgoing.messageText,
       booking.replyText
     );
     assert.match(session.harness.lastOutgoing.waMessageId, /^out-\d+$/);
-    assert.deepEqual(
-      session.harness.lastOutgoing.rawPayload.interaction.optionIds,
-      ['service:service-1', 'service:service-2']
-    );
+    assert.equal(session.harness.lastOutgoing.rawPayload.interaction, null);
     assert.equal(
       session.harness.lastOutgoing.rawPayload.delivery.messageId,
       session.harness.lastOutgoing.waMessageId
     );
     assert.equal(session.harness.aiCalls, 0);
   });
+
+  test('passes payment interaction once and persists only safe metadata', async () => {
+    const session = createSession({
+      initialShadenState: {
+        version: 1,
+        mode: 'idle',
+        step: null,
+        customer: { name: 'نورة' },
+        context: null,
+        options: [],
+        booking: {
+          step: 'payment_method',
+          serviceId: 'service-1',
+          city: 'Riyadh',
+          branchId: 'branch-1',
+          doctorId: null,
+          preferredStart: '2026-08-10T10:00:00.000Z',
+          paymentMethodId: null,
+          insuranceCompanyId: null,
+          insuranceClassId: null,
+        },
+      },
+    });
+
+    const result = await session.send('اختيار غير صالح');
+    const sent = session.harness.lastSentInput;
+    const outgoing = session.harness.lastOutgoing;
+    assert.equal(sent.interaction.mode, 'reply_buttons');
+    assert.equal(sent.interaction.purpose, 'select_payment_method');
+    assert.equal(sent.interaction.displayText, '💳 اختاري طريقة الدفع.');
+    assert.deepEqual(sent.interaction.options.map(({ id }) => id), [
+      'payment-1', 'payment-2',
+    ]);
+    assert.equal(outgoing.messageText, result.replyText);
+    assert.deepEqual(outgoing.rawPayload.interaction, {
+      version: 1,
+      mode: 'reply_buttons',
+      purpose: 'select_payment_method',
+      optionIds: ['payment-1', 'payment-2'],
+    });
+    assert.equal(outgoing.waMessageId, 'out-1');
+  });
 });
 
-function createSession({ customerName = null } = {}) {
-  const initialState = customerName
+function createSession({ customerName = null, initialShadenState = null } = {}) {
+  const initialState = initialShadenState || (customerName
     ? {
       version: 1,
       mode: 'idle',
@@ -308,7 +346,7 @@ function createSession({ customerName = null } = {}) {
       context: null,
       options: [],
     }
-    : null;
+    : null);
   const harness = createHarness(initialState);
   return {
     harness,
