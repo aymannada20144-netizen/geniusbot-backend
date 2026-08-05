@@ -21,7 +21,12 @@ const MessageTypes = require(
 );
 
 class AppointmentService {
-  constructor(appointmentRepository, communicationService = null) {
+  constructor(
+    appointmentRepository,
+    communicationService = null,
+    notificationService = null,
+    { googleReviewDelayMinutes = 60 } = {}
+  ) {
     if (!appointmentRepository) {
       throw new Error('AppointmentService requires appointmentRepository');
     }
@@ -37,6 +42,8 @@ class AppointmentService {
 
     this.appointmentRepository = appointmentRepository;
     this.communicationService = communicationService;
+    this.notificationService = notificationService;
+    this.googleReviewDelayMinutes = googleReviewDelayMinutes;
     this.messageContextBuilder = new MessageContextBuilder();
   }
 
@@ -122,7 +129,9 @@ class AppointmentService {
 
     const communication = status === 'confirmed'
       ? await this.sendAppointmentConfirmation(clinicId, appointmentId)
-      : {
+      : status === 'completed'
+        ? await this.scheduleCompletionFollowup(clinicId, appointmentId)
+        : {
           attempted: false,
           success: false,
           status: 'not_required',
@@ -233,6 +242,136 @@ class AppointmentService {
     }
   }
 
+  async scheduleCompletionFollowup(clinicId, appointmentId) {
+    console.info('Appointment completed.', { appointmentId, clinicId });
+    if (!this.notificationService) {
+      return {
+        attempted: false,
+        success: false,
+        status: 'not_configured',
+      };
+    }
+    try {
+      const reminder = await this.notificationService.scheduleFollowup(
+        appointmentId
+      );
+      return {
+        attempted: true,
+        success: true,
+        status: 'scheduled',
+        reminderId: reminder?.id || null,
+      };
+    } catch (error) {
+      console.error('Followup scheduling failed.', {
+        appointmentId,
+        clinicId,
+        errorCode: error?.code || 'FOLLOWUP_SCHEDULING_FAILED',
+      });
+      return {
+        attempted: true,
+        success: false,
+        status: 'failed',
+        errorCode: error?.code || 'FOLLOWUP_SCHEDULING_FAILED',
+      };
+    }
+  }
+
+  async sendThankYou(clinicId, appointmentId) {
+    if (!this.communicationService) {
+      return {
+        attempted: false,
+        success: false,
+        status: 'not_configured',
+      };
+    }
+
+    try {
+      const appointment =
+        await this.appointmentRepository.findPresentationById(
+          clinicId,
+          appointmentId
+        );
+      if (!appointment) {
+        throw new NotFoundError('Appointment presentation not found.');
+      }
+
+      const result = await this.communicationService.send(
+        MessageTypes.THANK_YOU,
+        {
+          phone: normalizeSaudiMobileDigits(
+            appointment.patient_phone,
+            'appointment.patient_phone'
+          ),
+          patientName: appointment.patient_name,
+          appointmentNumber: appointment.booking_reference,
+          appointmentId: appointment.id,
+          patientId: appointment.patient_id,
+          clinicId: appointment.clinic_id,
+        }
+      );
+
+      if (result?.success !== true) {
+        return {
+          attempted: true,
+          success: false,
+          status: 'failed',
+          errorCode: result?.error?.code || 'THANK_YOU_FAILED',
+        };
+      }
+
+      let googleReview = {
+        scheduled: false,
+        reason: appointment.review_url
+          ? 'not_configured'
+          : 'review_url_missing',
+      };
+      if (appointment.review_url && this.notificationService) {
+        try {
+          const scheduledAt = new Date(
+            Date.now() + this.googleReviewDelayMinutes * 60 * 1000
+          );
+          await this.notificationService.scheduleGoogleReview(
+            appointment.id,
+            scheduledAt
+          );
+          googleReview = { scheduled: true, scheduledAt };
+        } catch (error) {
+          googleReview = {
+            scheduled: false,
+            reason: 'scheduling_failed',
+            errorCode: error?.code || 'GOOGLE_REVIEW_SCHEDULING_FAILED',
+          };
+          console.error('Google review scheduling failed.', {
+            appointmentId,
+            clinicId,
+            errorCode: googleReview.errorCode,
+          });
+        }
+      }
+
+      return {
+        attempted: true,
+        success: true,
+        status: 'sent',
+        messageId: result.transportResult?.messageId || null,
+        googleReview,
+      };
+    } catch (error) {
+      const failure = {
+        attempted: true,
+        success: false,
+        status: 'failed',
+        errorCode: error?.code || 'THANK_YOU_FAILED',
+      };
+      console.error('Thank-you delivery failed.', {
+        appointmentId,
+        clinicId,
+        errorCode: failure.errorCode,
+      });
+      return failure;
+    }
+  }
+
   async getValidatedAppointment(clinicId, appointmentId, options = {}) {
     validateUuid(clinicId, 'clinicId');
     validateUuid(appointmentId, 'appointmentId');
@@ -297,12 +436,10 @@ class AppointmentService {
 }
 
   async completeAppointment(clinicId, appointmentId) {
-    const appointment = await this.getValidatedAppointment(clinicId, appointmentId);
-    validateAppointmentTransition(appointment.status, 'completed');
-
-    return this.appointmentRepository.completeAppointment(
+    return this.updateAppointmentStatus(
       clinicId,
-      appointment.id
+      appointmentId,
+      'completed'
     );
   }
 

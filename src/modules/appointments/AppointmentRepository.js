@@ -37,6 +37,7 @@ class AppointmentRepository extends BaseRepository {
         p."phone_number" AS "patient_phone",
         s."name" AS "service_name",
         b."name" AS "branch_name",
+        b."google_maps_url" AS "review_url",
         d."full_name" AS "doctor_name",
         r."room_name",
         r."room_number",
@@ -44,6 +45,7 @@ class AppointmentRepository extends BaseRepository {
         pm."code" AS "payment_method_code",
         ic."name" AS "insurance_company_name",
         cls."class_name" AS "insurance_class_name",
+        c."name" AS "clinic_name",
         c."timezone" AS "clinic_timezone"
       FROM ${this.fullTableName} a
       JOIN "geniusbot"."clinics" c

@@ -46,7 +46,7 @@ const UnknownMessageTypeError = require(
     '../../shared/errors/UnknownMessageTypeError'
 );
 
-const APPOINTMENT_REQUIRED_FIELDS = Object.freeze([
+const APPOINTMENT_CONFIRMATION_REQUIRED_FIELDS = Object.freeze([
     'phone',
     'patientName',
     'doctorName',
@@ -58,11 +58,24 @@ const APPOINTMENT_REQUIRED_FIELDS = Object.freeze([
     'clinicId'
 ]);
 
+const APPOINTMENT_REMINDER_REQUIRED_FIELDS = Object.freeze([
+    'phone',
+    'patientName',
+    'serviceName',
+    'doctorName',
+    'branchName',
+    'appointmentDate',
+    'appointmentTime',
+    'appointmentNumber',
+    'appointmentId',
+    'patientId',
+    'clinicId'
+]);
+
 const THANK_YOU_REQUIRED_FIELDS = Object.freeze([
     'phone',
     'patientName',
-    'clinicName',
-    'doctorName',
+    'appointmentNumber',
     'appointmentId',
     'patientId',
     'clinicId'
@@ -71,7 +84,6 @@ const THANK_YOU_REQUIRED_FIELDS = Object.freeze([
 const GOOGLE_REVIEW_REQUIRED_FIELDS = Object.freeze([
     'phone',
     'patientName',
-    'clinicName',
     'reviewUrl',
     'appointmentId',
     'patientId',
@@ -81,12 +93,12 @@ const GOOGLE_REVIEW_REQUIRED_FIELDS = Object.freeze([
 const MESSAGE_REGISTRY = Object.freeze({
 
     [MessageTypes.APPOINTMENT_CONFIRMATION]: Object.freeze({
-        requiredFields: APPOINTMENT_REQUIRED_FIELDS,
+        requiredFields: APPOINTMENT_CONFIRMATION_REQUIRED_FIELDS,
         build: buildAppointmentConfirmation
     }),
 
     [MessageTypes.APPOINTMENT_REMINDER]: Object.freeze({
-        requiredFields: APPOINTMENT_REQUIRED_FIELDS,
+        requiredFields: APPOINTMENT_REMINDER_REQUIRED_FIELDS,
         build: buildAppointmentReminder
     }),
 

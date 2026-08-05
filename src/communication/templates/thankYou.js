@@ -36,9 +36,7 @@ function buildThankYou(payload) {
 
                 patientName: payload.patientName,
 
-                clinicName: payload.clinicName,
-
-                doctorName: payload.doctorName
+                appointmentNumber: payload.appointmentNumber
 
             })
 

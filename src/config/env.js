@@ -29,5 +29,10 @@ module.exports = {
     verifyToken: process.env.VERIFY_TOKEN,
     phoneNumberId: process.env.PHONE_NUMBER_ID,
     recoveryTemplateName: process.env.WHATSAPP_RECOVERY_TEMPLATE_NAME
+  },
+  notifications: {
+    intervalMs: Number(process.env.NOTIFICATION_INTERVAL_MS) || 60000,
+    googleReviewDelayMinutes:
+      Number(process.env.GOOGLE_REVIEW_DELAY_MINUTES) || 60
   }
 };

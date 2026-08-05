@@ -41,11 +41,32 @@ function buildGoogleReview(payload) {
 
             language: payload.language || 'ar',
 
-            variables: Object.freeze({
-                patientName: payload.patientName,
-                clinicName: payload.clinicName,
-                reviewUrl: payload.reviewUrl
-            })
+            components: Object.freeze([
+                Object.freeze({
+                    type: 'body',
+                    parameters: Object.freeze([
+                        Object.freeze({
+                            type: 'text',
+                            text: payload.patientName
+                        }),
+                        Object.freeze({
+                            type: 'text',
+                            text: payload.reviewUrl
+                        })
+                    ])
+                }),
+                Object.freeze({
+                    type: 'button',
+                    sub_type: 'url',
+                    index: '0',
+                    parameters: Object.freeze([
+                        Object.freeze({
+                            type: 'text',
+                            text: payload.reviewUrl
+                        })
+                    ])
+                })
+            ])
         }),
 
         metadata: Object.freeze({

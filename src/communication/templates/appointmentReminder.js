@@ -42,11 +42,12 @@ function buildAppointmentReminder(payload) {
 
             variables: Object.freeze({
                 patientName: payload.patientName,
+                serviceName: payload.serviceName,
                 doctorName: payload.doctorName,
                 branchName: payload.branchName,
-                roomName: payload.roomName || null,
                 appointmentDate: payload.appointmentDate,
-                appointmentTime: payload.appointmentTime
+                appointmentTime: payload.appointmentTime,
+                appointmentNumber: payload.appointmentNumber
             })
         }),
 

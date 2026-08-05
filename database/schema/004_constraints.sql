@@ -1088,6 +1088,8 @@ SELECT geniusbot.add_constraint_if_missing(
         ''confirmation'',
         ''day_before'',
         ''same_day'',
+        ''followup'',
+        ''google_review'',
         ''custom''
     ))'
 );

@@ -39,6 +39,8 @@ const AppointmentRepository = require(
 const AppointmentService = require(
   './modules/appointments/AppointmentService'
 );
+const NotificationService = require('./services/NotificationService');
+const NotificationScheduler = require('./services/NotificationScheduler');
 
 const appointmentsModule = require('./modules/appointments');
 const dashboardModule = require('./modules/dashboard');
@@ -89,9 +91,30 @@ async function buildApp() {
       transport: new WhatsAppTransport(),
     }),
   });
+  const bookingRepositories = createRepositories(db);
+  const notificationService = new NotificationService(
+    bookingRepositories.notifications,
+    communicationService,
+    {
+      googleReviewDelayMinutes:
+        env.notifications.googleReviewDelayMinutes,
+    }
+  );
+  const notificationScheduler = new NotificationScheduler(
+    notificationService,
+    {
+      intervalMs: env.notifications.intervalMs,
+      logger: app.log,
+    }
+  );
   const appointmentService = new AppointmentService(
     new AppointmentRepository(db),
-    communicationService
+    communicationService,
+    notificationService,
+    {
+      googleReviewDelayMinutes:
+        env.notifications.googleReviewDelayMinutes,
+    }
   );
 
   app.get('/health', async () => {
@@ -121,11 +144,12 @@ async function buildApp() {
   const assistantIdentity = assistantIdentityModule.register({ app, db });
   pricesModule.register({ app, db });
 
-  const bookingRepositories = createRepositories(db);
   const availabilityService = new AvailabilityService(bookingRepositories);
   const bookingService = new BookingService(
     bookingRepositories,
-    availabilityService
+    availabilityService,
+    communicationService,
+    notificationService
   );
   const bookingEngine = new BookingEngine({ bookingService });
   const clinicRepository = bookingRepositories.clinics;
@@ -171,6 +195,11 @@ async function buildApp() {
   });
 
   await recoveryWorkerService.runNext();
+
+  notificationScheduler.start();
+  app.addHook('onClose', async () => {
+    notificationScheduler.stop();
+  });
 
   return app;
 }

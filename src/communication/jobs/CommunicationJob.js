@@ -124,7 +124,12 @@ class CommunicationJob {
                 name: lastError?.name || 'Error',
                 code: lastError?.code || 'COMMUNICATION_SEND_FAILED',
                 message: lastError?.message || 'Communication delivery failed.',
-                retryable: this.#isRetryable(lastError)
+                retryable: this.#isRetryable(lastError),
+                statusCode: lastError?.statusCode || null,
+                errorSubcode: lastError?.metaErrorSubcode || null,
+                details:
+                    lastError?.response?.error?.error_data?.details || null,
+                fbtraceId: lastError?.metaTraceId || null
             })
         });
     }

@@ -10,7 +10,16 @@ class NotificationRepository extends BaseRepository {
     super(db, 'appointment_reminders');
   }
 
-  async scheduleReminder({ appointmentId, reminderType, scheduledAt }) {
+  async scheduleReminder({
+    appointmentId,
+    reminderType,
+    scheduledAt,
+  }) {
+    console.info('INSERT into appointment_reminders.', {
+      appointmentId,
+      reminderType,
+      scheduledAt,
+    });
     const result = await this.query(
       `INSERT INTO geniusbot.appointment_reminders (
           appointment_id,
@@ -25,8 +34,13 @@ class NotificationRepository extends BaseRepository {
          status = 'pending',
          updated_at = CURRENT_TIMESTAMP
        RETURNING *`,
-      [appointmentId, reminderType, scheduledAt]
+      [
+        appointmentId,
+        reminderType,
+        scheduledAt,
+      ]
     );
+
     return result.rows[0];
   }
 
@@ -40,6 +54,7 @@ class NotificationRepository extends BaseRepository {
        RETURNING *`,
       [appointmentId]
     );
+
     return result.rows;
   }
 
@@ -48,10 +63,20 @@ class NotificationRepository extends BaseRepository {
       `WITH due AS (
          SELECT ar.id
            FROM geniusbot.appointment_reminders AS ar
-           JOIN geniusbot.appointments AS a ON a.id = ar.appointment_id
+           JOIN geniusbot.appointments AS a
+             ON a.id = ar.appointment_id
           WHERE ar.status = 'pending'
             AND ar.scheduled_at <= CURRENT_TIMESTAMP
-            AND a.status IN ('pending', 'confirmed')
+            AND (
+              (
+                ar.reminder_type IN ('day_before', 'same_day')
+                AND a.status IN ('pending', 'confirmed')
+              )
+              OR (
+                ar.reminder_type IN ('followup', 'google_review')
+                AND a.status = 'completed'
+              )
+            )
           ORDER BY ar.scheduled_at, ar.id
           FOR UPDATE OF ar SKIP LOCKED
           LIMIT $1
@@ -64,26 +89,51 @@ class NotificationRepository extends BaseRepository {
        RETURNING ar.*`,
       [limit]
     );
+
     return result.rows;
   }
 
   async loadDeliveryContext(reminderId) {
     const result = await this.query(
       `SELECT
-          ar.*,
-          a.clinic_id,
-          a.public_reference AS appointment_reference,
-          a.appointment_start,
-          p.id AS patient_id,
-          p.full_name AS patient_name,
-          COALESCE(p.whatsapp_id, p.phone_number) AS recipient
-         FROM geniusbot.appointment_reminders AS ar
-         JOIN geniusbot.appointments AS a ON a.id = ar.appointment_id
-         JOIN geniusbot.patients AS p ON p.id = a.patient_id
-        WHERE ar.id = $1
-        LIMIT 1`,
+         ar.*,
+         a.clinic_id,
+         a.booking_reference AS appointment_reference,
+         a.appointment_start,
+         p.id AS patient_id,
+         p.full_name AS patient_name,
+         COALESCE(
+           p.whatsapp_id,
+           p.phone_number
+         ) AS recipient,
+         s.name AS service_name,
+         d.full_name AS doctor_name,
+         b.name AS branch_name,
+         b.google_maps_url AS review_url,
+         c.name AS clinic_name,
+         c.timezone AS clinic_timezone
+       FROM geniusbot.appointment_reminders AS ar
+       JOIN geniusbot.appointments AS a
+         ON a.id = ar.appointment_id
+       JOIN geniusbot.clinics AS c
+         ON c.id = a.clinic_id
+       JOIN geniusbot.patients AS p
+         ON p.id = a.patient_id
+        AND p.clinic_id = a.clinic_id
+       JOIN geniusbot.services AS s
+         ON s.id = a.service_id
+        AND s.clinic_id = a.clinic_id
+       JOIN geniusbot.branches AS b
+         ON b.id = a.branch_id
+        AND b.clinic_id = a.clinic_id
+       LEFT JOIN geniusbot.doctors AS d
+         ON d.id = a.doctor_id
+        AND d.clinic_id = a.clinic_id
+      WHERE ar.id = $1
+      LIMIT 1`,
       [reminderId]
     );
+
     return result.rows[0] || null;
   }
 
@@ -98,6 +148,7 @@ class NotificationRepository extends BaseRepository {
        RETURNING *`,
       [reminderId]
     );
+
     return result.rows[0] || null;
   }
 
@@ -111,6 +162,7 @@ class NotificationRepository extends BaseRepository {
        RETURNING *`,
       [reminderId]
     );
+
     return result.rows[0] || null;
   }
 }

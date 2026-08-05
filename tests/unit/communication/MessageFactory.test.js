@@ -1,5 +1,8 @@
 'use strict';
 
+const { describe, test } = require('node:test');
+const assert = require('node:assert/strict');
+
 const MessageFactory = require(
     '../../../src/communication/factories/MessageFactory'
 );
@@ -12,12 +15,14 @@ describe('MessageFactory', () => {
 
     const validAppointmentPayload = {
         phone: '966500000000',
+        serviceName: 'Dermatology',
         patientName: 'محمد أحمد',
         doctorName: 'د. نوف الراجحي',
         branchName: 'فرع الروضة',
         roomName: '201',
         appointmentDate: '2026-08-10',
         appointmentTime: '18:00',
+        appointmentNumber: 'APT-1001',
         appointmentId: 'APT-1001',
         patientId: 'PAT-1001',
         clinicId: 'CLN-1001'
@@ -26,8 +31,7 @@ describe('MessageFactory', () => {
     const validThankYouPayload = {
         phone: '966500000000',
         patientName: 'محمد أحمد',
-        clinicName: 'عيادات أوريان',
-        doctorName: 'د. نوف الراجحي',
+        appointmentNumber: 'APT-1001',
         appointmentId: 'APT-1001',
         patientId: 'PAT-1001',
         clinicId: 'CLN-1001'
@@ -40,19 +44,11 @@ describe('MessageFactory', () => {
             validAppointmentPayload
         );
 
-        expect(message).toBeDefined();
-
-        expect(message.type)
-            .toBe(MessageTypes.APPOINTMENT_CONFIRMATION);
-
-        expect(message.channel)
-            .toBe('whatsapp');
-
-        expect(message.recipient.phone)
-            .toBe(validAppointmentPayload.phone);
-
-        expect(message.template.variables.patientName)
-            .toBe(validAppointmentPayload.patientName);
+        assert.ok(message);
+        assert.equal(message.type, MessageTypes.APPOINTMENT_CONFIRMATION);
+        assert.equal(message.channel, 'whatsapp');
+        assert.equal(message.recipient.phone, validAppointmentPayload.phone);
+        assert.equal(message.template.variables.patientName, validAppointmentPayload.patientName);
 
     });
 
@@ -63,19 +59,23 @@ describe('MessageFactory', () => {
             validAppointmentPayload
         );
 
-        expect(message).toBeDefined();
-
-        expect(message.type)
-            .toBe(MessageTypes.APPOINTMENT_REMINDER);
-
-        expect(message.channel)
-            .toBe('whatsapp');
-
-        expect(message.recipient.phone)
-            .toBe(validAppointmentPayload.phone);
-
-        expect(message.template.variables.patientName)
-            .toBe(validAppointmentPayload.patientName);
+        assert.ok(message);
+        assert.equal(message.type, MessageTypes.APPOINTMENT_REMINDER);
+        assert.equal(message.channel, 'whatsapp');
+        assert.equal(message.recipient.phone, validAppointmentPayload.phone);
+        assert.deepEqual(message.template.variables, {
+            patientName: validAppointmentPayload.patientName,
+            serviceName: validAppointmentPayload.serviceName,
+            doctorName: validAppointmentPayload.doctorName,
+            branchName: validAppointmentPayload.branchName,
+            appointmentDate: validAppointmentPayload.appointmentDate,
+            appointmentTime: validAppointmentPayload.appointmentTime,
+            appointmentNumber: validAppointmentPayload.appointmentNumber
+        });
+        assert.equal(
+            Object.hasOwn(message.template.variables, 'roomName'),
+            false
+        );
 
     });
 
@@ -86,44 +86,34 @@ describe('MessageFactory', () => {
             validThankYouPayload
         );
 
-        expect(message).toBeDefined();
-
-        expect(message.type)
-            .toBe(MessageTypes.THANK_YOU);
-
-        expect(message.channel)
-            .toBe('whatsapp');
-
-        expect(message.recipient.phone)
-            .toBe(validThankYouPayload.phone);
-
-        expect(message.template.variables.patientName)
-            .toBe(validThankYouPayload.patientName);
-
-        expect(message.template.variables.clinicName)
-            .toBe(validThankYouPayload.clinicName);
+        assert.ok(message);
+        assert.equal(message.type, MessageTypes.THANK_YOU);
+        assert.equal(message.channel, 'whatsapp');
+        assert.equal(message.recipient.phone, validThankYouPayload.phone);
+        assert.equal(message.template.variables.patientName, validThankYouPayload.patientName);
+        assert.equal(message.template.variables.appointmentNumber, validThankYouPayload.appointmentNumber);
 
     });
 
     test('should throw for unknown message type', () => {
 
-        expect(() => {
+        assert.throws(() => {
             MessageFactory.build(
                 'invalid_type',
                 validAppointmentPayload
             );
-        }).toThrow();
+        });
 
     });
 
     test('should throw when payload is invalid', () => {
 
-        expect(() => {
+        assert.throws(() => {
             MessageFactory.build(
                 MessageTypes.APPOINTMENT_CONFIRMATION,
                 {}
             );
-        }).toThrow();
+        });
 
     });
 

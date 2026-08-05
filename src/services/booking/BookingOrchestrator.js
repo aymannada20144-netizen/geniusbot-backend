@@ -15,7 +15,12 @@ const PriceService = require('../PriceService');
 const NotificationService = require('../NotificationService');
 
 class BookingOrchestrator {
-  constructor(repositories, availabilityService) {
+  constructor(
+    repositories,
+    availabilityService,
+    communicationService = null,
+    notificationService = null
+  ) {
     if (!repositories) {
       throw new Error(
         'BookingOrchestrator requires repositories'
@@ -57,9 +62,12 @@ class BookingOrchestrator {
     this.priceService = repositories.prices
       ? new PriceService(repositories.prices)
       : null;
-    this.notificationService = repositories.notifications
-      ? new NotificationService(repositories.notifications)
-      : null;
+    this.notificationService = notificationService || (repositories.notifications
+      ? new NotificationService(
+          repositories.notifications,
+          communicationService
+        )
+      : null);
   }
 
   async bookAppointment(data = {}) {
@@ -228,13 +236,14 @@ class BookingOrchestrator {
         );
         notification = { scheduled: true };
       } catch (error) {
-        notification = { scheduled: false, reason: 'scheduling_failed' };
-        console.error('Appointment notification scheduling failed.', {
-          appointmentId: appointment.id,
-          clinicId: data.clinic_id,
-          error: error?.message || 'Unknown notification error',
-        });
-      }
+  notification = {
+    scheduled: false,
+    reason: 'scheduling_failed',
+  };
+
+  console.error('Appointment notification scheduling failed.');
+  console.error(error);
+}
     }
 
     return {
