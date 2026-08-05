@@ -239,6 +239,66 @@ class BookingEngine {
       metadata: { reasonCode: result.reason || 'technical_failure' },
     });
   }
+
+  async getAvailableDates(command) {
+    const fields = readFields(
+      command,
+      ['clinicId', 'service', 'branch', 'doctor', 'fromDate', 'searchDays', 'limit'],
+      'BookingEngine available dates command must be a plain object',
+      'BookingEngine received unsupported available dates command field',
+      'BookingEngine does not accept accessor property: availableDatesCommand'
+    );
+    const clinicId = valueOrNull(fields.clinicId);
+    const service = readNested(valueOrNull(fields.service), 'service', ['id']);
+    const branch = readNested(valueOrNull(fields.branch), 'branch', ['id']);
+    const doctor = readNested(valueOrNull(fields.doctor), 'doctor', ['id']);
+    const fromDate = valueOrNull(fields.fromDate);
+    if (!clinicId || !service?.id || !branch?.id || !fromDate) {
+      return { success: false, reason: 'missing_available_dates_input', dates: [] };
+    }
+    const method = findMethod(this.#bookingService, 'getAvailableDates');
+    if (!method) {
+      throw new TypeError('BookingEngine requires bookingService.getAvailableDates()');
+    }
+    return method.call(this.#bookingService, {
+      clinic_id: clinicId,
+      service_id: service.id,
+      branch_id: branch.id,
+      doctor_id: doctor?.id || null,
+      from_date: fromDate,
+      search_days: valueOrNull(fields.searchDays),
+      limit: valueOrNull(fields.limit),
+    });
+  }
+
+  async getAvailableTimes(command) {
+    const fields = readFields(
+      command,
+      ['clinicId', 'service', 'branch', 'doctor', 'date'],
+      'BookingEngine available times command must be a plain object',
+      'BookingEngine received unsupported available times command field',
+      'BookingEngine does not accept accessor property: availableTimesCommand'
+    );
+    const clinicId = valueOrNull(fields.clinicId);
+    const service = readNested(valueOrNull(fields.service), 'service', ['id']);
+    const branch = readNested(valueOrNull(fields.branch), 'branch', ['id']);
+    const doctor = readNested(valueOrNull(fields.doctor), 'doctor', ['id']);
+    const date = valueOrNull(fields.date);
+    if (!clinicId || !service?.id || !branch?.id || !date) {
+      return { success: false, reason: 'missing_available_times_input', times: [] };
+    }
+    const method = findMethod(this.#bookingService, 'getAvailableTimes');
+    if (!method) {
+      throw new TypeError('BookingEngine requires bookingService.getAvailableTimes()');
+    }
+    return method.call(this.#bookingService, {
+      clinic_id: clinicId,
+      service_id: service.id,
+      branch_id: branch.id,
+      doctor_id: doctor?.id || null,
+      date,
+    });
+  }
 }
 
 function readFields(
@@ -533,4 +593,3 @@ function isPlainObject(value) {
 }
 
 module.exports = BookingEngine;
-

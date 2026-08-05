@@ -276,6 +276,35 @@ describe('BookingEngine', () => {
     assert.equal(calls.length, 1);
   });
 
+  test('maps available-time input to the booking service', async () => {
+    let received;
+    const engine = new BookingEngine({
+      bookingService: {
+        bookAppointment: async () => ({ success: false }),
+        getAvailableTimes: async (input) => {
+          received = input;
+          return { success: true, times: ['09:00'] };
+        },
+      },
+    });
+    const result = await engine.getAvailableTimes({
+      clinicId: 'clinic-1',
+      service: { id: 'service-1' },
+      branch: { id: 'branch-1' },
+      doctor: { id: 'doctor-1' },
+      date: '2026-08-06',
+    });
+
+    assert.deepEqual(result.times, ['09:00']);
+    assert.deepEqual(received, {
+      clinic_id: 'clinic-1',
+      service_id: 'service-1',
+      branch_id: 'branch-1',
+      doctor_id: 'doctor-1',
+      date: '2026-08-06',
+    });
+  });
+
   test('has no dependency on src/services/shaden', () => {
     const source = fs.readFileSync(
       path.resolve(
@@ -351,4 +380,3 @@ function successfulServiceResult() {
     },
   };
 }
-

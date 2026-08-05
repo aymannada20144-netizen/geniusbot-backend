@@ -300,6 +300,328 @@ class BookingOrchestrator {
       assignment: resolution.assignment,
     };
   }
+
+  async getAvailableDates(data = {}) {
+    const clinic = await this.repositories.clinics.findById(data.clinic_id);
+    if (!clinic || clinic.is_active !== true || !clinic.timezone) {
+      return { success: false, reason: 'clinic_not_found', dates: [] };
+    }
+    const branch = await this.repositories.branches.findActiveById(
+      data.clinic_id,
+      data.branch_id
+    );
+    const service = await this.repositories.services.findActiveById(
+      data.clinic_id,
+      data.service_id
+    );
+    if (!branch || !service || service.is_booking_enabled !== true) {
+      return { success: false, reason: 'booking_context_not_found', dates: [] };
+    }
+    const intervalMinutes = positiveInteger(
+      service.duration_minutes,
+      Number(service.duration_minutes)
+    );
+    const searchDays = boundedInteger(data.search_days, 30, 1, 31);
+    const limit = boundedInteger(data.limit, 10, 1, 31);
+    const fromDate = parseIsoDate(data.from_date);
+    if (!fromDate) {
+      return { success: false, reason: 'invalid_from_date', dates: [] };
+    }
+    const now = new Date();
+    const earliestStart = now;
+    const windowStart = zonedLocalToDate(fromDate, 0, clinic.timezone);
+    const windowEnd = zonedLocalToDate(
+      addUtcDays(fromDate, searchDays),
+      0,
+      clinic.timezone
+    );
+    const window = await this.repositories.serviceAssignments
+      .findAvailabilityWindow({
+        clinicId: data.clinic_id,
+        branchId: data.branch_id,
+        serviceId: service.id,
+        doctorId: data.doctor_id || null,
+        windowStart,
+        windowEnd,
+        timeZone: clinic.timezone,
+      });
+    const assignments = window.assignments || [];
+    if (!assignments.length) {
+      return { success: true, dates: [] };
+    }
+    const dates = [];
+    for (let offset = 0; offset < searchDays && dates.length < limit; offset += 1) {
+      const date = addUtcDays(fromDate, offset);
+      const slots = availableSlotsForDate({
+        date,
+        branchId: data.branch_id,
+        timeZone: clinic.timezone,
+        durationMinutes: Number(service.duration_minutes),
+        intervalMinutes,
+        earliestStart,
+        assignments,
+        window,
+      });
+      if (slots.length) dates.push(date);
+    }
+    return { success: true, dates };
+  }
+
+  async getAvailableTimes(data = {}) {
+    const date = parseIsoDate(data.date);
+    if (!date) return { success: false, reason: 'invalid_date', times: [] };
+    const clinic = await this.repositories.clinics.findById(data.clinic_id);
+    const branch = await this.repositories.branches.findActiveById(
+      data.clinic_id,
+      data.branch_id
+    );
+    const service = await this.repositories.services.findActiveById(
+      data.clinic_id,
+      data.service_id
+    );
+    if (
+      !clinic || clinic.is_active !== true || !clinic.timezone ||
+      !branch || !service || service.is_booking_enabled !== true
+    ) {
+      return { success: false, reason: 'booking_context_not_found', times: [] };
+    }
+    const windowStart = zonedLocalToDate(date, 0, clinic.timezone);
+    const windowEnd = zonedLocalToDate(addUtcDays(date, 1), 0, clinic.timezone);
+    const window = await this.repositories.serviceAssignments
+      .findAvailabilityWindow({
+        clinicId: data.clinic_id,
+        branchId: data.branch_id,
+        serviceId: service.id,
+        doctorId: data.doctor_id || null,
+        windowStart,
+        windowEnd,
+        timeZone: clinic.timezone,
+      });
+    const assignments = window.assignments || [];
+    if (!assignments.length) return { success: true, times: [] };
+    const times = availableSlotsForDate({
+      date,
+      branchId: data.branch_id,
+      timeZone: clinic.timezone,
+      durationMinutes: Number(service.duration_minutes),
+      intervalMinutes: positiveInteger(
+        service.duration_minutes,
+        Number(service.duration_minutes)
+      ),
+      earliestStart: new Date(),
+      assignments,
+      window,
+    }).map(({ time }) => time);
+    return { success: true, times };
+  }
+}
+
+function boundedInteger(value, fallback, minimum, maximum) {
+  const number = Number(value ?? fallback);
+  return Number.isInteger(number) && number >= minimum && number <= maximum
+    ? number
+    : fallback;
+}
+
+function positiveInteger(value, fallback) {
+  const number = Number(value);
+  return Number.isInteger(number) && number > 0 ? number : fallback;
+}
+
+function parseIsoDate(value) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(value || ''))) return null;
+  const date = new Date(`${value}T00:00:00.000Z`);
+  return Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== value
+    ? null
+    : value;
+}
+
+function addUtcDays(value, count) {
+  const date = new Date(`${value}T00:00:00.000Z`);
+  date.setUTCDate(date.getUTCDate() + count);
+  return date.toISOString().slice(0, 10);
+}
+
+function timeToMinutes(value) {
+  const match = String(value || '').match(/^(\d{2}):(\d{2})/);
+  if (!match) return null;
+  return Number(match[1]) * 60 + Number(match[2]);
+}
+
+function holidayForDate(holidays = [], date, branchId) {
+  const matches = holidays.filter((holiday) =>
+    String(holiday.holiday_date).slice(0, 10) === date
+  );
+  return matches.find((holiday) => holiday.branch_id === branchId) ||
+    matches.find((holiday) => holiday.branch_id == null) || null;
+}
+
+function availableSlotsForDate({
+  date,
+  branchId,
+  timeZone,
+  durationMinutes,
+  intervalMinutes,
+  earliestStart,
+  assignments,
+  window,
+}) {
+  const dayOfWeek = new Date(`${date}T00:00:00.000Z`).getUTCDay();
+  const hours = (window.branch_hours || []).find(
+    (item) => Number(item.day_of_week) === dayOfWeek
+  );
+  if (!hours || hours.is_closed === true) return [];
+  const opensAt = timeToMinutes(hours.opens_at);
+  const closesAt = timeToMinutes(hours.closes_at);
+  if (
+    opensAt === null || closesAt === null ||
+    !Number.isFinite(durationMinutes) || durationMinutes <= 0
+  ) return [];
+  const holiday = holidayForDate(window.holidays, date, branchId);
+  if (holiday?.is_closed === true) return [];
+  const effectiveOpen = holiday?.opens_at
+    ? Math.max(opensAt, timeToMinutes(holiday.opens_at))
+    : opensAt;
+  const effectiveClose = holiday?.closes_at
+    ? Math.min(closesAt, timeToMinutes(holiday.closes_at))
+    : closesAt;
+  const slots = [];
+  for (
+    let minute = effectiveOpen;
+    minute + durationMinutes <= effectiveClose;
+    minute += intervalMinutes
+  ) {
+    const appointmentStart = zonedLocalToDate(date, minute, timeZone);
+    if (appointmentStart < earliestStart) continue;
+    const appointmentEnd = new Date(
+      appointmentStart.getTime() + durationMinutes * 60 * 1000
+    );
+    if (assignments.some((assignment) => assignmentAvailableInWindow(
+      assignment,
+      dayOfWeek,
+      appointmentStart,
+      appointmentEnd,
+      window
+    ))) {
+      slots.push({
+        time: `${padTime(Math.floor(minute / 60))}:${padTime(minute % 60)}`,
+        appointmentStart,
+      });
+    }
+  }
+  return slots;
+}
+
+function padTime(value) {
+  return String(value).padStart(2, '0');
+}
+
+function assignmentAvailableInWindow(
+  assignment,
+  dayOfWeek,
+  start,
+  end,
+  window
+) {
+  if (assignment.requires_doctor && !assignment.doctor_id) return false;
+  if (assignment.requires_room && !assignment.room_id) return false;
+  if (assignment.doctor_id) {
+    const withinDoctorHours = (window.doctor_hours || []).some((hours) =>
+      hours.doctor_id === assignment.doctor_id &&
+      Number(hours.day_of_week) === dayOfWeek &&
+      timeToMinutes(hours.start_time) <= localMinute(start, window.time_zone) &&
+      timeToMinutes(hours.end_time) >= localMinute(end, window.time_zone)
+    );
+    if (!withinDoctorHours) return false;
+    if (overlapsResourceWindow(
+      window.doctor_time_off,
+      'doctor_id',
+      assignment.doctor_id,
+      start,
+      end
+    )) return false;
+    if (overlapsAppointments(window.appointments, 'doctor_id', assignment.doctor_id, start, end)) {
+      return false;
+    }
+  }
+  if (assignment.room_id) {
+    if (overlapsResourceWindow(
+      window.room_time_off,
+      'room_id',
+      assignment.room_id,
+      start,
+      end
+    )) return false;
+    if (overlapsAppointments(window.appointments, 'room_id', assignment.room_id, start, end)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function overlapsResourceWindow(rows = [], field, id, start, end) {
+  return rows.some((row) => row[field] === id && overlaps(
+    row.start_datetime,
+    row.end_datetime,
+    start,
+    end
+  ));
+}
+
+function overlapsAppointments(rows = [], field, id, start, end) {
+  return rows.some((row) => row[field] === id && overlaps(
+    row.appointment_start,
+    row.appointment_end,
+    start,
+    end
+  ));
+}
+
+function overlaps(existingStart, existingEnd, start, end) {
+  return new Date(existingStart) < end && new Date(existingEnd) > start;
+}
+
+function localMinute(value, timeZone) {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone,
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(value);
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return Number(values.hour) * 60 + Number(values.minute);
+}
+
+function zonedLocalToDate(date, minuteOfDay, timeZone) {
+  const [year, month, day] = date.split('-').map(Number);
+  const hour = Math.floor(minuteOfDay / 60);
+  const minute = minuteOfDay % 60;
+  let timestamp = Date.UTC(year, month - 1, day, hour, minute);
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      hourCycle: 'h23',
+    }).formatToParts(new Date(timestamp));
+    const values = Object.fromEntries(
+      parts
+        .filter((part) => part.type !== 'literal')
+        .map((part) => [part.type, Number(part.value)])
+    );
+    const actual = Date.UTC(
+      values.year,
+      values.month - 1,
+      values.day,
+      values.hour,
+      values.minute
+    );
+    timestamp += Date.UTC(year, month - 1, day, hour, minute) - actual;
+  }
+  return new Date(timestamp);
 }
 
 module.exports = BookingOrchestrator;

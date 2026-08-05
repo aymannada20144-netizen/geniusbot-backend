@@ -83,6 +83,8 @@ function named(item) {
 function serviceFact(item) {
   return {
     ...named(item),
+    specialtyId: item.specialty_id || null,
+    isBookingEnabled: item.is_booking_enabled !== false,
     requiresDoctor: item.requires_doctor === true,
     requiresRoom: item.requires_room === true,
   };

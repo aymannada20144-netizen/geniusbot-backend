@@ -65,7 +65,7 @@ function formatCities({ items, selection = false } = {}) {
     if (city && !unique.has(normalizeKey(city))) unique.set(normalizeKey(city), city);
   }
   const values = sortNames([...unique.values()]);
-  const lines = [rtl('🏙️ *المدن المتاحة للحجز*'), '', ...(values.length ? values.map(listItem) : [rtl('لا توجد مدن متاحة للحجز حاليًا.')])];
+  const lines = [rtl('🏙️ اختاري المدينة:'), '', ...(values.length ? values.map(listItem) : [rtl('لا توجد مدن متاحة للحجز حاليًا.')])];
   if (values.length) appendListEnding(lines, selection, 'في أي مدينة تفضّلين الحجز؟ 🌸', 'يمكنني مساعدتكِ في اختيار المدينة المناسبة 🌸');
   return lines.join('\n');
 }

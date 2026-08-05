@@ -283,3 +283,247 @@ describe('Runtime availability boundaries', () => {
     assert.equal(creates, 0);
   });
 });
+
+describe('Available appointment dates', () => {
+  function dateRepositories(overrides = {}) {
+    const branchHours = Array.from({ length: 7 }, (_, dayOfWeek) => ({
+      day_of_week: dayOfWeek,
+      opens_at: '10:00:00',
+      closes_at: '11:00:00',
+      is_closed: false,
+    }));
+    const window = {
+      assignments: [{
+        id: 'assignment-1',
+        doctor_id: ids.doctor,
+        room_id: ids.room,
+        requires_doctor: true,
+        requires_room: true,
+      }],
+      branch_hours: branchHours,
+      doctor_hours: Array.from({ length: 7 }, (_, dayOfWeek) => ({
+        doctor_id: ids.doctor,
+        day_of_week: dayOfWeek,
+        start_time: '10:00:00',
+        end_time: '11:00:00',
+      })),
+      doctor_time_off: [],
+      room_time_off: [],
+      holidays: [],
+      appointments: [],
+      time_zone: 'Asia/Riyadh',
+      ...overrides.window,
+    };
+    let windowCalls = 0;
+    return repositories({
+      patients: {},
+      clinics: {
+        findById: async () => ({
+          id: ids.clinic,
+          is_active: true,
+          timezone: 'Asia/Riyadh',
+        }),
+      },
+      branches: {
+        findActiveById: async () => ({ id: ids.branch, is_active: true }),
+      },
+      services: {
+        findActiveById: async () => ({
+          id: ids.service,
+          is_booking_enabled: true,
+          duration_minutes: overrides.serviceDuration || 30,
+        }),
+      },
+      serviceAssignments: {
+        findAvailabilityWindow: async () => {
+          windowCalls += 1;
+          return window;
+        },
+      },
+      getWindowCalls: () => windowCalls,
+    });
+  }
+
+  test('uses one bulk window read and never checks availability per slot', async () => {
+    let slotChecks = 0;
+    const repos = dateRepositories();
+    const result = await new BookingOrchestrator(repos, {
+      checkAppointmentAvailability: async () => {
+        slotChecks += 1;
+        return { available: true };
+      },
+    }).getAvailableDates({
+      clinic_id: ids.clinic,
+      branch_id: ids.branch,
+      service_id: ids.service,
+      from_date: '2099-01-01',
+      search_days: 30,
+      limit: 10,
+    });
+
+    assert.equal(result.dates.length, 10);
+    assert.equal(repos.getWindowCalls(), 1);
+    assert.equal(slotChecks, 0);
+  });
+
+  test('excludes closed days, holidays, time off, and appointment conflicts', async () => {
+    const fromDate = '2099-01-01';
+    const closedDate = '2099-01-02';
+    const holidayDate = '2099-01-03';
+    const doctorOffDate = '2099-01-04';
+    const roomOffDate = '2099-01-05';
+    const doctorConflictDate = '2099-01-06';
+    const roomConflictDate = '2099-01-07';
+    const closedDay = new Date(`${closedDate}T00:00:00Z`).getUTCDay();
+    const localSlot = (date) => ({
+      start: `${date}T07:00:00.000Z`,
+      end: `${date}T08:00:00.000Z`,
+    });
+    const branchHours = Array.from({ length: 7 }, (_, dayOfWeek) => ({
+      day_of_week: dayOfWeek,
+      opens_at: '10:00:00',
+      closes_at: '11:00:00',
+      is_closed: dayOfWeek === closedDay,
+    }));
+    const repos = dateRepositories({ window: {
+      branch_hours: branchHours,
+      holidays: [{ holiday_date: holidayDate, is_closed: true, branch_id: null }],
+      doctor_time_off: [{
+        doctor_id: ids.doctor,
+        start_datetime: localSlot(doctorOffDate).start,
+        end_datetime: localSlot(doctorOffDate).end,
+      }],
+      room_time_off: [{
+        room_id: ids.room,
+        start_datetime: localSlot(roomOffDate).start,
+        end_datetime: localSlot(roomOffDate).end,
+      }],
+      appointments: [{
+        doctor_id: ids.doctor,
+        room_id: null,
+        appointment_start: localSlot(doctorConflictDate).start,
+        appointment_end: localSlot(doctorConflictDate).end,
+      }, {
+        doctor_id: null,
+        room_id: ids.room,
+        appointment_start: localSlot(roomConflictDate).start,
+        appointment_end: localSlot(roomConflictDate).end,
+      }],
+    } });
+    const result = await new BookingOrchestrator(repos, {})
+      .getAvailableDates({
+        clinic_id: ids.clinic,
+        branch_id: ids.branch,
+        service_id: ids.service,
+        from_date: fromDate,
+        search_days: 8,
+        limit: 10,
+      });
+
+    assert.equal(result.success, true);
+    assert.ok(result.dates.includes(fromDate));
+    for (const rejected of [
+      closedDate,
+      holidayDate,
+      doctorOffDate,
+      roomOffDate,
+      doctorConflictDate,
+      roomConflictDate,
+    ]) assert.equal(result.dates.includes(rejected), false, rejected);
+  });
+
+  test('returns the first ten available dates only', async () => {
+    const repos = dateRepositories();
+    const result = await new BookingOrchestrator(repos, {}).getAvailableDates({
+      clinic_id: ids.clinic,
+      branch_id: ids.branch,
+      service_id: ids.service,
+      from_date: '2099-01-01',
+      search_days: 30,
+      limit: 10,
+    });
+
+    assert.equal(result.dates.length, 10);
+    assert.deepEqual(result.dates.slice(0, 2), ['2099-01-01', '2099-01-02']);
+  });
+
+  test('returns no availability quickly when assignments have no schedules', async () => {
+    const repos = dateRepositories({ window: { doctor_hours: [] } });
+    const started = Date.now();
+    const result = await new BookingOrchestrator(repos, {}).getAvailableDates({
+      clinic_id: ids.clinic,
+      branch_id: ids.branch,
+      service_id: ids.service,
+      from_date: '2099-01-01',
+      search_days: 30,
+      limit: 10,
+    });
+
+    assert.deepEqual(result.dates, []);
+    assert.equal(repos.getWindowCalls(), 1);
+    assert.ok(Date.now() - started < 1000);
+  });
+
+  test('available times reuse the bulk window and exclude doctor and room conflicts', async () => {
+    const repos = dateRepositories({ window: {
+      appointments: [{
+        doctor_id: ids.doctor,
+        room_id: null,
+        appointment_start: '2099-01-01T07:00:00.000Z',
+        appointment_end: '2099-01-01T07:30:00.000Z',
+      }, {
+        doctor_id: null,
+        room_id: ids.room,
+        appointment_start: '2099-01-01T07:30:00.000Z',
+        appointment_end: '2099-01-01T08:00:00.000Z',
+      }],
+    } });
+    let slotChecks = 0;
+    const result = await new BookingOrchestrator(repos, {
+      checkAppointmentAvailability: async () => {
+        slotChecks += 1;
+        return { available: true };
+      },
+    }).getAvailableTimes({
+      clinic_id: ids.clinic,
+      branch_id: ids.branch,
+      service_id: ids.service,
+      date: '2099-01-01',
+    });
+
+    assert.deepEqual(result.times, []);
+    assert.equal(repos.getWindowCalls(), 1);
+    assert.equal(slotChecks, 0);
+  });
+
+  test('available times return only generated slots that pass the shared rules', async () => {
+    const result = await new BookingOrchestrator(dateRepositories(), {})
+      .getAvailableTimes({
+        clinic_id: ids.clinic,
+        branch_id: ids.branch,
+        service_id: ids.service,
+        date: '2099-01-01',
+      });
+
+    assert.deepEqual(result.times, ['10:00', '10:30']);
+  });
+
+  for (const [duration, expected] of [
+    [15, ['10:00', '10:15', '10:30', '10:45']],
+    [30, ['10:00', '10:30']],
+    [60, ['10:00']],
+  ]) {
+    test(`available times honor a ${duration}-minute service duration`, async () => {
+      const result = await new BookingOrchestrator(
+        dateRepositories({ serviceDuration: duration }),
+        {}
+      ).getAvailableTimes({
+        clinic_id: ids.clinic,
+        branch_id: ids.branch,
+        service_id: ids.service,
+        date: '2099-01-01',
+      });
+      assert.deepEqual(result.times, expected);
+    });
+  }
+});

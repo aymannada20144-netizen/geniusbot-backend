@@ -279,13 +279,30 @@ describe('Shaden Phase 1.2 public runtime', () => {
     assert.equal(booking.state.data.shaden.mode, 'idle');
     assert.equal('serviceId' in booking.state.data.shaden, false);
     assert.equal('bookingSelection' in booking.state.data.shaden, false);
-    assert.equal(session.harness.lastSentInput.interaction, undefined);
+    assert.equal(session.harness.lastSentInput.interaction.mode, 'list');
+    assert.equal(
+      session.harness.lastSentInput.interaction.purpose,
+      'select_service'
+    );
+    assert.equal(
+      session.harness.lastSentInput.interaction.displayText,
+      '💎 اختاري الخدمة:'
+    );
+    assert.equal(
+      session.harness.lastSentInput.interaction.listPrompt,
+      'عرض الخدمات'
+    );
     assert.equal(
       session.harness.lastOutgoing.messageText,
       booking.replyText
     );
     assert.match(session.harness.lastOutgoing.waMessageId, /^out-\d+$/);
-    assert.equal(session.harness.lastOutgoing.rawPayload.interaction, null);
+    assert.deepEqual(session.harness.lastOutgoing.rawPayload.interaction, {
+      version: 1,
+      mode: 'list',
+      purpose: 'select_service',
+      optionIds: ['service:service-1', 'service:service-2'],
+    });
     assert.equal(
       session.harness.lastOutgoing.rawPayload.delivery.messageId,
       session.harness.lastOutgoing.waMessageId

@@ -115,7 +115,7 @@ describe('central Shaden list formatting', () => {
   });
 
   test('deduplicates cities and formats booking selection exactly', () => {
-    assert.equal(formatter.formatCities({ items: ['جدة', 'الرياض', 'جدة'], selection: true }), [r('🏙️ *المدن المتاحة للحجز*'), '', r('▪️ الرياض'), r('▪️ جدة'), '', r('في أي مدينة تفضّلين الحجز؟ 🌸')].join('\n'));
+    assert.equal(formatter.formatCities({ items: ['جدة', 'الرياض', 'جدة'], selection: true }), [r('🏙️ اختاري المدينة:'), '', r('▪️ الرياض'), r('▪️ جدة'), '', r('في أي مدينة تفضّلين الحجز؟ 🌸')].join('\n'));
   });
 
   test('keeps payment inquiry separate from payment selection', () => {

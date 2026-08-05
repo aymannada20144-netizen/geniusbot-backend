@@ -180,6 +180,116 @@ class ServiceAssignmentRepository extends BaseRepository {
     return result.rows;
   }
 
+  async findAvailabilityWindow({
+    clinicId,
+    branchId,
+    serviceId,
+    doctorId = null,
+    windowStart,
+    windowEnd,
+    timeZone,
+  }) {
+    const result = await this.query(
+      `WITH eligible_assignments AS (
+         SELECT sa.*, s.requires_doctor, s.requires_room
+           FROM geniusbot.service_assignments sa
+           JOIN geniusbot.services s
+             ON s.id = sa.service_id
+            AND s.clinic_id = sa.clinic_id
+            AND s.is_active IS TRUE
+            AND s.is_booking_enabled IS TRUE
+           LEFT JOIN geniusbot.doctors d ON d.id = sa.doctor_id
+           LEFT JOIN geniusbot.rooms r ON r.id = sa.room_id
+          WHERE sa.clinic_id = $1
+            AND sa.branch_id = $2
+            AND sa.service_id = $3
+            AND sa.is_active IS TRUE
+            AND ($4::uuid IS NULL OR sa.doctor_id = $4)
+            AND (sa.doctor_id IS NULL OR d.is_active IS TRUE)
+            AND (sa.room_id IS NULL OR (
+              r.is_active IS TRUE AND r.branch_id = sa.branch_id
+            ))
+       )
+       SELECT
+         COALESCE((SELECT jsonb_agg(jsonb_build_object(
+                       'id', ea.id,
+                       'doctor_id', ea.doctor_id,
+                       'room_id', ea.room_id,
+                       'requires_doctor', ea.requires_doctor,
+                       'requires_room', ea.requires_room
+                     ) ORDER BY ea.is_default DESC, ea.created_at, ea.id)
+                     FROM eligible_assignments ea), '[]'::jsonb) AS assignments,
+         COALESCE((SELECT jsonb_agg(to_jsonb(bwh) ORDER BY bwh.day_of_week)
+                     FROM geniusbot.branch_working_hours bwh
+                    WHERE bwh.branch_id = $2), '[]'::jsonb) AS branch_hours,
+         COALESCE((SELECT jsonb_agg(jsonb_build_object(
+                       'doctor_id', dwh.doctor_id,
+                       'day_of_week', dwh.day_of_week,
+                       'start_time', dwh.start_time,
+                       'end_time', dwh.end_time
+                     ) ORDER BY dwh.day_of_week, dwh.start_time)
+                     FROM geniusbot.doctor_working_hours dwh
+                    WHERE dwh.branch_id = $2
+                      AND dwh.is_active IS TRUE
+                      AND dwh.doctor_id IN (
+                        SELECT doctor_id FROM eligible_assignments WHERE doctor_id IS NOT NULL
+                      )), '[]'::jsonb) AS doctor_hours,
+         COALESCE((SELECT jsonb_agg(jsonb_build_object(
+                       'doctor_id', dto.doctor_id,
+                       'start_datetime', dto.start_datetime,
+                       'end_datetime', dto.end_datetime
+                     ) ORDER BY dto.start_datetime)
+                     FROM geniusbot.doctor_time_off dto
+                    WHERE dto.doctor_id IN (
+                            SELECT doctor_id FROM eligible_assignments WHERE doctor_id IS NOT NULL
+                          )
+                      AND dto.start_datetime < $6
+                      AND dto.end_datetime > $5), '[]'::jsonb) AS doctor_time_off,
+         COALESCE((SELECT jsonb_agg(jsonb_build_object(
+                       'room_id', rto.room_id,
+                       'start_datetime', rto.start_datetime,
+                       'end_datetime', rto.end_datetime
+                     ) ORDER BY rto.start_datetime)
+                     FROM geniusbot.room_time_off rto
+                    WHERE rto.room_id IN (
+                            SELECT room_id FROM eligible_assignments WHERE room_id IS NOT NULL
+                          )
+                      AND rto.start_datetime < $6
+                      AND rto.end_datetime > $5), '[]'::jsonb) AS room_time_off,
+         COALESCE((SELECT jsonb_agg(to_jsonb(ch) ORDER BY ch.holiday_date, ch.branch_id DESC NULLS LAST)
+                     FROM geniusbot.clinic_holidays ch
+                    WHERE ch.clinic_id = $1
+                      AND (ch.branch_id = $2 OR ch.branch_id IS NULL)
+                      AND ch.holiday_date >= ($5 AT TIME ZONE $7)::date
+                      AND ch.holiday_date < ($6 AT TIME ZONE $7)::date), '[]'::jsonb) AS holidays,
+         COALESCE((SELECT jsonb_agg(jsonb_build_object(
+                       'doctor_id', a.doctor_id,
+                       'room_id', a.room_id,
+                       'appointment_start', a.appointment_start,
+                       'appointment_end', a.appointment_end
+                     ) ORDER BY a.appointment_start)
+                     FROM geniusbot.appointments a
+                    WHERE a.clinic_id = $1
+                      AND a.status IN ('pending', 'confirmed', 'checked_in')
+                      AND a.appointment_start < $6
+                      AND a.appointment_end > $5
+                      AND (
+                        a.doctor_id IN (SELECT doctor_id FROM eligible_assignments WHERE doctor_id IS NOT NULL)
+                        OR a.room_id IN (SELECT room_id FROM eligible_assignments WHERE room_id IS NOT NULL)
+                      )), '[]'::jsonb) AS appointments`,
+      [
+        clinicId,
+        branchId,
+        serviceId,
+        doctorId,
+        windowStart,
+        windowEnd,
+        timeZone,
+      ]
+    );
+    return { ...result.rows[0], time_zone: timeZone };
+  }
+
   /**
    * توافق مؤقت مع BookingOrchestrator الحالي.
    *

@@ -3,6 +3,7 @@
 const ShadenPolicy = require('./ShadenPolicy');
 const {
   parsePreferredStart: parseBookingPreferredStart,
+  DEFAULT_TIME_ZONE,
 } = require('./BookingDateTimeParser');
 
 class ShadenEngine {
@@ -33,6 +34,9 @@ class ShadenEngine {
       : null;
     const customerName = canonicalCustomerName || nextState.customer.name;
     const text = message?.text ?? message;
+    const interactiveReplyId = message && typeof message === 'object'
+      ? message.rawPayload?.value
+      : null;
     let inquiry = this.policy.recognize(text);
 
     // ✅ تفعيل السياق: فهم أسئلة المتابعة القصيرة قبل أي شيء آخر
@@ -81,7 +85,7 @@ class ShadenEngine {
         priceService: this.priceService,
         now: this.clock.now(),
         bookingContext,
-      }).then((reply) => ({ reply, nextState }));
+      }).then((result) => normalizeEngineReply(result, nextState));
     }
 
     if (canonicalCustomerName && nextState.step === 'customer_name') {
@@ -93,10 +97,17 @@ class ShadenEngine {
         nextState.step = null;
         nextState.context = null;
         if (nextState.booking) {
-          return {
-            reply: this.policy.bookingNameCaptured(name, safeData.services, safeData.clinic),
-            nextState,
-          };
+          const choice = bookingServiceChoiceReply(
+            this.policy.bookingNameCaptured(
+              name,
+              bookableServices(safeData.services),
+              safeData.clinic
+            ),
+            nextState.booking,
+            safeData,
+            this.policy
+          );
+          return { ...choice, nextState };
         }
         return { reply: this.policy.nameCaptured(name), nextState };
       }
@@ -104,7 +115,7 @@ class ShadenEngine {
 
     if (inquiry.type === 'booking' && !nextState.booking) {
       const requestedService = inquiry.serviceText
-        ? findNamedSelection(inquiry.serviceText, safeData.services, this.policy)
+        ? findNamedSelection(inquiry.serviceText, bookableServices(safeData.services), this.policy)
         : null;
       if (inquiry.serviceText && !requestedService) {
         return { reply: this.policy.serviceExists(null), nextState };
@@ -119,20 +130,32 @@ class ShadenEngine {
         };
       }
       if (requestedService) {
-        return {
-          reply: advanceFromServiceSelection(nextState.booking, requestedService, safeData, this.policy),
-          nextState,
-        };
+        return normalizeEngineReply(
+          advanceFromServiceSelection(
+            nextState.booking,
+            requestedService,
+            safeData,
+            this.policy
+          ),
+          nextState
+        );
       }
-      return {
-        reply: this.policy.bookingChooseService(safeData.services, safeData.clinic),
-        nextState,
-      };
+      const choice = bookingServiceChoiceReply(
+        this.policy.bookingChooseService(
+          bookableServices(safeData.services),
+          safeData.clinic
+        ),
+        nextState.booking,
+        safeData,
+        this.policy
+      );
+      return { ...choice, nextState };
     }
 
     if (nextState.booking) {
       const bookingReply = handleBookingStep({
         text,
+        interactiveReplyId,
         inquiry,
         data: safeData,
         state: nextState,
@@ -261,20 +284,25 @@ function advanceFromServiceSelection(booking, service, data, policy) {
   const cities = availableCities(data.branches, policy);
   if (cities.length > 1) {
     booking.step = 'city';
-    return policy.bookingChooseCity(cities);
+    return cityListReply(policy.bookingChooseCity(cities), cities, policy);
   }
   booking.city = cities[0] || null;
   booking.step = 'branch';
-  return policy.bookingChooseBranch(branchesForCity(data.branches, booking.city, policy));
+  const branches = branchesForCity(data.branches, booking.city, policy);
+  return branchListReply(policy.bookingChooseBranch(branches), branches, policy);
 }
 
 function emptyBookingState() {
   return {
     step: 'service',
+    specialtyId: null,
     serviceId: null,
     city: null,
     branchId: null,
     doctorId: null,
+    date: null,
+    datePeriod: null,
+    timePeriod: null,
     preferredStart: null,
     paymentMethodId: null,
     insuranceCompanyId: null,
@@ -284,6 +312,7 @@ function emptyBookingState() {
 
 function handleBookingStep({
   text,
+  interactiveReplyId,
   inquiry,
   data,
   state,
@@ -297,8 +326,58 @@ function handleBookingStep({
   const booking = state.booking;
 
   switch (booking.step) {
+    case 'specialty': {
+      const selection = findSpecialtySelection(
+        interactiveReplyId,
+        text,
+        data,
+        policy
+      );
+      if (!selection.matched) {
+        return specialtyListReply(
+          policy.specialties(bookingSpecialties(data), data.clinic),
+          data,
+          policy
+        );
+      }
+      booking.specialtyId = selection.specialtyId;
+      booking.step = 'service';
+      const services = servicesForSpecialty(
+        bookableServices(data.services),
+        selection.specialtyId
+      );
+      const reply = policy.bookingChooseService(services, data.clinic);
+      if (services.length > 10) {
+        console.warn('BOOKING_SPECIALTY_SERVICE_LIST_LIMIT_EXCEEDED', {
+          specialtyId: selection.specialtyId,
+          serviceCount: services.length,
+        });
+        return reply;
+      }
+      return serviceListReply(reply, services, policy);
+    }
+
     case 'service': {
-      const service = findNamedSelection(text, data.services, policy);
+      const availableServices = booking.specialtyId == null
+        ? bookableServices(data.services)
+        : servicesForSpecialty(
+          bookableServices(data.services),
+          booking.specialtyId
+        );
+      if (booking.specialtyId == null && availableServices.length > 10) {
+        booking.step = 'specialty';
+        return specialtyListReply(
+          policy.specialties(bookingSpecialties(data), data.clinic),
+          data,
+          policy
+        );
+      }
+      const service = findServiceSelection(
+        interactiveReplyId,
+        text,
+        availableServices,
+        policy
+      );
       if (service) {
         booking.serviceId = service.id;
         const cities = availableCities(data.branches, policy);
@@ -308,37 +387,58 @@ function handleBookingStep({
         if (mentionedCity) {
           booking.city = mentionedCity;
           booking.step = 'branch';
-          return policy.bookingChooseBranch(branchesForCity(data.branches, mentionedCity, policy));
+          const branches = branchesForCity(data.branches, mentionedCity, policy);
+          return branchListReply(policy.bookingChooseBranch(branches), branches, policy);
         }
         if (cities.length > 1) {
           booking.step = 'city';
-          return policy.bookingChooseCity(cities);
+          return cityListReply(policy.bookingChooseCity(cities), cities, policy);
         }
         booking.city = cities[0] || null;
         booking.step = 'branch';
-        return policy.bookingChooseBranch(branchesForCity(data.branches, booking.city, policy));
+        const branches = branchesForCity(data.branches, booking.city, policy);
+        return branchListReply(policy.bookingChooseBranch(branches), branches, policy);
       }
-      return bookingKnowledgeOrReminder({
+      const reply = bookingKnowledgeOrReminder({
         inquiry,
         data,
         state,
         policy,
         replyFor,
         customerName,
-        reminder: policy.bookingChooseService(data.services, data.clinic),
+        reminder: policy.bookingChooseService(availableServices, data.clinic),
       });
+      return serviceListReply(reply, availableServices, policy);
     }
 
     case 'city': {
-      const directBranch = findBranchSelection(text, data.branches, policy);
+      const cities = availableCities(data.branches, policy);
+      const hasCityReplyId = typeof interactiveReplyId === 'string' &&
+        interactiveReplyId.startsWith('city:');
+      const directBranch = hasCityReplyId
+        ? null
+        : findBranchSelection(null, text, data.branches, policy);
       if (directBranch) {
         booking.city = directBranch.city || null;
         booking.branchId = directBranch.id;
-        booking.step = 'availability';
-        return policy.bookingAskAvailability();
+        booking.date = null;
+        booking.datePeriod = null;
+        booking.timePeriod = null;
+        booking.step = 'date_period';
+        return bookingDatePeriodListReply({
+          booking,
+          data,
+          policy,
+          bookingEngine,
+          bookingContext,
+          now,
+        });
       }
-      const selectedCity = availableCities(data.branches, policy).find(
-        city => policy.normalize(city) === policy.normalize(text)
+      const selectedCity = findCitySelection(
+        interactiveReplyId,
+        text,
+        cities,
+        policy
       );
       if (selectedCity) {
         booking.city = selectedCity;
@@ -346,21 +446,37 @@ function handleBookingStep({
         booking.doctorId = null;
         booking.preferredStart = null;
         booking.step = 'branch';
-        return policy.bookingChooseBranch(branchesForCity(data.branches, selectedCity, policy));
+        const branches = branchesForCity(data.branches, selectedCity, policy);
+        return branchListReply(policy.bookingChooseBranch(branches), branches, policy);
       }
-      return policy.bookingChooseCity(availableCities(data.branches, policy));
+      return cityListReply(policy.bookingChooseCity(cities), cities, policy);
     }
 
     case 'branch': {
       const candidates = branchesForCity(data.branches, booking.city, policy);
-      const branch = findBranchSelection(text, candidates, policy);
+      const branch = findBranchSelection(
+        interactiveReplyId,
+        text,
+        candidates,
+        policy
+      );
       if (branch) {
         booking.city = branch.city || booking.city;
         booking.branchId = branch.id;
-        booking.step = 'availability';
-        return policy.bookingAskAvailability();
+        booking.date = null;
+        booking.datePeriod = null;
+        booking.timePeriod = null;
+        booking.step = 'date_period';
+        return bookingDatePeriodListReply({
+          booking,
+          data,
+          policy,
+          bookingEngine,
+          bookingContext,
+          now,
+        });
       }
-      return bookingKnowledgeOrReminder({
+      return branchListReply(bookingKnowledgeOrReminder({
         inquiry,
         data,
         state,
@@ -368,11 +484,57 @@ function handleBookingStep({
         replyFor,
         customerName,
         reminder: policy.bookingChooseBranch(candidates),
-      });
+      }), candidates, policy);
     }
 
     case 'doctor':
       return policy.bookingAskAvailability();
+
+    case 'date_period':
+      return handleBookingDatePeriodStep({
+        interactiveReplyId,
+        booking,
+        data,
+        bookingEngine,
+        bookingContext,
+        now,
+      });
+
+    case 'date':
+      return handleBookingDateStep({
+        text,
+        interactiveReplyId,
+        booking,
+        data,
+        policy,
+        bookingEngine,
+        bookingContext,
+        now,
+      });
+
+    case 'time_period':
+      return handleBookingTimePeriodStep({
+        text,
+        interactiveReplyId,
+        booking,
+        data,
+        policy,
+        bookingEngine,
+        bookingContext,
+        now,
+      });
+
+    case 'time':
+      return handleBookingTimeStep({
+        text,
+        interactiveReplyId,
+        booking,
+        data,
+        policy,
+        bookingEngine,
+        bookingContext,
+        now,
+      });
 
     case 'availability': {
       const branch = findById(data.branches, booking.branchId);
@@ -380,7 +542,7 @@ function handleBookingStep({
         text,
         booking.preferredStart,
         policy,
-        { timeZone: branch?.timezone || 'Asia/Riyadh', now }
+      { timeZone: branch?.timezone || DEFAULT_TIME_ZONE, now }
       );
       if (availability.complete) {
         booking.preferredStart = availability.value;
@@ -836,6 +998,780 @@ function paymentMethodReply(reply, paymentMethods, policy) {
   };
 }
 
+function serviceListReply(reply, services, policy) {
+  if (!Array.isArray(services)) return { reply };
+  const options = services.map((service) => ({
+    id: `service:${String(service?.id ?? '')}`,
+    label: policy.display(service?.name),
+  }));
+  const ids = new Set(options.map((option) => option.id));
+  if (
+    options.length < 1 ||
+    options.length > 10 ||
+    ids.size !== options.length ||
+    options.some((option) =>
+      option.id === 'service:' ||
+      option.id.length > 200 ||
+      !option.label.trim() ||
+      option.label.length > 24
+    )
+  ) return { reply };
+
+  return {
+    reply,
+    interaction: {
+      version: 1,
+      mode: 'list',
+      purpose: 'select_service',
+      displayText: '💎 اختاري الخدمة:',
+      listPrompt: 'عرض الخدمات',
+      options,
+    },
+  };
+}
+
+function cityListReply(reply, cities, policy) {
+  if (!Array.isArray(cities)) return { reply };
+  const options = cities.map((city) => ({
+    id: cityReplyId(city, policy),
+    label: policy.display(city),
+  }));
+  if (
+    options.length < 1 ||
+    options.length > 10 ||
+    new Set(options.map(({ id }) => id)).size !== options.length ||
+    options.some(({ id, label }) =>
+      id === 'city:' || id.length > 200 || !label.trim() || label.length > 24
+    )
+  ) {
+    console.warn('BOOKING_CITY_LIST_FALLBACK', {
+      cityCount: options.length,
+    });
+    return { reply };
+  }
+  return {
+    reply,
+    interaction: {
+      version: 1,
+      mode: 'list',
+      purpose: 'select_city',
+      displayText: '🏙️ اختاري المدينة:',
+      listPrompt: 'عرض المدن',
+      options,
+    },
+  };
+}
+
+function branchListReply(reply, branches, policy) {
+  if (!Array.isArray(branches)) return { reply };
+  const uniqueBranches = new Map();
+  for (const branch of branches) {
+    const id = String(branch?.id ?? '');
+    if (id && !uniqueBranches.has(id)) uniqueBranches.set(id, branch);
+  }
+  const options = [...uniqueBranches.values()].map((branch) => ({
+    id: `branch:${String(branch.id)}`,
+    label: policy.display(policy.cleanBranchName(branch.name)),
+  }));
+  if (
+    options.length < 1 ||
+    options.length > 10 ||
+    options.some(({ id, label }) =>
+      id === 'branch:' || id.length > 200 || !label.trim() || label.length > 24
+    )
+  ) {
+    console.warn('BOOKING_BRANCH_LIST_FALLBACK', {
+      branchCount: options.length,
+    });
+    return { reply };
+  }
+  return {
+    reply,
+    interaction: {
+      version: 1,
+      mode: 'list',
+      purpose: 'select_branch',
+      displayText: '📍 اختاري الفرع:',
+      listPrompt: 'عرض الفروع',
+      options,
+    },
+  };
+}
+
+async function bookingDatePeriodListReply({
+  booking,
+  data,
+  bookingEngine,
+  bookingContext,
+  now,
+}) {
+  const dates = await loadAvailableBookingDates({
+    booking,
+    data,
+    bookingEngine,
+    bookingContext,
+    now,
+  });
+  const branch = findById(data.branches, booking.branchId);
+  return datePeriodListReply(availableDatePeriods(dates, branch, now));
+}
+
+async function handleBookingDatePeriodStep({
+  interactiveReplyId,
+  booking,
+  data,
+  bookingEngine,
+  bookingContext,
+  now,
+}) {
+  const branch = findById(data.branches, booking.branchId);
+  const dates = await loadAvailableBookingDates({
+    booking,
+    data,
+    bookingEngine,
+    bookingContext,
+    now,
+  });
+  const periods = availableDatePeriods(dates, branch, now);
+  const selected = typeof interactiveReplyId === 'string' &&
+    interactiveReplyId.startsWith('date-period:')
+    ? interactiveReplyId.slice('date-period:'.length)
+    : null;
+  if (!periods.some(({ id }) => id === selected)) {
+    return datePeriodListReply(periods);
+  }
+  booking.datePeriod = selected;
+  booking.step = 'date';
+  return dateListReply(
+    dates.filter((date) => dateInPeriod(date, selected)),
+    branch,
+    now
+  );
+}
+
+async function handleBookingDateStep({
+  text,
+  interactiveReplyId,
+  booking,
+  data,
+  policy,
+  bookingEngine,
+  bookingContext,
+  now,
+}) {
+  const branch = findById(data.branches, booking.branchId);
+  const dates = await loadAvailableBookingDates({
+    booking,
+    data,
+    bookingEngine,
+    bookingContext,
+    now,
+  });
+  if (!dates.length) return dateListReply(dates, branch, now);
+  const parsed = parseBookingPreferredStart(
+    text,
+    null,
+    policy,
+    { timeZone: branch?.timezone || 'Asia/Riyadh', now }
+  );
+  const replyDate = typeof interactiveReplyId === 'string' &&
+    interactiveReplyId.startsWith('date:')
+    ? interactiveReplyId.slice('date:'.length)
+    : parsed.date
+      ? isoDate(parsed.date)
+      : null;
+  const periodDates = booking.datePeriod
+    ? dates.filter((date) => dateInPeriod(date, booking.datePeriod))
+    : dates;
+  const interactiveDate = typeof interactiveReplyId === 'string' &&
+    interactiveReplyId.startsWith('date:');
+  const validDate = dates.includes(replyDate) &&
+    (!interactiveDate || periodDates.includes(replyDate));
+  if (!replyDate || !validDate) {
+    return dateListReply(periodDates, branch, now);
+  }
+  booking.date = replyDate;
+  booking.datePeriod = null;
+  booking.timePeriod = null;
+  if (parsed.complete) {
+    booking.preferredStart = parsed.value;
+    return validateEarlyAvailability({
+      booking,
+      data,
+      policy,
+      bookingEngine,
+      bookingContext,
+      parsedAvailability: parsed,
+    });
+  }
+  booking.preferredStart = null;
+  booking.step = 'time_period';
+  return bookingTimePeriodListReply({
+    booking,
+    data,
+    bookingEngine,
+    bookingContext,
+  });
+}
+
+async function loadAvailableBookingDates({
+  booking,
+  data,
+  bookingEngine,
+  bookingContext,
+  now,
+}) {
+  if (!bookingEngine || typeof bookingEngine.getAvailableDates !== 'function') {
+    return [];
+  }
+  const branch = findById(data.branches, booking.branchId);
+  if (!branch) return [];
+  const timeZone = branch.timezone || DEFAULT_TIME_ZONE;
+  const fromDate = localIsoDate(now, timeZone);
+  const searchDays = daysRemainingInMonth(fromDate);
+  try {
+    const result = await bookingEngine.getAvailableDates({
+      clinicId: bookingContext?.clinicId || data.clinic.id || null,
+      service: { id: booking.serviceId },
+      branch: { id: booking.branchId },
+      doctor: booking.doctorId ? { id: booking.doctorId } : null,
+      fromDate,
+      searchDays,
+      limit: searchDays,
+    });
+    return Array.isArray(result?.dates)
+      ? result.dates.filter((date) =>
+        isIsoDate(date) && date >= fromDate && sameIsoMonth(date, fromDate)
+      )
+      : [];
+  } catch (error) {
+    console.error('BOOKING_AVAILABLE_DATES_FAILED', {
+      code: error?.code || null,
+    });
+    return [];
+  }
+}
+
+async function bookingTimePeriodListReply(context) {
+  const times = await loadAvailableBookingTimes(context);
+  return timePeriodListReply(availableTimePeriods(times));
+}
+
+async function handleBookingTimePeriodStep({
+  text,
+  interactiveReplyId,
+  booking,
+  data,
+  policy,
+  bookingEngine,
+  bookingContext,
+  now,
+}) {
+  const times = await loadAvailableBookingTimes({
+    booking,
+    data,
+    bookingEngine,
+    bookingContext,
+  });
+  const parsedTime = parseSelectedBookingTime(text, booking, data, policy, now);
+  if (parsedTime && times.includes(parsedTime.time)) {
+    return acceptBookingTime({
+      time: parsedTime.time,
+      parsedAvailability: parsedTime.parsed,
+      booking,
+      data,
+      policy,
+      bookingEngine,
+      bookingContext,
+    });
+  }
+  const periods = availableTimePeriods(times);
+  const selected = typeof interactiveReplyId === 'string' &&
+    interactiveReplyId.startsWith('time-period:')
+    ? interactiveReplyId.slice('time-period:'.length)
+    : null;
+  if (!periods.some(({ id }) => id === selected)) {
+    return timePeriodListReply(periods);
+  }
+  booking.timePeriod = selected;
+  booking.step = 'time';
+  return timeListReply(timePeriodSlots(times, selected));
+}
+
+async function handleBookingTimeStep({
+  text,
+  interactiveReplyId,
+  booking,
+  data,
+  policy,
+  bookingEngine,
+  bookingContext,
+  now,
+}) {
+  const times = await loadAvailableBookingTimes({
+    booking,
+    data,
+    bookingEngine,
+    bookingContext,
+  });
+  const interactiveTime = typeof interactiveReplyId === 'string' &&
+    interactiveReplyId.startsWith('time:')
+    ? interactiveReplyId.slice('time:'.length)
+    : null;
+  const parsedTime = interactiveTime
+    ? parseSelectedBookingTime(interactiveTime, booking, data, policy, now)
+    : parseSelectedBookingTime(text, booking, data, policy, now);
+  const periodTimes = booking.timePeriod
+    ? timePeriodSlots(times, booking.timePeriod)
+    : times;
+  const valid = parsedTime && times.includes(parsedTime.time) &&
+    (!interactiveTime || periodTimes.includes(parsedTime.time));
+  if (!valid) return timeListReply(periodTimes);
+  return acceptBookingTime({
+    time: parsedTime.time,
+    parsedAvailability: parsedTime.parsed,
+    booking,
+    data,
+    policy,
+    bookingEngine,
+    bookingContext,
+  });
+}
+
+async function acceptBookingTime({
+  parsedAvailability,
+  booking,
+  data,
+  policy,
+  bookingEngine,
+  bookingContext,
+}) {
+  booking.preferredStart = parsedAvailability.value;
+  const selectedPeriod = booking.timePeriod;
+  booking.timePeriod = null;
+  const result = await validateEarlyAvailability({
+    booking,
+    data,
+    policy,
+    bookingEngine,
+    bookingContext,
+    parsedAvailability,
+  });
+  if (booking.step !== 'availability') return result;
+  booking.preferredStart = null;
+  booking.timePeriod = selectedPeriod;
+  booking.step = 'time';
+  const times = await loadAvailableBookingTimes({
+    booking,
+    data,
+    bookingEngine,
+    bookingContext,
+  });
+  return prependReply(
+    'عذرًا، الوقت المختار لم يعد متاحًا. اختاري وقتًا آخر. 🌸',
+    timeListReply(timePeriodSlots(times, selectedPeriod))
+  );
+}
+
+function parseSelectedBookingTime(text, booking, data, policy, now) {
+  const branch = findById(data.branches, booking.branchId);
+  const parsed = parseBookingPreferredStart(
+    text,
+    booking.date ? `date:${booking.date}` : null,
+    policy,
+    { timeZone: branch?.timezone || DEFAULT_TIME_ZONE, now }
+  );
+  if (!parsed.complete) return null;
+  return {
+    parsed,
+    time: `${pad(parsed.time.hour)}:${pad(parsed.time.minute)}`,
+  };
+}
+
+async function loadAvailableBookingTimes({
+  booking,
+  data,
+  bookingEngine,
+  bookingContext,
+}) {
+  if (!bookingEngine || typeof bookingEngine.getAvailableTimes !== 'function') {
+    return [];
+  }
+  try {
+    const result = await bookingEngine.getAvailableTimes({
+      clinicId: bookingContext?.clinicId || data.clinic.id || null,
+      service: { id: booking.serviceId },
+      branch: { id: booking.branchId },
+      doctor: booking.doctorId ? { id: booking.doctorId } : null,
+      date: booking.date,
+    });
+    return Array.isArray(result?.times)
+      ? [...new Set(result.times.filter(isTimeValue))].sort()
+      : [];
+  } catch (error) {
+    console.error('BOOKING_AVAILABLE_TIMES_FAILED', { code: error?.code || null });
+    return [];
+  }
+}
+
+const TIME_PERIODS = Object.freeze([
+  { id: 'morning', label: '🕘 صباح', start: '08:00', end: '11:59' },
+  { id: 'noon', label: '🕐 ظهر', start: '12:00', end: '15:59' },
+  { id: 'afternoon', label: '🌆 عصر', start: '16:00', end: '18:59' },
+  { id: 'evening', label: '🌙 مساء', start: '19:00', end: '23:59' },
+]);
+
+function availableTimePeriods(times) {
+  const periods = [];
+  for (const base of TIME_PERIODS) {
+    const matching = times.filter((time) => timeInBasePeriod(time, base));
+    const chunks = [];
+    for (let index = 0; index < matching.length; index += 10) {
+      chunks.push(matching.slice(index, index + 10));
+    }
+    chunks.forEach((slots, index) => {
+      const split = chunks.length > 1;
+      periods.push({
+        id: split ? `${base.id}-${index + 1}` : base.id,
+        label: split
+          ? `${base.label} ${index === 0 ? 'مبكر' : 'متأخر'}`
+          : base.label,
+        start: slots[0],
+        end: slots[slots.length - 1],
+        slots,
+      });
+    });
+  }
+  return periods;
+}
+
+function timeInBasePeriod(time, period) {
+  return time >= period.start && time <= period.end;
+}
+
+function timePeriodSlots(times, periodId) {
+  return availableTimePeriods(times).find(({ id }) => id === periodId)?.slots || [];
+}
+
+function timePeriodListReply(periods) {
+  if (!periods.length) {
+    return 'لا توجد مواعيد متاحة في هذا التاريخ حاليًا. 🌸';
+  }
+  return {
+    reply: '🕘 اختاري الفترة الزمنية:',
+    interaction: {
+      version: 1,
+      mode: 'list',
+      purpose: 'select_time_period',
+      displayText: '🕘 اختاري الفترة الزمنية:',
+      listPrompt: 'عرض الفترات',
+      options: periods.map(({ id, label, start, end }) => ({
+        id: `time-period:${id}`,
+        label,
+        description: `${start} → ${end}`,
+      })),
+    },
+  };
+}
+
+function timeListReply(times) {
+  if (!times.length) {
+    return 'لا توجد مواعيد متاحة في هذه الفترة حاليًا. 🌸';
+  }
+  return {
+    reply: '🕒 اختاري الوقت:',
+    interaction: {
+      version: 1,
+      mode: 'list',
+      purpose: 'select_time',
+      displayText: '🕒 اختاري الوقت:',
+      listPrompt: 'عرض المواعيد',
+      options: times.map((time) => ({
+        id: `time:${time}`,
+        label: displayTime(time),
+      })),
+    },
+  };
+}
+
+function displayTime(time) {
+  const [hourText, minute] = time.split(':');
+  const hour = Number(hourText);
+  const suffix = hour < 12 ? 'ص' : 'م';
+  const displayHour = hour % 12 || 12;
+  return `${pad(displayHour)}:${minute} ${suffix}`;
+}
+
+function isTimeValue(value) {
+  return /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(String(value || ''));
+}
+
+function prependReply(prefix, response) {
+  if (typeof response === 'string') return `${prefix}\n${response}`;
+  return { ...response, reply: `${prefix}\n${response.reply}` };
+}
+
+function dateListReply(dates, branch, now) {
+  if (!dates.length) {
+    return 'لا توجد مواعيد متاحة للحجز خلال الشهر الحالي. 🌸';
+  }
+  const timeZone = branch?.timezone || DEFAULT_TIME_ZONE;
+  const today = localIsoDate(now, timeZone);
+  const tomorrow = addIsoDays(today, 1);
+  return {
+    reply: '📅 اختاري التاريخ:',
+    interaction: {
+      version: 1,
+      mode: 'list',
+      purpose: 'select_date',
+      displayText: '📅 اختاري التاريخ:',
+      listPrompt: 'عرض التواريخ',
+      options: dates.map((date) => ({
+        id: `date:${date}`,
+        label: date === today
+          ? 'اليوم'
+          : date === tomorrow
+            ? 'غدًا'
+            : formatDatePart(date, timeZone, { weekday: 'long' }),
+        description: formatDatePart(date, timeZone, {
+          weekday: 'long',
+          day: 'numeric',
+          month: 'long',
+        }),
+      })),
+    },
+  };
+}
+
+function datePeriodListReply(periods) {
+  if (!periods.length) {
+    return 'لا توجد مواعيد متاحة للحجز خلال الشهر الحالي. 🌸';
+  }
+  return {
+    reply: '📅 اختاري الفترة:',
+    interaction: {
+      version: 1,
+      mode: 'list',
+      purpose: 'select_date_period',
+      displayText: '📅 اختاري الفترة:',
+      listPrompt: 'عرض الفترات',
+      options: periods.map(({ id, label }) => ({
+        id: `date-period:${id}`,
+        label,
+      })),
+    },
+  };
+}
+
+function availableDatePeriods(dates, branch, now) {
+  const timeZone = branch?.timezone || DEFAULT_TIME_ZONE;
+  const today = localIsoDate(now, timeZone);
+  const monthEnd = daysInIsoMonth(today);
+  const periods = [];
+  for (let start = 1; start <= monthEnd; start += 10) {
+    const end = Math.min(start + 9, monthEnd);
+    periods.push({
+      id: `${start}-${end}`,
+      start,
+      end,
+      label: start === end ? String(start) : `${start}–${end}`,
+    });
+  }
+  return periods.filter((period) => dates.some((date) =>
+    date >= today && sameIsoMonth(date, today) &&
+    isoDay(date) >= period.start && isoDay(date) <= period.end
+  ));
+}
+
+function dateInPeriod(date, period) {
+  const match = String(period || '').match(/^(\d{1,2})-(\d{1,2})$/);
+  if (!match) return false;
+  const start = Number(match[1]);
+  const end = Number(match[2]);
+  if (start < 1 || end < start || end - start >= 10) return false;
+  const day = isoDay(date);
+  return day >= start && day <= end;
+}
+
+function isoDay(date) {
+  return Number(String(date).slice(8, 10));
+}
+
+function sameIsoMonth(left, right) {
+  return String(left).slice(0, 7) === String(right).slice(0, 7);
+}
+
+function daysInIsoMonth(date) {
+  const [year, month] = date.split('-').map(Number);
+  return new Date(Date.UTC(year, month, 0)).getUTCDate();
+}
+
+function daysRemainingInMonth(date) {
+  return daysInIsoMonth(date) - isoDay(date) + 1;
+}
+
+function localIsoDate(value, timeZone) {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(value instanceof Date ? value : new Date(value));
+  const values = Object.fromEntries(
+    parts
+      .filter((part) => part.type !== 'literal')
+      .map((part) => [part.type, part.value])
+  );
+  return `${values.year}-${values.month}-${values.day}`;
+}
+
+function formatDatePart(date, timeZone, options) {
+  return new Intl.DateTimeFormat('ar-SA-u-ca-gregory', {
+    timeZone,
+    ...options,
+  }).format(new Date(`${date}T12:00:00.000Z`));
+}
+
+function isIsoDate(value) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(value || ''))) return false;
+  const date = new Date(`${value}T00:00:00.000Z`);
+  return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
+}
+
+function isoDate(parts) {
+  return `${parts.year}-${pad(parts.month)}-${pad(parts.day)}`;
+}
+
+function addIsoDays(date, count) {
+  const value = new Date(`${date}T00:00:00.000Z`);
+  value.setUTCDate(value.getUTCDate() + count);
+  return value.toISOString().slice(0, 10);
+}
+
+function bookingServiceChoiceReply(reply, booking, data, policy) {
+  const services = bookableServices(data.services);
+  booking.specialtyId = null;
+  if (services.length <= 10) {
+    booking.step = 'service';
+    return serviceListReply(reply, services, policy);
+  }
+  booking.step = 'specialty';
+  return specialtyListReply(
+    policy.specialties(bookingSpecialties(data), data.clinic),
+    data,
+    policy
+  );
+}
+
+function specialtyListReply(reply, data, policy) {
+  const specialties = bookingSpecialties(data);
+  const options = specialties.map((specialty) => ({
+    id: specialty.id === 'uncategorized'
+      ? 'specialty:uncategorized'
+      : `specialty:${specialty.id}`,
+    label: policy.display(specialty.name),
+  }));
+  const fallbackReason = specialtyListFallbackReason(options);
+  if (fallbackReason) {
+    console.warn('BOOKING_SPECIALTY_LIST_FALLBACK', {
+      reason: fallbackReason,
+      specialtyCount: options.length,
+    });
+    if (options.length > 10) {
+      console.warn('BOOKING_SPECIALTY_LIST_LIMIT_EXCEEDED', {
+        specialtyCount: options.length,
+      });
+    }
+    return { reply, fallbackReason };
+  }
+  return {
+    reply,
+    interaction: {
+      version: 1,
+      mode: 'list',
+      purpose: 'select_specialty',
+      displayText: '💎 اختاري التخصص:',
+      listPrompt: 'عرض التخصصات',
+      options,
+    },
+  };
+}
+
+function specialtyListFallbackReason(options) {
+  if (!Array.isArray(options)) return 'EMPTY_ROWS';
+  if (options.length < 1) return 'NO_SPECIALTIES';
+  if (options.length > 10) return 'TOO_MANY_SPECIALTIES';
+  if (new Set(options.map(({ id }) => id)).size !== options.length) {
+    return 'DUPLICATE_ROWS';
+  }
+  if (options.some(({ id }) => !id || id.length > 200)) {
+    return 'INVALID_SPECIALTY_ID';
+  }
+  if (options.some(({ label }) => !label || label.length > 24)) {
+    return 'INVALID_TITLE';
+  }
+  return null;
+}
+
+function bookableServices(services) {
+  return services.filter((service) => service.isBookingEnabled !== false);
+}
+
+function bookingSpecialties(data) {
+  const services = bookableServices(data.services);
+  const usedIds = new Set(
+    services
+      .map(({ specialtyId }) => normalizedSpecialtyId(specialtyId))
+      .filter(Boolean)
+  );
+  const specialties = data.specialties.filter((specialty) =>
+    usedIds.has(String(specialty.id))
+  );
+  if (services.some(({ specialtyId }) => !normalizedSpecialtyId(specialtyId))) {
+    specialties.push({ id: 'uncategorized', name: 'خدمات أخرى' });
+  }
+  return specialties;
+}
+
+function servicesForSpecialty(services, specialtyId) {
+  if (specialtyId === 'uncategorized') {
+    return services.filter(({ specialtyId: id }) => !normalizedSpecialtyId(id));
+  }
+  return services.filter(({ specialtyId: id }) =>
+    normalizedSpecialtyId(id) === specialtyId
+  );
+}
+
+function normalizedSpecialtyId(value) {
+  if (value === null || value === undefined) return null;
+  const id = String(value);
+  return id === '00000000-0000-0000-0000-000000000000' ? null : id;
+}
+
+function findSpecialtySelection(interactiveReplyId, text, data, policy) {
+  const specialties = bookingSpecialties(data);
+  if (interactiveReplyId === 'specialty:uncategorized') {
+    return {
+      matched: specialties.some(({ id }) => id === 'uncategorized'),
+      specialtyId: 'uncategorized',
+    };
+  }
+  if (
+    typeof interactiveReplyId === 'string' &&
+    interactiveReplyId.startsWith('specialty:')
+  ) {
+    const specialtyId = interactiveReplyId.slice('specialty:'.length);
+    return {
+      matched: specialties.some(({ id }) => String(id) === specialtyId),
+      specialtyId,
+    };
+  }
+  const specialty = findNamedSelection(text, specialties, policy);
+  return specialty
+    ? { matched: true, specialtyId: String(specialty.id) }
+    : { matched: false, specialtyId: null };
+}
+
 function insuranceCompanyReply(reply, insuranceCompanies, policy) {
   if (!Array.isArray(insuranceCompanies)) return reply;
   const options = insuranceCompanies.map((insuranceCompany) => ({
@@ -934,7 +1870,43 @@ function findNamedSelection(text, items, policy) {
   }) || null;
 }
 
-function findBranchSelection(text, branches, policy) {
+function findServiceSelection(interactiveReplyId, text, services, policy) {
+  if (
+    typeof interactiveReplyId === 'string' &&
+    interactiveReplyId.startsWith('service:')
+  ) {
+    const serviceId = interactiveReplyId.slice('service:'.length);
+    return services.find((service) => String(service.id) === serviceId) || null;
+  }
+  return findNamedSelection(text, services, policy);
+}
+
+function findCitySelection(interactiveReplyId, text, cities, policy) {
+  if (
+    typeof interactiveReplyId === 'string' &&
+    interactiveReplyId.startsWith('city:')
+  ) {
+    return cities.find((city) =>
+      cityReplyId(city, policy) === interactiveReplyId
+    ) || null;
+  }
+  return cities.find((city) =>
+    policy.normalize(city) === policy.normalize(text)
+  ) || null;
+}
+
+function cityReplyId(city, policy) {
+  return `city:${encodeURIComponent(policy.normalize(city))}`;
+}
+
+function findBranchSelection(interactiveReplyId, text, branches, policy) {
+  if (
+    typeof interactiveReplyId === 'string' &&
+    interactiveReplyId.startsWith('branch:')
+  ) {
+    const branchId = interactiveReplyId.slice('branch:'.length);
+    return branches.find((branch) => String(branch.id) === branchId) || null;
+  }
   const exact = findNamedSelection(text, branches, policy);
   if (exact) return exact;
   const needle = policy.normalize(text)
@@ -1789,10 +2761,14 @@ function unavailableInsuranceReply() {
 
 const BOOKING_FIELDS = Object.freeze([
   'step',
+  'specialtyId',
   'serviceId',
   'city',
   'branchId',
   'doctorId',
+  'date',
+  'datePeriod',
+  'timePeriod',
   'preferredStart',
   'paymentMethodId',
   'insuranceCompanyId',
@@ -1806,10 +2782,15 @@ const BOOKING_FIELDS = Object.freeze([
 ]);
 
 const BOOKING_STEPS = new Set([
+  'specialty',
   'service',
   'city',
   'branch',
   'doctor',
+  'date_period',
+  'date',
+  'time_period',
+  'time',
   'availability',
   'patient',
   'payment_method',
@@ -1836,7 +2817,7 @@ function normalizeBookingState(state) {
     const property = Object.getOwnPropertyDescriptor(booking, field);
     if (!property) {
       if ([
-        'city', 'insuranceCompanyId', 'insuranceClassId', 'serviceName',
+        'specialtyId', 'city', 'date', 'datePeriod', 'timePeriod', 'insuranceCompanyId', 'insuranceClassId', 'serviceName',
         'paymentMethodCode', 'quotedPrice', 'currency', 'clinicId', 'patientId',
       ].includes(field)) {
         values[field] = null;
@@ -1853,9 +2834,13 @@ function normalizeBookingState(state) {
   }
   for (const field of [
     'serviceId',
+    'specialtyId',
     'city',
     'branchId',
     'doctorId',
+    'date',
+    'datePeriod',
+    'timePeriod',
     'preferredStart',
     'paymentMethodId',
     'insuranceCompanyId',
@@ -1879,8 +2864,20 @@ function normalizeBookingState(state) {
     preferredStart: values.preferredStart,
     paymentMethodId: values.paymentMethodId,
   };
+  if (Object.hasOwn(booking, 'specialtyId')) {
+    normalizedBooking.specialtyId = values.specialtyId;
+  }
   if (Object.hasOwn(booking, 'city')) {
     normalizedBooking.city = values.city;
+  }
+  if (Object.hasOwn(booking, 'date')) {
+    normalizedBooking.date = values.date;
+  }
+  if (Object.hasOwn(booking, 'datePeriod')) {
+    normalizedBooking.datePeriod = values.datePeriod;
+  }
+  if (Object.hasOwn(booking, 'timePeriod')) {
+    normalizedBooking.timePeriod = values.timePeriod;
   }
   if (
     Object.hasOwn(booking, 'insuranceCompanyId') ||
@@ -1914,16 +2911,24 @@ function isNullableNonBlankString(value) {
 function bookingFieldsMatchStep(booking) {
   const hasService = booking.serviceId !== null;
   const hasBranch = booking.branchId !== null;
+  const hasDate = booking.date !== null;
   const hasAvailability = booking.preferredStart !== null;
   const hasPaymentMethod = booking.paymentMethodId !== null;
 
   switch (booking.step) {
+    case 'specialty':
     case 'service':
       return true;
     case 'city':
       return hasService;
     case 'branch':
       return hasService;
+    case 'date_period':
+    case 'date':
+      return hasService && hasBranch;
+    case 'time_period':
+    case 'time':
+      return hasService && hasBranch && hasDate;
     case 'doctor':
     case 'availability':
       return hasService && hasBranch;
