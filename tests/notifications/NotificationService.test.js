@@ -9,7 +9,11 @@ const NotificationService = require(
 const APPOINTMENT_ID = '00000000-0000-0000-0000-000000000001';
 
 describe('NotificationService', () => {
-  test('schedules only approved lifecycle reminder types', async () => {
+  test('future appointment schedules day-before and same-day reminders', async (t) => {
+    t.mock.timers.enable({
+      apis: ['Date'],
+      now: new Date('2026-08-01T08:00:00.000Z'),
+    });
     const scheduled = [];
     const repository = {
       scheduleReminder: async (input) => {
@@ -29,7 +33,68 @@ describe('NotificationService', () => {
     );
   });
 
-  test('cancels old reminders before rescheduling', async () => {
+  test('same-day appointment keeps only a still-future same-day reminder', async (t) => {
+    t.mock.timers.enable({
+      apis: ['Date'],
+      now: new Date('2026-08-04T06:00:00.000Z'),
+    });
+    const scheduled = [];
+    const service = new NotificationService({
+      scheduleReminder: async (input) => scheduled.push(input),
+    });
+
+    await service.scheduleAppointmentLifecycle({
+      id: APPOINTMENT_ID,
+      appointment_start: '2026-08-04T09:00:00.000Z',
+    });
+
+    assert.deepEqual(
+      scheduled.map(({ reminderType }) => reminderType),
+      ['same_day']
+    );
+  });
+
+  test('same-day appointment after reminder time schedules no reminders', async (t) => {
+    t.mock.timers.enable({
+      apis: ['Date'],
+      now: new Date('2026-08-04T08:01:00.000Z'),
+    });
+    const scheduled = [];
+    const service = new NotificationService({
+      scheduleReminder: async (input) => scheduled.push(input),
+    });
+
+    await service.scheduleAppointmentLifecycle({
+      id: APPOINTMENT_ID,
+      appointment_start: '2026-08-04T09:00:00.000Z',
+    });
+
+    assert.deepEqual(scheduled, []);
+  });
+
+  test('reminder scheduled exactly at now is skipped', async (t) => {
+    t.mock.timers.enable({
+      apis: ['Date'],
+      now: new Date('2026-08-04T08:00:00.000Z'),
+    });
+    const scheduled = [];
+    const service = new NotificationService({
+      scheduleReminder: async (input) => scheduled.push(input),
+    });
+
+    await service.scheduleAppointmentLifecycle({
+      id: APPOINTMENT_ID,
+      appointment_start: '2026-08-04T09:00:00.000Z',
+    });
+
+    assert.deepEqual(scheduled, []);
+  });
+
+  test('cancels old reminders before rescheduling', async (t) => {
+    t.mock.timers.enable({
+      apis: ['Date'],
+      now: new Date('2026-08-01T08:00:00.000Z'),
+    });
     const events = [];
     const repository = {
       cancelPendingByAppointment: async () => {
