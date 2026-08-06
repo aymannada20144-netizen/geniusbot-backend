@@ -21,9 +21,14 @@ async function sendWhatsAppMessage(input, runtime = {}) {
   const hasBody = Boolean(
     Object.getOwnPropertyDescriptor(input, 'body')
   );
-  const isTemplateMessage = hasTemplateName || !hasBody;
+  const hasInteraction = Boolean(
+    Object.getOwnPropertyDescriptor(input, 'interaction')
+  );
+  const isTemplateMessage = hasTemplateName || (!hasBody && !hasInteraction);
   const isTextMessage = !isTemplateMessage;
-  const body = isTextMessage ? requiredString(input, 'body') : null;
+  const explicitBody = nonEmptyString(ownDataValue(input, 'body'))
+    ? ownDataValue(input, 'body')
+    : null;
   const templateName = isTemplateMessage
     ? requiredString(input, 'templateName')
     : null;
@@ -31,9 +36,17 @@ async function sendWhatsAppMessage(input, runtime = {}) {
   const interaction = isTextMessage
     ? ownDataValue(input, 'interaction')
     : undefined;
+  const body = isTextMessage && interaction === undefined
+    ? requiredString(input, 'body')
+    : explicitBody;
   const interactivePayload = interaction === undefined
     ? null
-    : buildInteractivePayload({ to, interaction });
+    : buildInteractivePayload({ to, body, interaction });
+  if (isTextMessage && interactivePayload === null && body === null) {
+    throw new TypeError(
+      'sendWhatsAppMessage: body must be a non-empty string.'
+    );
+  }
       const endpoint =
     `https://graph.facebook.com/${GRAPH_API_VERSION}/` +
     `${env.whatsapp.phoneNumberId}/messages`;
@@ -121,12 +134,14 @@ async function sendWhatsAppMessage(input, runtime = {}) {
   });
 }
 
-function buildInteractivePayload({ to, interaction }) {
+function buildInteractivePayload({ to, body, interaction }) {
   if (!validInteraction(interaction)) return null;
 
   if (interaction.mode === 'reply_buttons') {
+    const bodyText = nonEmptyString(body) ? body : interaction.displayText;
     if (
       interaction.displayText.length > 1024 ||
+      bodyText.length > 1024 ||
       interaction.options.length > 3 ||
       interaction.options.some((option) =>
         option.label.length > 20 ||
@@ -142,7 +157,7 @@ function buildInteractivePayload({ to, interaction }) {
       type: 'interactive',
       interactive: {
         type: 'button',
-        body: { text: interaction.displayText },
+        body: { text: bodyText },
         action: {
           buttons: interaction.options.map((option) => ({
             type: 'reply',

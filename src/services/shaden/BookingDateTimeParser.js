@@ -8,6 +8,17 @@ function parsePreferredStart(text, previousValue, policy, options = {}) {
   const normalized = policy.normalize(text);
   const previous = parsePartialPreferredStart(previousValue);
   const date = parseDatePart(normalized, now, timeZone) || previous.date;
+  const preference = parseAvailabilityPreference(normalized);
+  if (preference) {
+    return {
+      complete: false,
+      partial: false,
+      preference: {
+        type: preference,
+        ...(date ? { date } : {}),
+      },
+    };
+  }
   const time = parseTimePart(stripExplicitDate(normalized)) || previous.time;
 
   if (date && time) {
@@ -38,6 +49,16 @@ function parsePreferredStart(text, previousValue, policy, options = {}) {
     };
   }
   return { complete: false, partial: false, ambiguousTime: hasAmbiguousTime(normalized) };
+}
+
+function parseAvailabilityPreference(text) {
+  if (/^(?:اقرب موعد|اول موعد متاح)$/u.test(text)) {
+    return 'nearest_available';
+  }
+  if (/^(?:اي وقت|بكره اي وقت)$/u.test(text)) {
+    return 'any_time';
+  }
+  return null;
 }
 
 function parseTimePart(text) {

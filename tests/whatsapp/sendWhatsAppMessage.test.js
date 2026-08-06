@@ -127,13 +127,12 @@ describe('WhatsApp outbound transport', () => {
     }, transport.options);
   });
 
-  test('builds reply buttons without changing ids, labels, or display text', async () => {
+  test('builds reply buttons with explicit body without changing ids or labels', async () => {
     const interaction = confirmationInteraction();
     const { transport } = successfulTransport((payload) => {
       assert.equal(payload.type, 'interactive');
       assert.equal(payload.interactive.type, 'button');
-      assert.equal(payload.interactive.body.text, interaction.displayText);
-      assert.equal(JSON.stringify(payload).includes('النص الكامل'), false);
+      assert.equal(payload.interactive.body.text, 'النص الكامل');
       assert.deepEqual(payload.interactive.action.buttons, [
         { type: 'reply', reply: { id: 'payment:cash', title: 'كاش' } },
         { type: 'reply', reply: { id: 'payment:insurance', title: 'تأمين' } },
@@ -144,6 +143,73 @@ describe('WhatsApp outbound transport', () => {
     }, transport.options), { messageId: 'wamid.ok' });
   });
 
+  test('reply buttons without a valid explicit body use displayText', async () => {
+    for (const input of [{}, { body: '' }, { body: 42 }]) {
+      const interaction = confirmationInteraction();
+      const { transport } = successfulTransport((payload) => {
+        assert.equal(payload.interactive.body.text, interaction.displayText);
+      });
+      await sendWhatsAppMessage({
+        to: '966500000001',
+        ...input,
+        interaction,
+      }, transport.options);
+    }
+  });
+
+  test('availability recovery explanation reaches the final reply-buttons payload', async () => {
+    const explanation =
+      'غدًا الجمعة والعيادة مغلقة. هذه أقرب المواعيد المتاحة بعد ذلك:';
+    const interaction = confirmationInteraction({
+      purpose: 'select_booking_alternative',
+      displayText: 'اختاري موعدًا بديلًا:',
+      options: [{
+        id: 'booking-alternative:2026-08-08T09:00',
+        label: '08/08 09:00 ص',
+      }],
+    });
+    const { transport } = successfulTransport((payload) => {
+      assert.equal(payload.interactive.body.text, explanation);
+      assert.notEqual(payload.interactive.body.text, interaction.displayText);
+      assert.equal(
+        payload.interactive.action.buttons[0].reply.id,
+        interaction.options[0].id
+      );
+    });
+
+    await sendWhatsAppMessage({
+      to: '966500000001',
+      body: explanation,
+      interaction,
+    }, transport.options);
+  });
+
+  test('booking confirmation keeps the full review body and stable button IDs', async () => {
+    const review = '📋 *راجعي تفاصيل حجزك*\n\n💎 *الخدمة*\nفيلر\n\nهل البيانات صحيحة؟ 🌸';
+    const interaction = confirmationInteraction({
+      purpose: 'confirm_booking',
+      displayText: 'راجعي تفاصيل الحجز ثم اختاري:',
+      options: [
+        { id: 'booking-confirm:yes', label: 'تأكيد الحجز' },
+        { id: 'booking-confirm:cancel', label: 'إلغاء' },
+      ],
+    });
+    const { transport } = successfulTransport((payload) => {
+      assert.equal(payload.interactive.body.text, review);
+      assert.notEqual(payload.interactive.body.text, interaction.displayText);
+      assert.deepEqual(payload.interactive.action.buttons, [
+        { type: 'reply', reply: { id: 'booking-confirm:yes', title: 'تأكيد الحجز' } },
+        { type: 'reply', reply: { id: 'booking-confirm:cancel', title: 'إلغاء' } },
+      ]);
+    });
+
+    await sendWhatsAppMessage({
+      to: '966500000001',
+      body: review,
+      interaction,
+    }, transport.options);
+  });
+
   test('builds one list section and preserves optional descriptions', async () => {
     const interaction = listInteraction({ options: [
       { id: 'service:1', label: 'تنظيف البشرة' },
@@ -151,6 +217,7 @@ describe('WhatsApp outbound transport', () => {
     ] });
     const { transport } = successfulTransport((payload) => {
       assert.equal(payload.interactive.type, 'list');
+      assert.equal(payload.interactive.body.text, interaction.displayText);
       assert.equal(payload.interactive.action.sections.length, 1);
       assert.deepEqual(payload.interactive.action.sections[0].rows, [
         { id: 'service:1', title: 'تنظيف البشرة' },

@@ -300,6 +300,7 @@ function emptyBookingState() {
     city: null,
     branchId: null,
     doctorId: null,
+    roomId: null,
     date: null,
     datePeriod: null,
     timePeriod: null,
@@ -324,6 +325,32 @@ function handleBookingStep({
   now,
 }) {
   const booking = state.booking;
+
+  if (typeof interactiveReplyId !== 'string') {
+    const branch = findById(data.branches, booking.branchId);
+    let preference = null;
+    try {
+      preference = parseBookingPreferredStart(
+        text,
+        booking.date ? `date:${booking.date}` : booking.preferredStart,
+        policy,
+        { timeZone: branch?.timezone || DEFAULT_TIME_ZONE, now }
+      ).preference || null;
+    } catch (error) {
+      preference = null;
+    }
+    if (preference) {
+      return handleBookingAvailabilityPreference({
+        preference,
+        booking,
+        data,
+        policy,
+        bookingEngine,
+        bookingContext,
+        now,
+      });
+    }
+  }
 
   switch (booking.step) {
     case 'specialty': {
@@ -691,6 +718,24 @@ function handleBookingStep({
     }
 
     case 'confirmation': {
+      if (typeof interactiveReplyId === 'string') {
+        if (interactiveReplyId === 'booking-confirm:yes') {
+          return executeConfirmedBooking({
+            booking,
+            state,
+            data,
+            policy,
+            bookingEngine,
+            bookingContext,
+            customerName,
+          });
+        }
+        if (interactiveReplyId === 'booking-confirm:cancel') {
+          delete state.booking;
+          return policy.bookingCancelled();
+        }
+        return bookingSummary(policy, data, booking);
+      }
       if (inquiry?.type === 'booking_cancellation_request') {
         delete state.booking;
         return policy.bookingCancelled();
@@ -764,14 +809,30 @@ function bookingSummary(policy, data, booking) {
       policy
     );
   }
-  return policy.bookingConfirmationSummary({
+  return bookingConfirmationReply(policy.bookingConfirmationSummary({
     service: findById(data.services, booking.serviceId),
     branch: findById(data.branches, booking.branchId),
     preferredStart: booking.preferredStart,
     paymentMethod,
     insuranceCompany: insurance ? insuranceCompany : null,
     insuranceClass: insurance ? insuranceClass : null,
-  });
+  }));
+}
+
+function bookingConfirmationReply(reply) {
+  return {
+    reply,
+    interaction: {
+      version: 1,
+      mode: 'reply_buttons',
+      purpose: 'confirm_booking',
+      displayText: 'راجعي تفاصيل الحجز ثم اختاري:',
+      options: [
+        { id: 'booking-confirm:yes', label: 'تأكيد الحجز' },
+        { id: 'booking-confirm:cancel', label: 'إلغاء' },
+      ],
+    },
+  };
 }
 
 async function validateEarlyAvailability({
@@ -782,6 +843,9 @@ async function validateEarlyAvailability({
   bookingContext,
   parsedAvailability,
   recoverAlternatives = false,
+  candidateDoctorId = null,
+  candidateRoomId = null,
+  persistAssignedResources = false,
 }) {
   if (!bookingEngine || typeof bookingEngine.checkAvailability !== 'function') {
     return policy.bookingAvailabilityCheckFailed();
@@ -792,7 +856,10 @@ async function validateEarlyAvailability({
       clinicId: bookingContext?.clinicId || null,
       service: { id: booking.serviceId },
       branch: { id: booking.branchId },
-      doctor: booking.doctorId ? { id: booking.doctorId } : null,
+      doctor: candidateDoctorId || booking.doctorId
+        ? { id: candidateDoctorId || booking.doctorId }
+        : null,
+      room: candidateRoomId ? { id: candidateRoomId } : null,
       availability: { preferredStart: booking.preferredStart },
     });
   } catch (error) {
@@ -800,6 +867,10 @@ async function validateEarlyAvailability({
     return policy.bookingAvailabilityCheckFailed();
   }
   if (result.status === 'available') {
+    if (persistAssignedResources) {
+      booking.doctorId = result.doctor?.id || candidateDoctorId || booking.doctorId;
+      booking.roomId = result.room?.id || candidateRoomId || null;
+    }
     if (booking.paymentMethodId !== null) {
       booking.step = 'confirmation';
       return bookingSummary(policy, data, booking);
@@ -830,6 +901,25 @@ async function validateEarlyAvailability({
   return alternatives.length
     ? bookingAlternativesReply(rejectedReply, alternatives)
     : rejectedReply;
+}
+
+function availabilityPreferenceRecoveryReply(result, booking, data, now) {
+  const branch = findById(data.branches, booking.branchId);
+  const timeZone = branch?.timezone || DEFAULT_TIME_ZONE;
+  const tomorrow = addIsoDays(localIsoDate(now, timeZone), 1);
+  const requestedDay = result.date === tomorrow
+    ? 'غدًا'
+    : formatDatePart(result.date, timeZone, {
+      weekday: 'long',
+      day: 'numeric',
+      month: 'long',
+    });
+  if (result.unavailableReason === 'closed_day') {
+    const weekday = formatDatePart(result.date, timeZone, { weekday: 'long' });
+    const day = result.date === tomorrow ? `غدًا ${weekday}` : requestedDay;
+    return `${day} والعيادة مغلقة. هذه أقرب المواعيد المتاحة بعد ذلك:`;
+  }
+  return `لا توجد مواعيد متاحة ${requestedDay}. هذه أقرب المواعيد المتاحة بعد ذلك:`;
 }
 
 function preferredStartAfterRejection(reason, parsed) {
@@ -865,6 +955,7 @@ async function executeConfirmedBooking({
     service: { id: booking.serviceId },
     branch: { id: booking.branchId },
     doctor: booking.doctorId ? { id: booking.doctorId } : null,
+    room: booking.roomId ? { id: booking.roomId } : null,
     availability: { preferredStart: booking.preferredStart },
     patient,
     appointment: {
@@ -1461,6 +1552,87 @@ function parseBookingAlternativeReply(interactiveReplyId, policy, branch, now) {
     { timeZone: branch?.timezone || DEFAULT_TIME_ZONE, now }
   );
   return parsed.complete ? parsed : null;
+}
+
+async function handleBookingAvailabilityPreference({
+  preference,
+  booking,
+  data,
+  policy,
+  bookingEngine,
+  bookingContext,
+  now,
+}) {
+  if (
+    preference.type === 'any_time' && !preference.date ||
+    !bookingEngine || typeof bookingEngine.getPreferredAvailability !== 'function'
+  ) {
+    return policy.bookingAskAvailability();
+  }
+  let result;
+  try {
+    result = await bookingEngine.getPreferredAvailability({
+      clinicId: bookingContext?.clinicId || data.clinic.id || null,
+      service: { id: booking.serviceId },
+      branch: { id: booking.branchId },
+      doctor: booking.doctorId ? { id: booking.doctorId } : null,
+      mode: preference.type,
+      date: preference.date
+        ? `${preference.date.year}-${pad(preference.date.month)}-${pad(preference.date.day)}`
+        : null,
+      from: now.toISOString(),
+    });
+  } catch (error) {
+    console.error('BOOKING_PREFERRED_AVAILABILITY_FAILED', { code: error?.code || null });
+    return policy.bookingAskAvailability();
+  }
+  if (result?.success === true && result.preferredStart && result.date && result.time) {
+    const branch = findById(data.branches, booking.branchId);
+    const parsed = parseBookingPreferredStart(
+      `${result.date} ${result.time}`,
+      null,
+      policy,
+      { timeZone: branch?.timezone || DEFAULT_TIME_ZONE, now }
+    );
+    if (!parsed.complete || parsed.value !== result.preferredStart) {
+      return policy.bookingAskAvailability();
+    }
+    booking.preferredStart = result.preferredStart;
+    return validateEarlyAvailability({
+      booking,
+      data,
+      policy,
+      bookingEngine,
+      bookingContext,
+      parsedAvailability: parsed,
+      recoverAlternatives: true,
+      candidateDoctorId: result.doctorId || null,
+      candidateRoomId: result.roomId || null,
+      persistAssignedResources: true,
+    });
+  }
+  if (preference.type !== 'any_time' || !result?.recoveryStart) {
+    return policy.bookingAskAvailability();
+  }
+  const rejectedReply = policy.bookingAvailabilityRejected({
+    reason: 'slot_not_available',
+    branch: findById(data.branches, booking.branchId),
+  });
+  booking.step = 'availability';
+  booking.preferredStart = `date:${result.date}`;
+  const alternatives = await loadAvailableBookingAlternatives({
+    booking,
+    data,
+    bookingEngine,
+    bookingContext,
+    preferredStart: result.recoveryStart,
+  });
+  return alternatives.length
+    ? bookingAlternativesReply(
+      availabilityPreferenceRecoveryReply(result, booking, data, now),
+      alternatives
+    )
+    : rejectedReply;
 }
 
 async function loadAvailableBookingAlternatives({
@@ -2887,6 +3059,7 @@ const BOOKING_FIELDS = Object.freeze([
   'city',
   'branchId',
   'doctorId',
+  'roomId',
   'date',
   'datePeriod',
   'timePeriod',
@@ -2938,7 +3111,7 @@ function normalizeBookingState(state) {
     const property = Object.getOwnPropertyDescriptor(booking, field);
     if (!property) {
       if ([
-        'specialtyId', 'city', 'date', 'datePeriod', 'timePeriod', 'insuranceCompanyId', 'insuranceClassId', 'serviceName',
+        'specialtyId', 'city', 'roomId', 'date', 'datePeriod', 'timePeriod', 'insuranceCompanyId', 'insuranceClassId', 'serviceName',
         'paymentMethodCode', 'quotedPrice', 'currency', 'clinicId', 'patientId',
       ].includes(field)) {
         values[field] = null;
@@ -2959,6 +3132,7 @@ function normalizeBookingState(state) {
     'city',
     'branchId',
     'doctorId',
+    'roomId',
     'date',
     'datePeriod',
     'timePeriod',
@@ -2985,6 +3159,9 @@ function normalizeBookingState(state) {
     preferredStart: values.preferredStart,
     paymentMethodId: values.paymentMethodId,
   };
+  if (Object.hasOwn(booking, 'roomId')) {
+    normalizedBooking.roomId = values.roomId;
+  }
   if (Object.hasOwn(booking, 'specialtyId')) {
     normalizedBooking.specialtyId = values.specialtyId;
   }

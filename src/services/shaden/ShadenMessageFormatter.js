@@ -142,11 +142,22 @@ function formatSimpleList({ icon, title, items, selection, question, footer }) {
 
 function formatBookingSummary(input = {}) {
   const sections = [];
-  addSection(sections, 'الخدمة والفرع', [field('الخدمة', input.service?.name), field('الفرع', branchWithCity(input.branch))]);
-  addSection(sections, 'تفاصيل الزيارة', resourceFields(input));
-  addSection(sections, 'الموعد', [field('التاريخ', input.dateText), field('الوقت', input.timeText)]);
-  addSection(sections, 'الدفع', paymentFields(input, false));
-  return [rtl('📋 *راجعي تفاصيل حجزك*'), '', ...joinSections(sections), '', rtl(DIVIDER), '', rtl('هل بيانات الحجز صحيحة؟'), '', rtl('اكتبي *نعم* للتأكيد أو *إلغاء*.')].join('\n');
+  addReviewSection(sections, '💎', 'الخدمة', input.service?.name);
+  addReviewSection(sections, '🏥', 'الفرع', branchWithCity(input.branch));
+  if (input.service?.requiresDoctor === true) {
+    addReviewSection(sections, '👩‍⚕️', 'الطبيب', personName(input.doctor));
+  }
+  if (input.service?.requiresRoom === true) {
+    addReviewSection(sections, '🚪', 'الغرفة', roomLabel(input.room));
+  }
+  addReviewSection(sections, '📅', 'التاريخ', input.dateText);
+  addReviewSection(sections, '🕒', 'الوقت', input.timeText);
+  addReviewSection(sections, '💳', 'طريقة الدفع', input.paymentMethod?.name);
+  if (isInsurancePayment(input.paymentMethod)) {
+    addReviewSection(sections, '🏢', 'شركة التأمين', input.insuranceCompany?.name);
+    addReviewSection(sections, '🎫', 'الفئة', input.insuranceClass?.name);
+  }
+  return [rtl('📋 *راجعي تفاصيل حجزك*'), '', ...joinSections(sections), '', rtl(DIVIDER), '', rtl('هل البيانات صحيحة؟ 🌸')].join('\n');
 }
 
 function formatBookingSuccess(input = {}) {
@@ -213,6 +224,11 @@ function resourceFields(input, includeAssigned = false) {
 function addSection(sections, title, lines) {
   const clean = lines.filter(Boolean);
   if (clean.length) sections.push(title ? [rtl(`*${title}*`), ...clean] : clean);
+}
+
+function addReviewSection(sections, icon, title, value) {
+  const clean = cleanValue(value);
+  if (clean) sections.push([rtl(`${icon} *${title}*`), rtl(bidi(clean))]);
 }
 
 function joinSections(sections) {

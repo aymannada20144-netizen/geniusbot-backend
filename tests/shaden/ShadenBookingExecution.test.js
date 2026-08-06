@@ -139,7 +139,7 @@ describe('Shaden confirmed booking execution', () => {
     assert.equal(result.nextState.booking.step, 'confirmation');
     assert.equal(result.nextState.booking.insuranceCompanyId, 'company-1');
     assert.equal(result.nextState.booking.insuranceClassId, 'class-a');
-    assert.equal(result.interaction, undefined);
+    assert.equal(result.interaction.purpose, 'confirm_booking');
   });
 
   test('payment selection exposes the active methods as reply buttons', async () => {
@@ -242,7 +242,7 @@ describe('Shaden confirmed booking execution', () => {
       assert.equal(result.nextState.booking.step, 'confirmation');
       assert.equal(result.nextState.booking.insuranceClassId, id);
       assert.equal(typeof result.reply, 'string');
-      assert.equal(result.interaction, undefined);
+      assert.equal(result.interaction.purpose, 'confirm_booking');
     }
   });
 
@@ -386,6 +386,88 @@ describe('Shaden confirmed booking execution', () => {
     assert.equal(result.nextState.booking.paymentMethodId, 'cash-1');
     assert.equal(result.nextState.booking.serviceId, 'service-1');
   });
+
+  test('confirmation review exposes exactly the two stable reply buttons', async () => {
+    const result = await turn(
+      createEngine(async () => successfulServiceResult()),
+      bookingState({ step: 'payment_method', paymentMethodId: null }),
+      'كاش'
+    );
+
+    assert.equal(result.nextState.booking.step, 'confirmation');
+    assert.equal(result.interaction.mode, 'reply_buttons');
+    assert.deepEqual(result.interaction.options, [
+      { id: 'booking-confirm:yes', label: 'تأكيد الحجز' },
+      { id: 'booking-confirm:cancel', label: 'إلغاء' },
+    ]);
+    assert.match(result.reply, /\*الخدمة\*[\s\S]+\*الفرع\*[\s\S]+\*التاريخ\*[\s\S]+\*الوقت\*[\s\S]+\*طريقة الدفع\*/u);
+    assert.doesNotMatch(result.reply, /null|undefined/u);
+  });
+
+  test('confirmation button IDs use the existing yes and cancel paths', async () => {
+    const buttonCalls = [];
+    const textCalls = [];
+    const buttonYes = await interactiveTurn(
+      createEngine(async (input) => {
+        buttonCalls.push(input);
+        return successfulServiceResult();
+      }),
+      bookingState(),
+      'booking-confirm:yes',
+      'تأكيد الحجز'
+    );
+    const textYes = await turn(
+      createEngine(async (input) => {
+        textCalls.push(input);
+        return successfulServiceResult();
+      }),
+      bookingState(),
+      'نعم'
+    );
+    assert.equal(buttonCalls.length, 1);
+    assert.equal(textCalls.length, 1);
+    assert.equal(buttonYes.reply, textYes.reply);
+    assert.equal('booking' in buttonYes.nextState, false);
+
+    const buttonCancel = await interactiveTurn(
+      createEngine(async () => successfulServiceResult()),
+      bookingState(),
+      'booking-confirm:cancel',
+      'إلغاء'
+    );
+    const textCancel = await turn(
+      createEngine(async () => successfulServiceResult()),
+      bookingState(),
+      'إلغاء'
+    );
+    assert.equal(buttonCancel.reply, textCancel.reply);
+    assert.equal('booking' in buttonCancel.nextState, false);
+  });
+
+  test('malformed or out-of-step confirmation IDs are not consumed', async () => {
+    let calls = 0;
+    const engine = createEngine(async () => {
+      calls += 1;
+      return successfulServiceResult();
+    });
+    const malformed = await interactiveTurn(
+      engine,
+      bookingState(),
+      'booking-confirm:invalid',
+      'تأكيد الحجز'
+    );
+    assert.equal(malformed.nextState.booking.step, 'confirmation');
+    assert.equal(malformed.interaction.purpose, 'confirm_booking');
+
+    const wrongStep = await interactiveTurn(
+      engine,
+      bookingState({ step: 'payment_method', paymentMethodId: null }),
+      'booking-confirm:yes',
+      'تأكيد الحجز'
+    );
+    assert.equal(wrongStep.nextState.booking.step, 'payment_method');
+    assert.equal(calls, 0);
+  });
 });
 
 function createEngine(bookAppointment) {
@@ -403,6 +485,15 @@ function confirm(engine) {
 function turn(engine, currentState, text) {
   return Promise.resolve(engine.handle({
     message: { text },
+    currentState,
+    clinicData: clinicData(),
+    bookingContext: bookingContext(),
+  }));
+}
+
+function interactiveTurn(engine, currentState, value, text) {
+  return Promise.resolve(engine.handle({
+    message: { text, rawPayload: { value } },
     currentState,
     clinicData: clinicData(),
     bookingContext: bookingContext(),

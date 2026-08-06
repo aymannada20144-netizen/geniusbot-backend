@@ -14,9 +14,9 @@ const branch = { name: 'فرع الصالحية', city: 'جدة' };
 describe('WhatsApp booking message formatting', () => {
   test('formats the confirmation summary exactly for a doctor-and-room service', () => {
     assert.equal(formatter.formatBookingSummary({ service: requiredService, branch, doctor: { name: 'د. علياء' }, room: { number: '102', name: 'غرفة ليزر' }, dateText: 'الأحد، ٢ أغسطس ٢٠٢٦', timeText: '١١:٠٠ ص', paymentMethod: { name: 'كاش' } }), [
-      r('📋 *راجعي تفاصيل حجزك*'), '', r('*الخدمة والفرع*'), r('*الخدمة:* إزالة الشعر بالليزر'), r('*الفرع:* جدة — فرع الصالحية'), '',
-      r('*تفاصيل الزيارة*'), r('*الطبيب:* د. علياء'), r(`*الغرفة:* ${i('102')} — غرفة ليزر`), '', r('*الموعد*'), r('*التاريخ:* الأحد، ٢ أغسطس ٢٠٢٦'),
-      r('*الوقت:* ١١:٠٠ ص'), '', r('*الدفع*'), r('*طريقة الدفع:* كاش'), '', r('ــــــــــــــــــــ'), '', r('هل بيانات الحجز صحيحة؟'), '', r('اكتبي *نعم* للتأكيد أو *إلغاء*.'),
+      r('📋 *راجعي تفاصيل حجزك*'), '', r('💎 *الخدمة*'), r('إزالة الشعر بالليزر'), '', r('🏥 *الفرع*'), r('جدة — فرع الصالحية'), '',
+      r('👩‍⚕️ *الطبيب*'), r('د. علياء'), '', r('🚪 *الغرفة*'), r(`${i('102')} — غرفة ليزر`), '', r('📅 *التاريخ*'), r('الأحد، ٢ أغسطس ٢٠٢٦'),
+      '', r('🕒 *الوقت*'), r('١١:٠٠ ص'), '', r('💳 *طريقة الدفع*'), r('كاش'), '', r('ــــــــــــــــــــ'), '', r('هل البيانات صحيحة؟ 🌸'),
     ].join('\n'));
   });
 
@@ -35,7 +35,7 @@ describe('WhatsApp booking message formatting', () => {
   });
 
   test('supports room number only and room number with name', () => {
-    assert.match(formatter.formatBookingSummary({ service: requiredService, room: { number: '301' } }), new RegExp(`الغرفة:\\* ${LRI}301${PDI}`));
+    assert.match(formatter.formatBookingSummary({ service: requiredService, room: { number: '301' } }), new RegExp(`الغرفة\\*\\n${RLM}${LRI}301${PDI}`));
     assert.match(formatter.formatBookingSummary({ service: requiredService, room: { number: '301', name: 'غرفة العلاج' } }), /— غرفة العلاج/);
   });
 
@@ -247,9 +247,9 @@ describe('booking insurance, persisted status, and official reference', () => {
       insuranceCompany: { name: 'بوبا' },
       insuranceClass: { name: 'A' },
     });
-    assert.match(text, /\*طريقة الدفع:\* تأمين/u);
-    assert.match(text, /\*شركة التأمين:\* بوبا/u);
-    assert.match(text, new RegExp(`فئة التأمين:\\* ${LRI}A${PDI}`));
+    assert.match(text, /\*طريقة الدفع\*\n‏تأمين/u);
+    assert.match(text, /\*شركة التأمين\*\n‏بوبا/u);
+    assert.match(text, new RegExp(`\\*الفئة\\*\\n${RLM}${LRI}A${PDI}`));
   });
 
   test('cash summary never displays insurance details', () => {

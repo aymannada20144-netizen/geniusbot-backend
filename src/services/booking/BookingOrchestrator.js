@@ -458,6 +458,87 @@ class BookingOrchestrator {
     }
     return { success: true, alternatives };
   }
+
+  async getPreferredAvailability(data = {}) {
+    const clinic = await this.repositories.clinics.findById(data.clinic_id);
+    const branch = await this.repositories.branches.findActiveById(
+      data.clinic_id,
+      data.branch_id
+    );
+    const service = await this.repositories.services.findActiveById(
+      data.clinic_id,
+      data.service_id
+    );
+    const from = new Date(data.from);
+    if (
+      !clinic?.timezone || !branch || !service ||
+      service.is_booking_enabled !== true || Number.isNaN(from.getTime())
+    ) {
+      return { success: false, reason: 'booking_context_not_found' };
+    }
+    const requestedDate = data.mode === 'any_time'
+      ? parseIsoDate(data.date)
+      : localIsoDate(from, clinic.timezone);
+    if (!requestedDate) {
+      return { success: false, reason: 'invalid_preference_date' };
+    }
+    const searchDays = data.mode === 'any_time' ? 1 : 31;
+    const windowStart = zonedLocalToDate(requestedDate, 0, clinic.timezone);
+    const windowEnd = zonedLocalToDate(
+      addUtcDays(requestedDate, searchDays),
+      0,
+      clinic.timezone
+    );
+    const window = await this.repositories.serviceAssignments
+      .findAvailabilityWindow({
+        clinicId: data.clinic_id,
+        branchId: data.branch_id,
+        serviceId: service.id,
+        doctorId: data.doctor_id || null,
+        windowStart,
+        windowEnd,
+        timeZone: clinic.timezone,
+      });
+    const assignments = window.assignments || [];
+    const intervalMinutes = positiveInteger(
+      service.duration_minutes,
+      Number(service.duration_minutes)
+    );
+    for (let offset = 0; offset < searchDays; offset += 1) {
+      const date = addUtcDays(requestedDate, offset);
+      const slot = availableSlotsForDate({
+        date,
+        branchId: data.branch_id,
+        timeZone: clinic.timezone,
+        durationMinutes: Number(service.duration_minutes),
+        intervalMinutes,
+        earliestStart: from,
+        assignments,
+        window,
+      })[0];
+      if (slot) {
+        return {
+          success: true,
+          preferredStart: slot.appointmentStart.toISOString(),
+          date,
+          time: slot.time,
+          doctorId: slot.assignment.doctor_id || null,
+          roomId: slot.assignment.room_id || null,
+        };
+      }
+    }
+    return {
+      success: false,
+      reason: 'no_available_slot',
+      unavailableReason: unavailableDateReason(
+        window,
+        requestedDate,
+        data.branch_id
+      ),
+      date: requestedDate,
+      recoveryStart: zonedLocalToDate(requestedDate, 0, clinic.timezone).toISOString(),
+    };
+  }
 }
 
 function boundedInteger(value, fallback, minimum, maximum) {
@@ -500,6 +581,17 @@ function holidayForDate(holidays = [], date, branchId) {
     matches.find((holiday) => holiday.branch_id == null) || null;
 }
 
+function unavailableDateReason(window, date, branchId) {
+  const dayOfWeek = new Date(`${date}T00:00:00.000Z`).getUTCDay();
+  const hours = (window.branch_hours || []).find(
+    (item) => Number(item.day_of_week) === dayOfWeek
+  );
+  const holiday = holidayForDate(window.holidays, date, branchId);
+  return !hours || hours.is_closed === true || holiday?.is_closed === true
+    ? 'closed_day'
+    : 'no_availability';
+}
+
 function availableSlotsForDate({
   date,
   branchId,
@@ -540,16 +632,18 @@ function availableSlotsForDate({
     const appointmentEnd = new Date(
       appointmentStart.getTime() + durationMinutes * 60 * 1000
     );
-    if (assignments.some((assignment) => assignmentAvailableInWindow(
-      assignment,
+    const assignment = assignments.find((candidate) => assignmentAvailableInWindow(
+      candidate,
       dayOfWeek,
       appointmentStart,
       appointmentEnd,
       window
-    ))) {
+    ));
+    if (assignment) {
       slots.push({
         time: `${padTime(Math.floor(minute / 60))}:${padTime(minute % 60)}`,
         appointmentStart,
+        assignment,
       });
     }
   }

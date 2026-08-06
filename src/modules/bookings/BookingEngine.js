@@ -11,6 +11,7 @@ const COMMAND_FIELDS = Object.freeze([
   'service',
   'branch',
   'doctor',
+  'room',
   'availability',
   'patient',
   'appointment',
@@ -82,6 +83,7 @@ class BookingEngine {
     const service = readNested(values.service, 'service', ['id']);
     const branch = readNested(values.branch, 'branch', ['id']);
     const doctor = readNested(values.doctor, 'doctor', ['id']);
+    const room = readNested(values.room, 'room', ['id']);
     const availability = readNested(
       values.availability,
       'availability',
@@ -104,6 +106,7 @@ class BookingEngine {
       service: values.service,
       branch: values.branch,
       doctor: values.doctor,
+      room: values.room,
       availability: values.availability,
       patient: values.patient,
       appointment: values.appointment,
@@ -173,6 +176,9 @@ class BookingEngine {
     if (doctor && doctor.id !== null) {
       bookingInput.doctor_id = doctor.id;
     }
+    if (room && room.id !== null) {
+      bookingInput.room_id = room.id;
+    }
     if (patient.id !== null) {
       bookingInput.patient_id = patient.id;
     } else {
@@ -190,7 +196,7 @@ class BookingEngine {
   async checkAvailability(command) {
     const fields = readFields(
       command,
-      ['clinicId', 'service', 'branch', 'doctor', 'availability'],
+      ['clinicId', 'service', 'branch', 'doctor', 'room', 'availability'],
       'BookingEngine availability command must be a plain object',
       'BookingEngine received unsupported availability command field',
       'BookingEngine does not accept accessor property: availabilityCommand'
@@ -199,6 +205,7 @@ class BookingEngine {
     const service = readNested(valueOrNull(fields.service), 'service', ['id']);
     const branch = readNested(valueOrNull(fields.branch), 'branch', ['id']);
     const doctor = readNested(valueOrNull(fields.doctor), 'doctor', ['id']);
+    const room = readNested(valueOrNull(fields.room), 'room', ['id']);
     const availability = readNested(
       valueOrNull(fields.availability),
       'availability',
@@ -219,6 +226,7 @@ class BookingEngine {
       service_id: service.id,
       branch_id: branch.id,
       doctor_id: doctor?.id || null,
+      room_id: room?.id || null,
       preferred_start: availability.preferredStart,
     });
     if (result.success === true) {
@@ -327,6 +335,41 @@ class BookingEngine {
       doctor_id: doctor?.id || null,
       preferred_start: preferredStart,
       limit: valueOrNull(fields.limit),
+    });
+  }
+
+  async getPreferredAvailability(command) {
+    const fields = readFields(
+      command,
+      ['clinicId', 'service', 'branch', 'doctor', 'mode', 'date', 'from'],
+      'BookingEngine preferred availability command must be a plain object',
+      'BookingEngine received unsupported preferred availability command field',
+      'BookingEngine does not accept accessor property: preferredAvailabilityCommand'
+    );
+    const clinicId = valueOrNull(fields.clinicId);
+    const service = readNested(valueOrNull(fields.service), 'service', ['id']);
+    const branch = readNested(valueOrNull(fields.branch), 'branch', ['id']);
+    const doctor = readNested(valueOrNull(fields.doctor), 'doctor', ['id']);
+    const mode = valueOrNull(fields.mode);
+    const from = valueOrNull(fields.from);
+    if (
+      !clinicId || !service?.id || !branch?.id || !from ||
+      !['nearest_available', 'any_time'].includes(mode)
+    ) {
+      return { success: false, reason: 'missing_preferred_availability_input' };
+    }
+    const method = findMethod(this.#bookingService, 'getPreferredAvailability');
+    if (!method) {
+      throw new TypeError('BookingEngine requires bookingService.getPreferredAvailability()');
+    }
+    return method.call(this.#bookingService, {
+      clinic_id: clinicId,
+      service_id: service.id,
+      branch_id: branch.id,
+      doctor_id: doctor?.id || null,
+      mode,
+      date: valueOrNull(fields.date),
+      from,
     });
   }
 }
