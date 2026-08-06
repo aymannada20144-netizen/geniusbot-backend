@@ -492,9 +492,11 @@ function handleBookingStep({
 
     case 'date_period':
       return handleBookingDatePeriodStep({
+        text,
         interactiveReplyId,
         booking,
         data,
+        policy,
         bookingEngine,
         bookingContext,
         now,
@@ -1117,9 +1119,11 @@ async function bookingDatePeriodListReply({
 }
 
 async function handleBookingDatePeriodStep({
+  text,
   interactiveReplyId,
   booking,
   data,
+  policy,
   bookingEngine,
   bookingContext,
   now,
@@ -1137,16 +1141,38 @@ async function handleBookingDatePeriodStep({
     interactiveReplyId.startsWith('date-period:')
     ? interactiveReplyId.slice('date-period:'.length)
     : null;
-  if (!periods.some(({ id }) => id === selected)) {
+  if (periods.some(({ id }) => id === selected)) {
+    booking.datePeriod = selected;
+    booking.step = 'date';
+    return dateListReply(
+      dates.filter((date) => dateInPeriod(date, selected)),
+      branch,
+      now
+    );
+  }
+  if (typeof interactiveReplyId === 'string') {
     return datePeriodListReply(periods);
   }
-  booking.datePeriod = selected;
-  booking.step = 'date';
-  return dateListReply(
-    dates.filter((date) => dateInPeriod(date, selected)),
-    branch,
-    now
-  );
+  try {
+    const parsed = parseBookingPreferredStart(text, null, policy, {
+      timeZone: branch?.timezone || DEFAULT_TIME_ZONE,
+      now,
+    });
+    if (parsed.complete) {
+      booking.preferredStart = parsed.value;
+      return validateEarlyAvailability({
+        booking,
+        data,
+        policy,
+        bookingEngine,
+        bookingContext,
+        parsedAvailability: parsed,
+      });
+    }
+  } catch (error) {
+    console.error('BOOKING_DATE_PERIOD_PARSE_FAILED', { code: error?.code || null });
+  }
+  return datePeriodListReply(periods);
 }
 
 async function handleBookingDateStep({
