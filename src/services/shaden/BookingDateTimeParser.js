@@ -76,6 +76,7 @@ function parsePartialPreferredStart(value) {
 function parseDatePart(text, now, timeZone) {
   const today = localDateParts(now, timeZone);
   if (/(^|\s)(اليوم|today)(\s|$)/u.test(text)) return today;
+  if (/(^|\s)بعد\s+بكره(\s|$)/u.test(text)) return addDays(today, 2);
   if (/(^|\s)(بكره|بكرة|غدا|غدا|tomorrow)(\s|$)/u.test(text)) return addDays(today, 1);
   const explicit = text.match(/\b(\d{4})-(\d{1,2})-(\d{1,2})\b/) ||
     text.match(/\b(\d{1,2})[/-](\d{1,2})[/-](\d{4})\b/);

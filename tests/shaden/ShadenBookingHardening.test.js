@@ -74,6 +74,23 @@ describe('Shaden early availability validation', () => {
     assert.equal(result.nextState.booking.step, 'payment_method');
     assert.equal(result.nextState.booking.serviceId, 'service-1');
   });
+
+  test('بعد بكرة reaches availability with the correct preferredStart', async () => {
+    let received;
+    const engine = new ShadenEngine({
+      clock: { now: () => new Date('2026-07-31T09:00:00.000Z') },
+      bookingEngine: {
+        async checkAvailability(command) {
+          received = command.availability.preferredStart;
+          return { status: 'available' };
+        },
+      },
+    });
+    const result = await turn(engine, 'بعد بكرة الساعة 6 م');
+    assert.equal(received, '2026-08-02T15:00:00.000Z');
+    assert.equal(result.nextState.booking.preferredStart, received);
+    assert.equal(result.nextState.booking.step, 'payment_method');
+  });
 });
 
 describe('Booking room confirmation', () => {
