@@ -69,18 +69,17 @@ class NotificationService {
     }
     const dayBefore = new Date(start.getTime() - 24 * 60 * 60 * 1000);
     const sameDay = new Date(start.getTime() - 60 * 60 * 1000);
+    const now = new Date();
     return Promise.all([
-      this.schedule({
+      { reminderType: 'day_before', scheduledAt: dayBefore },
+      { reminderType: 'same_day', scheduledAt: sameDay },
+    ]
+      .filter(({ scheduledAt }) => scheduledAt > now)
+      .map(({ reminderType, scheduledAt }) => this.schedule({
         appointmentId: appointment.id,
-        reminderType: 'day_before',
-        scheduledAt: dayBefore,
-      }),
-      this.schedule({
-        appointmentId: appointment.id,
-        reminderType: 'same_day',
-        scheduledAt: sameDay,
-      }),
-    ]);
+        reminderType,
+        scheduledAt,
+      })));
   }
 
   async cancelAppointmentNotifications(appointmentId) {
