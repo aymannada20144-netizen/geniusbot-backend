@@ -540,6 +540,27 @@ function handleBookingStep({
 
     case 'availability': {
       const branch = findById(data.branches, booking.branchId);
+      const alternative = parseBookingAlternativeReply(
+        interactiveReplyId,
+        policy,
+        branch,
+        now
+      );
+      if (alternative) {
+        booking.preferredStart = alternative.value;
+        return validateEarlyAvailability({
+          booking,
+          data,
+          policy,
+          bookingEngine,
+          bookingContext,
+          parsedAvailability: alternative,
+          recoverAlternatives: true,
+        });
+      }
+      if (typeof interactiveReplyId === 'string') {
+        return policy.bookingAskAvailability();
+      }
       const availability = parseBookingPreferredStart(
         text,
         booking.preferredStart,
@@ -760,6 +781,7 @@ async function validateEarlyAvailability({
   bookingEngine,
   bookingContext,
   parsedAvailability,
+  recoverAlternatives = false,
 }) {
   if (!bookingEngine || typeof bookingEngine.checkAvailability !== 'function') {
     return policy.bookingAvailabilityCheckFailed();
@@ -790,12 +812,24 @@ async function validateEarlyAvailability({
     );
   }
   const reason = result.metadata?.reasonCode || result.reason || 'technical_failure';
-  booking.step = 'availability';
-  booking.preferredStart = preferredStartAfterRejection(reason, parsedAvailability);
-  return policy.bookingAvailabilityRejected({
+  const rejectedReply = policy.bookingAvailabilityRejected({
     reason,
     branch: findById(data.branches, booking.branchId),
   });
+  const requestedStart = booking.preferredStart;
+  booking.step = 'availability';
+  booking.preferredStart = preferredStartAfterRejection(reason, parsedAvailability);
+  if (!recoverAlternatives) return rejectedReply;
+  const alternatives = await loadAvailableBookingAlternatives({
+    booking,
+    data,
+    bookingEngine,
+    bookingContext,
+    preferredStart: requestedStart,
+  });
+  return alternatives.length
+    ? bookingAlternativesReply(rejectedReply, alternatives)
+    : rejectedReply;
 }
 
 function preferredStartAfterRejection(reason, parsed) {
@@ -1167,6 +1201,7 @@ async function handleBookingDatePeriodStep({
         bookingEngine,
         bookingContext,
         parsedAvailability: parsed,
+        recoverAlternatives: true,
       });
     }
   } catch (error) {
@@ -1411,6 +1446,66 @@ function parseSelectedBookingTime(text, booking, data, policy, now) {
   return {
     parsed,
     time: `${pad(parsed.time.hour)}:${pad(parsed.time.minute)}`,
+  };
+}
+
+function parseBookingAlternativeReply(interactiveReplyId, policy, branch, now) {
+  const match = String(interactiveReplyId || '').match(
+    /^booking-alternative:(\d{4}-\d{2}-\d{2})T([0-2]\d:[0-5]\d)$/
+  );
+  if (!match) return null;
+  const parsed = parseBookingPreferredStart(
+    `${match[1]} ${match[2]}`,
+    null,
+    policy,
+    { timeZone: branch?.timezone || DEFAULT_TIME_ZONE, now }
+  );
+  return parsed.complete ? parsed : null;
+}
+
+async function loadAvailableBookingAlternatives({
+  booking,
+  data,
+  bookingEngine,
+  bookingContext,
+  preferredStart,
+}) {
+  if (!bookingEngine || typeof bookingEngine.getAvailableAlternatives !== 'function') {
+    return [];
+  }
+  try {
+    const result = await bookingEngine.getAvailableAlternatives({
+      clinicId: bookingContext?.clinicId || data.clinic.id || null,
+      service: { id: booking.serviceId },
+      branch: { id: booking.branchId },
+      doctor: booking.doctorId ? { id: booking.doctorId } : null,
+      preferredStart,
+      limit: 3,
+    });
+    return Array.isArray(result?.alternatives)
+      ? result.alternatives.filter(({ date, time }) =>
+        /^\d{4}-\d{2}-\d{2}$/.test(date) && isTimeValue(time)
+      ).slice(0, 3)
+      : [];
+  } catch (error) {
+    console.error('BOOKING_ALTERNATIVES_FAILED', { code: error?.code || null });
+    return [];
+  }
+}
+
+function bookingAlternativesReply(reply, alternatives) {
+  return {
+    reply: `${reply}\n\nاختاري أحد المواعيد البديلة المتاحة:`,
+    interaction: {
+      version: 1,
+      mode: 'reply_buttons',
+      purpose: 'select_booking_alternative',
+      displayText: 'اختاري موعدًا بديلًا:',
+      options: alternatives.map(({ date, time }) => ({
+        id: `booking-alternative:${date}T${time}`,
+        label: `${date.slice(5).replace('-', '/')} ${displayTime(time)}`,
+      })),
+    },
   };
 }
 

@@ -414,6 +414,50 @@ class BookingOrchestrator {
     }).map(({ time }) => time);
     return { success: true, times };
   }
+
+  async getAvailableAlternatives(data = {}) {
+    const requested = new Date(data.preferred_start);
+    const clinic = await this.repositories.clinics.findById(data.clinic_id);
+    if (Number.isNaN(requested.getTime()) || !clinic?.timezone) {
+      return { success: false, reason: 'invalid_preferred_start', alternatives: [] };
+    }
+    const limit = boundedInteger(data.limit, 3, 1, 3);
+    const requestedDate = localIsoDate(requested, clinic.timezone);
+    const requestedMinute = localMinute(requested, clinic.timezone);
+    const context = {
+      clinic_id: data.clinic_id,
+      service_id: data.service_id,
+      branch_id: data.branch_id,
+      doctor_id: data.doctor_id || null,
+    };
+    const sameDay = await this.getAvailableTimes({ ...context, date: requestedDate });
+    const alternatives = (sameDay.times || [])
+      .map((time) => ({ date: requestedDate, time }))
+      .filter(({ time }) => timeToMinutes(time) !== requestedMinute)
+      .sort((first, second) =>
+        Math.abs(timeToMinutes(first.time) - requestedMinute) -
+        Math.abs(timeToMinutes(second.time) - requestedMinute) ||
+        first.time.localeCompare(second.time)
+      )
+      .slice(0, limit);
+    if (alternatives.length < limit) {
+      const dates = await this.getAvailableDates({
+        ...context,
+        from_date: addUtcDays(requestedDate, 1),
+        search_days: 30,
+        limit,
+      });
+      for (const date of dates.dates || []) {
+        const available = await this.getAvailableTimes({ ...context, date });
+        for (const time of available.times || []) {
+          alternatives.push({ date, time });
+          if (alternatives.length === limit) break;
+        }
+        if (alternatives.length === limit) break;
+      }
+    }
+    return { success: true, alternatives };
+  }
 }
 
 function boundedInteger(value, fallback, minimum, maximum) {
@@ -590,6 +634,17 @@ function localMinute(value, timeZone) {
   }).formatToParts(value);
   const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
   return Number(values.hour) * 60 + Number(values.minute);
+}
+
+function localIsoDate(value, timeZone) {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(value);
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${values.year}-${values.month}-${values.day}`;
 }
 
 function zonedLocalToDate(date, minuteOfDay, timeZone) {

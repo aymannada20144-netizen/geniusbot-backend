@@ -299,6 +299,36 @@ class BookingEngine {
       date,
     });
   }
+
+  async getAvailableAlternatives(command) {
+    const fields = readFields(
+      command,
+      ['clinicId', 'service', 'branch', 'doctor', 'preferredStart', 'limit'],
+      'BookingEngine available alternatives command must be a plain object',
+      'BookingEngine received unsupported available alternatives command field',
+      'BookingEngine does not accept accessor property: availableAlternativesCommand'
+    );
+    const clinicId = valueOrNull(fields.clinicId);
+    const service = readNested(valueOrNull(fields.service), 'service', ['id']);
+    const branch = readNested(valueOrNull(fields.branch), 'branch', ['id']);
+    const doctor = readNested(valueOrNull(fields.doctor), 'doctor', ['id']);
+    const preferredStart = valueOrNull(fields.preferredStart);
+    if (!clinicId || !service?.id || !branch?.id || !preferredStart) {
+      return { success: false, reason: 'missing_available_alternatives_input', alternatives: [] };
+    }
+    const method = findMethod(this.#bookingService, 'getAvailableAlternatives');
+    if (!method) {
+      throw new TypeError('BookingEngine requires bookingService.getAvailableAlternatives()');
+    }
+    return method.call(this.#bookingService, {
+      clinic_id: clinicId,
+      service_id: service.id,
+      branch_id: branch.id,
+      doctor_id: doctor?.id || null,
+      preferred_start: preferredStart,
+      limit: valueOrNull(fields.limit),
+    });
+  }
 }
 
 function readFields(
