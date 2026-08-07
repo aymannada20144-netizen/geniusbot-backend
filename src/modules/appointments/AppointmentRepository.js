@@ -1,4 +1,5 @@
 const BaseRepository = require('../../core/BaseRepository');
+const AppointmentEvents = require('./AppointmentEvents');
 
 class AppointmentRepository extends BaseRepository {
   constructor(db) {
@@ -290,20 +291,44 @@ class AppointmentRepository extends BaseRepository {
             COALESCE($8::text, ''),
             true
           )
+      ),
+      updated AS MATERIALIZED (
+        UPDATE ${this.fullTableName}
+        SET
+          "status" = $3,
+          "notes" = CASE
+            WHEN $3 = 'cancelled' AND $6::boolean THEN $5
+            ELSE "notes"
+          END,
+          "updated_at" = NOW()
+        WHERE "clinic_id" = $1
+          AND "id" = $2
+          AND ($4::text IS NULL OR "status" = $4)
+          AND EXISTS (SELECT 1 FROM audit_context)
+        RETURNING "id", "status"
+      ),
+      outbox_event AS (
+        INSERT INTO geniusbot.outbox_events (
+          event_name,
+          aggregate_type,
+          aggregate_id,
+          payload
+        )
+        SELECT
+          '${AppointmentEvents.STATUS_CHANGED}',
+          'appointment',
+          "id",
+          jsonb_build_object(
+            'appointmentId', "id"::text,
+            'fromStatus', $4,
+            'toStatus', "status"
+          )
+        FROM updated
+        RETURNING "id"
       )
-      UPDATE ${this.fullTableName}
-      SET
-        "status" = $3,
-        "notes" = CASE
-          WHEN $3 = 'cancelled' AND $6::boolean THEN $5
-          ELSE "notes"
-        END,
-        "updated_at" = NOW()
-      WHERE "clinic_id" = $1
-        AND "id" = $2
-        AND ($4::text IS NULL OR "status" = $4)
-        AND EXISTS (SELECT 1 FROM audit_context)
-      RETURNING "id", "status"
+      SELECT updated."id", updated."status"
+      FROM updated
+      JOIN outbox_event ON true
     `;
 
     const result = await this.query(sql, [
