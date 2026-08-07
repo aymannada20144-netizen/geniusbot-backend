@@ -273,9 +273,24 @@ class AppointmentRepository extends BaseRepository {
     status,
     expectedStatus = null,
     cancellationReason = null,
-    applyCancellationNotes = false
+    applyCancellationNotes = false,
+    actorId = null,
+    statusChangeNotes = null
   ) {
     const sql = `
+      WITH audit_context AS MATERIALIZED (
+        SELECT
+          pg_catalog.set_config(
+            'geniusbot.changed_by_staff_id',
+            COALESCE($7::text, ''),
+            true
+          ),
+          pg_catalog.set_config(
+            'geniusbot.status_change_notes',
+            COALESCE($8::text, ''),
+            true
+          )
+      )
       UPDATE ${this.fullTableName}
       SET
         "status" = $3,
@@ -287,6 +302,7 @@ class AppointmentRepository extends BaseRepository {
       WHERE "clinic_id" = $1
         AND "id" = $2
         AND ($4::text IS NULL OR "status" = $4)
+        AND EXISTS (SELECT 1 FROM audit_context)
       RETURNING "id", "status"
     `;
 
@@ -297,6 +313,8 @@ class AppointmentRepository extends BaseRepository {
       expectedStatus,
       cancellationReason,
       applyCancellationNotes,
+      actorId,
+      statusChangeNotes,
     ]);
 
     return result.rows[0] || null;

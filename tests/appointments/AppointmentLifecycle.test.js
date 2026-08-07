@@ -8,6 +8,9 @@ const AppointmentService = require('../../src/modules/appointments/AppointmentSe
 const AppointmentRepository = require(
   '../../src/modules/appointments/AppointmentRepository'
 );
+const AppointmentController = require(
+  '../../src/modules/appointments/AppointmentController'
+);
 const {
   validateAppointmentTransition,
 } = require('../../src/modules/appointments/appointmentLifecycle');
@@ -118,6 +121,8 @@ describe('Appointment lifecycle v1', () => {
       'pending',
       null,
       true,
+      null,
+      null,
     ]);
     assert.deepEqual(calls[1].params, [
       clinicId,
@@ -126,8 +131,95 @@ describe('Appointment lifecycle v1', () => {
       'pending',
       null,
       false,
+      null,
+      null,
     ]);
+    assert.match(calls[0].sql, /WITH audit_context AS MATERIALIZED/);
+    assert.match(calls[0].sql, /geniusbot\.changed_by_staff_id/);
+    assert.match(calls[0].sql, /geniusbot\.status_change_notes/);
     assert.match(calls[0].sql, /WHEN \$3 = 'cancelled' AND \$6::boolean THEN \$5/);
+  });
+
+  test('dashboard actor reaches real transitions but no-op performs no update', async () => {
+    const staffId = '00000000-0000-0000-0000-000000000003';
+    let status = 'pending';
+    const updates = [];
+    const repository = {
+      findByIdAndClinic: async () => ({ id: appointmentId, status }),
+      updateStatus: async (...args) => {
+        updates.push(args);
+        status = args[2];
+        return { id: appointmentId, status };
+      },
+    };
+    const service = new AppointmentService(repository);
+
+    await service.updateAppointmentStatus(
+      clinicId,
+      appointmentId,
+      'confirmed',
+      null,
+      false,
+      staffId
+    );
+    assert.equal(updates.length, 1);
+    assert.deepEqual(updates[0].slice(6), [staffId, null]);
+
+    await service.updateAppointmentStatus(
+      clinicId,
+      appointmentId,
+      'confirmed',
+      null,
+      false,
+      staffId
+    );
+    assert.equal(updates.length, 1);
+  });
+
+  test('controller forwards only the authenticated actor', async () => {
+    const staffId = '00000000-0000-0000-0000-000000000003';
+    const calls = [];
+    const service = {
+      updateAppointmentStatus: async (...args) => {
+        calls.push(['update', args]);
+        return { id: appointmentId };
+      },
+      cancelAppointment: async (...args) => {
+        calls.push(['cancel', args]);
+        return { id: appointmentId };
+      },
+      completeAppointment: async (...args) => {
+        calls.push(['complete', args]);
+        return { id: appointmentId };
+      },
+      markAppointmentAsNoShow: async (...args) => {
+        calls.push(['no-show', args]);
+        return { id: appointmentId };
+      },
+    };
+    const controller = new AppointmentController(service);
+    const request = {
+      params: { clinicId, appointmentId },
+      user: { id: staffId },
+      body: {
+        status: 'confirmed',
+        reason: 'patient request',
+        changedByStaffId: '00000000-0000-0000-0000-000000000099',
+      },
+    };
+    const reply = { send: (value) => value };
+
+    await controller.updateAppointmentStatus(request, reply);
+    await controller.cancelAppointment(request, reply);
+    await controller.completeAppointment(request, reply);
+    await controller.markAppointmentAsNoShow(request, reply);
+
+    assert.deepEqual(calls, [
+      ['update', [clinicId, appointmentId, 'confirmed', null, false, staffId]],
+      ['cancel', [clinicId, appointmentId, 'patient request', staffId]],
+      ['complete', [clinicId, appointmentId, staffId]],
+      ['no-show', [clinicId, appointmentId, staffId]],
+    ]);
   });
 
   test('database constraints, transition trigger, and existing history trigger support checked_in', () => {

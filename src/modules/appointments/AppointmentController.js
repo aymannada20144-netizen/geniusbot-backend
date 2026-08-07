@@ -25,7 +25,10 @@ class AppointmentController {
         const appointment = await this.appointmentService.updateAppointmentStatus(
             clinicId,
             appointmentId,
-            status
+            status,
+            null,
+            false,
+            request.user?.id ?? null
         );
 
         return reply.send({
@@ -69,7 +72,8 @@ class AppointmentController {
         const appointment = await this.appointmentService.cancelAppointment(
             clinicId,
             appointmentId,
-            reason
+            reason,
+            request.user?.id ?? null
         );
 
         return reply.send({
@@ -83,7 +87,8 @@ class AppointmentController {
 
         const appointment = await this.appointmentService.completeAppointment(
             clinicId,
-            appointmentId
+            appointmentId,
+            request.user?.id ?? null
         );
 
         return reply.send({
@@ -97,7 +102,8 @@ class AppointmentController {
 
         const appointment = await this.appointmentService.markAppointmentAsNoShow(
             clinicId,
-            appointmentId
+            appointmentId,
+            request.user?.id ?? null
         );
 
         return reply.send({

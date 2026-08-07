@@ -77,7 +77,8 @@ class AppointmentService {
     appointmentId,
     status,
     cancellationReason = null,
-    applyCancellationNotes = false
+    applyCancellationNotes = false,
+    actorId = null
   ) {
     validateUuid(clinicId, 'clinicId');
     validateUuid(appointmentId, 'appointmentId');
@@ -112,7 +113,9 @@ class AppointmentService {
       status,
       appointment.status,
       cancellationReason,
-      applyCancellationNotes
+      applyCancellationNotes,
+      actorId,
+      applyCancellationNotes ? cancellationReason : null
     );
 
     if (!updated) {
@@ -432,7 +435,12 @@ class AppointmentService {
     );
   }
 
-  async cancelAppointment(clinicId, appointmentId, reason = null) {
+  async cancelAppointment(
+    clinicId,
+    appointmentId,
+    reason = null,
+    actorId = null
+  ) {
     const appointment = await this.getValidatedAppointment(
       clinicId,
       appointmentId
@@ -444,19 +452,27 @@ class AppointmentService {
       appointmentId,
       'cancelled',
       reason,
-      true
+      true,
+      actorId
     );
   }
 
-  async completeAppointment(clinicId, appointmentId) {
+  async completeAppointment(clinicId, appointmentId, actorId = null) {
     return this.updateAppointmentStatus(
       clinicId,
       appointmentId,
-      'completed'
+      'completed',
+      null,
+      false,
+      actorId
     );
   }
 
-  async markAppointmentAsNoShow(clinicId, appointmentId) {
+  async markAppointmentAsNoShow(
+    clinicId,
+    appointmentId,
+    actorId = null
+  ) {
     const appointment = await this.getValidatedAppointment(
       clinicId,
       appointmentId
@@ -466,7 +482,10 @@ class AppointmentService {
     return this.updateAppointmentStatus(
       clinicId,
       appointmentId,
-      'no_show'
+      'no_show',
+      null,
+      false,
+      actorId
     );
   }
 
