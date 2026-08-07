@@ -5,6 +5,9 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { describe, test } = require('node:test');
 const AppointmentService = require('../../src/modules/appointments/AppointmentService');
+const AppointmentRepository = require(
+  '../../src/modules/appointments/AppointmentRepository'
+);
 const {
   validateAppointmentTransition,
 } = require('../../src/modules/appointments/appointmentLifecycle');
@@ -59,6 +62,72 @@ describe('Appointment lifecycle v1', () => {
       (await service.updateAppointmentStatus(clinicId, appointmentId, 'completed')).status,
       'completed'
     );
+  });
+
+  test('cancel and no-show wrappers retain their non-idempotent validation', async () => {
+    for (const [method, status] of [
+      ['cancelAppointment', 'cancelled'],
+      ['markAppointmentAsNoShow', 'no_show'],
+    ]) {
+      let writes = 0;
+      const repository = {
+        findByIdAndClinic: async () => ({ id: appointmentId, status }),
+        updateStatus: async () => {
+          writes += 1;
+          return { id: appointmentId, status };
+        },
+      };
+      const service = new AppointmentService(repository);
+
+      await assert.rejects(
+        service[method](clinicId, appointmentId),
+        /transition is not allowed/
+      );
+      assert.equal(writes, 0);
+    }
+  });
+
+  test('only the cancellation entry point applies cancellation notes', async () => {
+    const calls = [];
+    const repository = new AppointmentRepository({
+      query: async (sql, params) => {
+        calls.push({ sql, params });
+        return { rows: [] };
+      },
+    });
+
+    await repository.updateStatus(
+      clinicId,
+      appointmentId,
+      'cancelled',
+      'pending',
+      null,
+      true
+    );
+    await repository.updateStatus(
+      clinicId,
+      appointmentId,
+      'cancelled',
+      'pending'
+    );
+
+    assert.deepEqual(calls[0].params, [
+      clinicId,
+      appointmentId,
+      'cancelled',
+      'pending',
+      null,
+      true,
+    ]);
+    assert.deepEqual(calls[1].params, [
+      clinicId,
+      appointmentId,
+      'cancelled',
+      'pending',
+      null,
+      false,
+    ]);
+    assert.match(calls[0].sql, /WHEN \$3 = 'cancelled' AND \$6::boolean THEN \$5/);
   });
 
   test('database constraints, transition trigger, and existing history trigger support checked_in', () => {

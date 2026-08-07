@@ -271,12 +271,18 @@ class AppointmentRepository extends BaseRepository {
     clinicId,
     appointmentId,
     status,
-    expectedStatus = null
+    expectedStatus = null,
+    cancellationReason = null,
+    applyCancellationNotes = false
   ) {
     const sql = `
       UPDATE ${this.fullTableName}
       SET
         "status" = $3,
+        "notes" = CASE
+          WHEN $3 = 'cancelled' AND $6::boolean THEN $5
+          ELSE "notes"
+        END,
         "updated_at" = NOW()
       WHERE "clinic_id" = $1
         AND "id" = $2
@@ -289,28 +295,11 @@ class AppointmentRepository extends BaseRepository {
       appointmentId,
       status,
       expectedStatus,
+      cancellationReason,
+      applyCancellationNotes,
     ]);
 
     return result.rows[0] || null;
-  }
-
-  async cancelAppointment(clinicId, appointmentId, notes = null) {
-    return this.updateByIdAndClinic(clinicId, appointmentId, {
-      status: 'cancelled',
-      notes,
-    });
-  }
-
-  async completeAppointment(clinicId, appointmentId) {
-    return this.updateByIdAndClinic(clinicId, appointmentId, {
-      status: 'completed',
-    });
-  }
-
-  async markAppointmentAsNoShow(clinicId, appointmentId) {
-    return this.updateByIdAndClinic(clinicId, appointmentId, {
-      status: 'no_show',
-    });
   }
 
   async updateAppointmentSchedule(clinicId, appointmentId, data) {
