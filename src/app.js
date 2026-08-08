@@ -41,6 +41,10 @@ const AppointmentService = require(
 );
 const NotificationService = require('./services/NotificationService');
 const NotificationScheduler = require('./services/NotificationScheduler');
+const LocalEventBus = require('./core/events/LocalEventBus');
+const OutboxRepository = require('./core/events/OutboxRepository');
+const OutboxPublisher = require('./core/events/OutboxPublisher');
+const OutboxScheduler = require('./core/events/OutboxScheduler');
 
 const appointmentsModule = require('./modules/appointments');
 const dashboardModule = require('./modules/dashboard');
@@ -106,6 +110,11 @@ async function buildApp() {
       intervalMs: env.notifications.intervalMs,
       logger: app.log,
     }
+  );
+  const eventBus = new LocalEventBus({ logger: app.log });
+  const outboxScheduler = new OutboxScheduler(
+    new OutboxPublisher(new OutboxRepository(db), eventBus),
+    { logger: app.log }
   );
   const appointmentService = new AppointmentService(
     new AppointmentRepository(db),
@@ -197,8 +206,10 @@ async function buildApp() {
   await recoveryWorkerService.runNext();
 
   notificationScheduler.start();
+  outboxScheduler.start();
   app.addHook('onClose', async () => {
     notificationScheduler.stop();
+    outboxScheduler.stop();
   });
 
   return app;
