@@ -379,7 +379,7 @@ function assistantIdentityText(value) {
 }
 function isPresence(text) { return /^(?:هل )?(?:انتي معي|انتي موجوده)$/.test(text) || /^(?:موجوده|في احد|الو)$/.test(text); }
 function isHowAreYou(text) { return /(?:كيفك|كيف حالك|كيف الحال|اخبارك|كيف امورك|طمنيني عنك|ان شاء الله بخير)/.test(text); }
-function recognizeCourtesy(text) { if (/^(?:الله )?يعطيك العافيه$/.test(text)) return { type: 'courtesy', kind: 'wellbeing' }; if (/حبيبتي/.test(text)) return { type: 'courtesy', kind: 'affection' }; if (/^(?:تسلمي|ما قصرتي)(?: حبيبتي)?$/.test(text)) return { type: 'courtesy', kind: 'praise' }; if (/^(?:شكرا|متشكره)$/.test(text)) return { type: 'courtesy', kind: 'thanks' }; return null; }
+function recognizeCourtesy(text) { if (/^(?:الله )?يعطيك العافيه$/.test(text)) return { type: 'courtesy', kind: 'wellbeing' }; if (/حبيبتي/.test(text)) return { type: 'courtesy', kind: 'affection' }; if (/^(?:تسلمي|ما قصرتي)(?: حبيبتي)?$/.test(text)) return { type: 'courtesy', kind: 'praise' }; if (/^(?:شكرا(?: لك)?|متشكره|مشكوره)$/.test(text)) return { type: 'courtesy', kind: 'thanks' }; return null; }
 function isAcknowledgement(text) { return /^(?:تمام|اوكي|حسنا|طيب|ماشي|جميل|ممتاز)$/.test(text); }
 function isFarewell(text) { return /^(?:مع السلامه|الي اللقاء|اشوفك علي خير|نشوفك علي خير|في امان الله|تصبحي(?:n)? علي خير)$/.test(text); }
 function extractCity(text) { for (const c of SAUDI_CITIES) if (text.includes(c)) return c; return null; }

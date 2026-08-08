@@ -121,6 +121,17 @@ class ShadenEngine {
         return { reply: this.policy.serviceExists(null), nextState };
       }
       nextState.booking = emptyBookingState();
+      try {
+        const initialPreference = parseBookingPreferredStart(text, null, this.policy, {
+          timeZone: DEFAULT_TIME_ZONE,
+          now: this.clock.now(),
+        });
+        if (initialPreference.partial || initialPreference.complete) {
+          nextState.booking.preferredStart = initialPreference.value;
+        }
+      } catch (error) {
+        // The booking request remains valid when its optional date text cannot be parsed.
+      }
       nextState.context = null;
       if (!customerName) {
         nextState.step = 'customer_name';
@@ -471,7 +482,6 @@ function handleBookingStep({
         booking.city = selectedCity;
         booking.branchId = null;
         booking.doctorId = null;
-        booking.preferredStart = null;
         booking.step = 'branch';
         const branches = branchesForCity(data.branches, selectedCity, policy);
         return branchListReply(policy.bookingChooseBranch(branches), branches, policy);
@@ -1293,6 +1303,18 @@ async function handleBookingDatePeriodStep({
         bookingContext,
         parsedAvailability: parsed,
         recoverAlternatives: true,
+      });
+    }
+    if (parsed.partial && parsed.date) {
+      return handleBookingDateStep({
+        text,
+        interactiveReplyId: `date:${isoDate(parsed.date)}`,
+        booking,
+        data,
+        policy,
+        bookingEngine,
+        bookingContext,
+        now,
       });
     }
   } catch (error) {

@@ -48,6 +48,12 @@ function datePeriodState() {
   };
 }
 
+function dateState() {
+  const state = datePeriodState();
+  state.booking.step = 'date';
+  return state;
+}
+
 function availableDatesEngine(onAvailability = null) {
   return {
     async getAvailableDates() {
@@ -63,6 +69,20 @@ function availableDatesEngine(onAvailability = null) {
 function engine(onAvailability = null) {
   return new ShadenEngine({
     bookingEngine: availableDatesEngine(onAvailability),
+    clock: { now: () => new Date('2026-08-05T08:00:00.000Z') },
+  });
+}
+
+function directDateEngine() {
+  return new ShadenEngine({
+    bookingEngine: {
+      async getAvailableDates() {
+        return { success: true, dates: ['2026-08-06', '2026-08-07'] };
+      },
+      async getAvailableTimes() {
+        return { success: true, times: ['09:00'] };
+      },
+    },
     clock: { now: () => new Date('2026-08-05T08:00:00.000Z') },
   });
 }
@@ -91,6 +111,24 @@ function assertPriorBookingDataPreserved(actual, before) {
 }
 
 describe('date_period integration boundary', () => {
+  for (const [text, date] of [
+    ['بكره', '2026-08-06'],
+    ['بعد بكره', '2026-08-07'],
+  ]) {
+    test(`${text} follows the interactive date continuation`, async () => {
+      const natural = await turn({ text }, datePeriodState(), directDateEngine());
+      const interactive = await turn({
+        text: date,
+        rawPayload: { value: `date:${date}` },
+      }, dateState(), directDateEngine());
+
+      assert.deepEqual(natural, interactive);
+      assert.equal(natural.nextState.booking.step, 'time_period');
+      assert.equal(natural.nextState.booking.date, date);
+      assert.notEqual(natural.interaction?.purpose, 'select_date_period');
+    });
+  }
+
   test('natural-language date-time uses the production parser and current availability path', async () => {
     const current = datePeriodState();
     let availabilityCommand;

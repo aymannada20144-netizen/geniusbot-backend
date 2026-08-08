@@ -10,8 +10,8 @@ const BLOCKING_INTENTS = Object.freeze([
   { type: 'booking_rejection', pattern: /^(?:لا|ما)\s+(?:ابي|ابغي|اريد|ودي)?\s*(?:حجز|احجز|موعد)/u },
 ]);
 
-const BOOKING_PREFIX = /^(?:(?:هل\s+اقدر|ممكن|ودي|ابي|ابغي|اريد|اود|ارغب|حاب|حابه|عايز|عايزه)\s+)?(?:حجز|احجز|موعد)(?:\s+لي)?(?:\s+|$)/u;
-const BOOKING_SUFFIX = /^(?:جديد|جديده|اخر|اخرى|ثاني|ثانيه|موعد)$/u;
+const BOOKING_KEYWORD = /(?:^|\s)(?:حجز|احجز|موعد)(?=\s|$)/u;
+const BOOKING_MODIFIER = /(?:^|\s)(?:تاني|ثاني|ثانيه|تانيه|جديد|جديده|اخر|اخرى|اليوم|بكره|غدا|بعد|الاحد|الاثنين|الثلاثاء|الاربعاء|الخميس|الجمعه|السبت|الساعه|ص|م|am|pm|\d{1,2}(?::\d{2})?)(?=\s|$)/gu;
 
 function resolveBookingIntent(value) {
   const text = normalizeArabic(value);
@@ -21,9 +21,10 @@ function resolveBookingIntent(value) {
     if (intent.pattern.test(text)) return { type: intent.type };
   }
 
-  if (!BOOKING_PREFIX.test(text)) return null;
-  let serviceText = text.replace(BOOKING_PREFIX, '').trim();
-  if (BOOKING_SUFFIX.test(serviceText)) serviceText = '';
+  const bookingKeyword = text.match(BOOKING_KEYWORD);
+  if (!bookingKeyword) return null;
+  const afterKeyword = text.slice(bookingKeyword.index + bookingKeyword[0].length).trim();
+  const serviceText = afterKeyword.replace(BOOKING_MODIFIER, ' ').replace(/\s+/g, ' ').trim();
   return {
     type: 'booking',
     serviceText: serviceText || null,
@@ -31,4 +32,3 @@ function resolveBookingIntent(value) {
 }
 
 module.exports = Object.freeze({ resolveBookingIntent });
-
