@@ -109,6 +109,7 @@ class NotificationRepository extends BaseRepository {
          s.name AS service_name,
          d.full_name AS doctor_name,
          b.name AS branch_name,
+         r.room_number,
          b.google_maps_url AS review_url,
          c.name AS clinic_name,
          c.timezone AS clinic_timezone
@@ -129,6 +130,8 @@ class NotificationRepository extends BaseRepository {
        LEFT JOIN geniusbot.doctors AS d
          ON d.id = a.doctor_id
         AND d.clinic_id = a.clinic_id
+       LEFT JOIN geniusbot.rooms AS r
+         ON r.id = a.room_id
       WHERE ar.id = $1
       LIMIT 1`,
       [reminderId]

@@ -201,6 +201,7 @@ class AppointmentService {
           serviceName: context.service_name,
           doctorName: context.doctor_name,
           branchName: context.branch_name,
+          roomNumber: appointment.room_number,
           appointmentDate: context.appointment_date,
           appointmentTime: context.appointment_time,
           appointmentNumber: context.booking_reference,

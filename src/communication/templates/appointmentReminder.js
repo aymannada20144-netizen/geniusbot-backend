@@ -45,6 +45,7 @@ function buildAppointmentReminder(payload) {
                 serviceName: payload.serviceName,
                 doctorName: payload.doctorName,
                 branchName: payload.branchName,
+                roomNumber: payload.roomNumber,
                 appointmentDate: payload.appointmentDate,
                 appointmentTime: payload.appointmentTime,
                 appointmentNumber: payload.appointmentNumber

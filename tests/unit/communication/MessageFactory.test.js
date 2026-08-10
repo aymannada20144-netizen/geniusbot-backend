@@ -19,7 +19,7 @@ describe('MessageFactory', () => {
         patientName: 'محمد أحمد',
         doctorName: 'د. نوف الراجحي',
         branchName: 'فرع الروضة',
-        roomName: '201',
+        roomNumber: '201',
         appointmentDate: '2026-08-10',
         appointmentTime: '18:00',
         appointmentNumber: 'APT-1001',
@@ -68,13 +68,14 @@ describe('MessageFactory', () => {
             serviceName: validAppointmentPayload.serviceName,
             doctorName: validAppointmentPayload.doctorName,
             branchName: validAppointmentPayload.branchName,
+            roomNumber: validAppointmentPayload.roomNumber,
             appointmentDate: validAppointmentPayload.appointmentDate,
             appointmentTime: validAppointmentPayload.appointmentTime,
             appointmentNumber: validAppointmentPayload.appointmentNumber
         });
         assert.equal(
-            Object.hasOwn(message.template.variables, 'roomName'),
-            false
+            Object.hasOwn(message.template.variables, 'roomNumber'),
+            true
         );
 
     });

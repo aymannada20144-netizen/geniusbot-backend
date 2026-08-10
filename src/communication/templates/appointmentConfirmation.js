@@ -30,6 +30,8 @@ function buildAppointmentConfirmation(payload) {
 
                 branchName: payload.branchName,
 
+                roomNumber: payload.roomNumber,
+
                 appointmentDate: payload.appointmentDate,
 
                 appointmentTime: payload.appointmentTime,

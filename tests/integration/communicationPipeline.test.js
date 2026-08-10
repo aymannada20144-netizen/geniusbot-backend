@@ -12,6 +12,7 @@ const appointmentPayload = {
     patientName: 'أحمد محمد',
     doctorName: 'د. نوف',
     branchName: 'فرع جدة',
+    roomNumber: '204',
     appointmentDate: '2026-08-10',
     appointmentTime: '18:00',
     appointmentNumber: 'APT-1001',
@@ -28,10 +29,12 @@ test(
     async () => {
 
         let sendCount = 0;
+        let capturedPayload = null;
 
-        const fetchImpl = async () => {
+        const fetchImpl = async (_url, options) => {
 
             sendCount++;
+            capturedPayload = JSON.parse(options.body);
 
             return {
                 ok: true,
@@ -104,6 +107,7 @@ const message = MessageFactory.build(
             result.transportResult.messageId,
             'wamid.integration'
         );
+        assert.deepEqual(capturedPayload.template.components[0].parameters.map((parameter) => parameter.text), [appointmentPayload.patientName, appointmentPayload.serviceName, appointmentPayload.doctorName, appointmentPayload.branchName, appointmentPayload.roomNumber, appointmentPayload.appointmentDate, appointmentPayload.appointmentTime, appointmentPayload.appointmentNumber]);
 
     }
 );
@@ -146,6 +150,7 @@ test(
                 reminderPayload.serviceName,
                 reminderPayload.doctorName,
                 reminderPayload.branchName,
+                reminderPayload.roomNumber,
                 reminderPayload.appointmentDate,
                 reminderPayload.appointmentTime,
                 reminderPayload.appointmentNumber
