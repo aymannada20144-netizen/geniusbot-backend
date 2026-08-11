@@ -66,6 +66,10 @@ export function AppointmentsPage() {
   )
   const updatingIdsRef = useRef(new Set<string>())
   const [rowErrors, setRowErrors] = useState<Record<string, string>>({})
+  const [cancellationTarget, setCancellationTarget] = useState<Appointment | null>(null)
+  const [cancellationReason, setCancellationReason] = useState('')
+  const [cancellationError, setCancellationError] = useState<string | null>(null)
+  const [feedback, setFeedback] = useState<string | null>(null)
 
   useEffect(() => {
     let active = true
@@ -158,6 +162,56 @@ export function AppointmentsPage() {
     }
   }
 
+  function openCancellationDialog(appointment: Appointment) {
+    setCancellationTarget(appointment)
+    setCancellationReason('')
+    setCancellationError(null)
+    setFeedback(null)
+  }
+
+  function closeCancellationDialog() {
+    if (cancellationTarget && updatingIdsRef.current.has(cancellationTarget.id)) {
+      return
+    }
+    setCancellationTarget(null)
+    setCancellationReason('')
+    setCancellationError(null)
+  }
+
+  async function confirmCancellation() {
+    if (!cancellationTarget || updatingIdsRef.current.has(cancellationTarget.id)) {
+      return
+    }
+
+    const appointmentId = cancellationTarget.id
+    const reason = cancellationReason.trim()
+    updatingIdsRef.current.add(appointmentId)
+    setUpdatingIds(new Set(updatingIdsRef.current))
+    setCancellationError(null)
+
+    try {
+      const updated = await updateAppointmentStatus(
+        user!.clinicId,
+        appointmentId,
+        'cancelled',
+        reason || undefined,
+      )
+      setAppointments((current) => current.map((item) =>
+        item.id === appointmentId
+          ? { ...item, status: updated.status }
+          : item,
+      ))
+      setCancellationTarget(null)
+      setCancellationReason('')
+      setFeedback('Appointment cancelled successfully.')
+    } catch {
+      setCancellationError('Cancellation failed. Please try again.')
+    } finally {
+      updatingIdsRef.current.delete(appointmentId)
+      setUpdatingIds(new Set(updatingIdsRef.current))
+    }
+  }
+
   return (
     <section className="appointments-page">
       <header className="appointments-page__heading">
@@ -167,6 +221,12 @@ export function AppointmentsPage() {
           <p>Review upcoming visits and keep appointment statuses current.</p>
         </div>
       </header>
+
+      {feedback && (
+        <div className="appointments-feedback appointments-feedback--success" role="status">
+          {feedback}
+        </div>
+      )}
 
       <div className="appointments-summary" aria-label="Appointment summary">
         {Object.entries(summary).map(([label, value]) => (
@@ -266,7 +326,7 @@ export function AppointmentsPage() {
                         {canConfirm && <Button size="sm" isLoading={updating} disabled={updating} onClick={() => changeStatus(appointment.id, 'confirmed')}>Confirm</Button>}
                         {canCheckIn && <Button size="sm" isLoading={updating} disabled={updating} onClick={() => changeStatus(appointment.id, 'checked_in')}>Check In</Button>}
                         {canComplete && <Button size="sm" isLoading={updating} disabled={updating} onClick={() => changeStatus(appointment.id, 'completed')}>Complete</Button>}
-                        {canCancel && <Button size="sm" variant="danger" disabled={updating} onClick={() => changeStatus(appointment.id, 'cancelled')}>Cancel</Button>}
+                        {canCancel && <Button size="sm" variant="danger" disabled={updating} onClick={() => openCancellationDialog(appointment)}>Cancel</Button>}
                       </div>
                       {rowErrors[appointment.id] && <p className="appointment-row-error" role="alert">{rowErrors[appointment.id]}</p>}
                     </td>
@@ -275,6 +335,63 @@ export function AppointmentsPage() {
               })}
             </tbody>
           </table>
+        </div>
+      )}
+
+
+      {cancellationTarget && (
+        <div className="appointment-cancel-dialog__backdrop">
+          <section
+            className="appointment-cancel-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="appointment-cancel-dialog-title"
+          >
+            <header>
+              <h3 id="appointment-cancel-dialog-title">Cancel appointment?</h3>
+              <p>
+                This will cancel the appointment for {cancellationTarget.patientName}.
+                Pending reminders will also be cancelled.
+              </p>
+            </header>
+
+            <label htmlFor="appointment-cancellation-reason">
+              Cancellation reason <span>(optional)</span>
+            </label>
+            <textarea
+              id="appointment-cancellation-reason"
+              value={cancellationReason}
+              rows={4}
+              maxLength={1000}
+              placeholder="Add a reason for this cancellation"
+              disabled={updatingIds.has(cancellationTarget.id)}
+              onChange={(event) => setCancellationReason(event.target.value)}
+            />
+
+            {cancellationError && (
+              <p className="appointment-cancel-dialog__error" role="alert">
+                {cancellationError}
+              </p>
+            )}
+
+            <footer>
+              <Button
+                variant="secondary"
+                disabled={updatingIds.has(cancellationTarget.id)}
+                onClick={closeCancellationDialog}
+              >
+                Back
+              </Button>
+              <Button
+                variant="danger"
+                isLoading={updatingIds.has(cancellationTarget.id)}
+                loadingText="Cancelling..."
+                onClick={confirmCancellation}
+              >
+                Confirm Cancellation
+              </Button>
+            </footer>
+          </section>
         </div>
       )}
     </section>

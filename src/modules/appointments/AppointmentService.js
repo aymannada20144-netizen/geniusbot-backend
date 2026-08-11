@@ -89,6 +89,15 @@ class AppointmentService {
     validateUuid(clinicId, 'clinicId');
     validateUuid(appointmentId, 'appointmentId');
 
+    if (status === 'cancelled') {
+      return this.cancelAppointment(
+        clinicId,
+        appointmentId,
+        cancellationReason,
+        actorId
+      );
+    }
+
     const appointment =
       await this.appointmentRepository.findByIdAndClinic(
         clinicId,
@@ -452,16 +461,78 @@ class AppointmentService {
       clinicId,
       appointmentId
     );
+
+    if (appointment.status === 'cancelled') {
+      return this.#cancelledResponse(appointment.id);
+    }
+
     validateAppointmentTransition(appointment.status, 'cancelled');
 
-    return this.updateAppointmentStatus(
-      clinicId,
-      appointmentId,
-      'cancelled',
-      reason,
-      true,
-      actorId
-    );
+    const normalizedReason = reason == null || String(reason).trim() === ''
+      ? null
+      : String(reason).trim();
+
+    let result;
+    try {
+      result = await this.applyValidatedChange(
+        {
+          clinicId,
+          appointmentId,
+          expected: {
+            status: appointment.status,
+            updatedAt: appointment.updated_at,
+          },
+          operation: 'cancel',
+          changes: { reason: normalizedReason },
+          actor: {
+            staffId: actorId,
+            patientId: null,
+            source: 'api',
+          },
+          metadata: {},
+        },
+        {
+          status: 'cancelled',
+          cancellation_reason: normalizedReason,
+        }
+      );
+    } catch (error) {
+      if (error?.code !== 'APPOINTMENT_STALE') throw error;
+      const current = await this.appointmentRepository.findByIdAndClinic(
+        clinicId,
+        appointmentId
+      );
+      if (current?.status !== 'cancelled') throw error;
+      return this.#cancelledResponse(current.id);
+    }
+
+    if (this.notificationService) {
+      try {
+        await this.notificationService.cancelAppointmentNotifications(
+          appointmentId
+        );
+      } catch (error) {
+        console.error('Appointment notification cleanup failed.', {
+          appointmentId,
+          clinicId,
+          errorCode: error?.code || 'NOTIFICATION_CLEANUP_FAILED',
+        });
+      }
+    }
+
+    return this.#cancelledResponse(result.appointment.id);
+  }
+
+  #cancelledResponse(appointmentId) {
+    return {
+      id: appointmentId,
+      status: 'cancelled',
+      communication: {
+        attempted: false,
+        success: false,
+        status: 'not_required',
+      },
+    };
   }
 
   async completeAppointment(clinicId, appointmentId, actorId = null) {

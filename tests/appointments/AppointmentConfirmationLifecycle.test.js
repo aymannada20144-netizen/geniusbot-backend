@@ -26,12 +26,20 @@ function createHarness(options = {}) {
   let sends = 0;
   let sendArguments = null;
   const repository = {
-    findByIdAndClinic: async () => ({ id: IDS.appointment, status }),
+    findByIdAndClinic: async () => ({
+      id: IDS.appointment,
+      status,
+      updated_at: '2026-08-11T08:00:00.000Z',
+    }),
     updateStatus: async (_clinicId, _appointmentId, next, expected) => {
       if (options.updateFails) return null;
       if (status !== expected) return null;
       status = next;
       return { id: IDS.appointment, status };
+    },
+    applyAtomicChange: async ({ patch }) => {
+      status = patch.status;
+      return { appointment: { id: IDS.appointment, status } };
     },
     findPresentationById: async () => ({
       id: IDS.appointment,

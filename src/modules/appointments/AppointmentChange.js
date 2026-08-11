@@ -18,10 +18,12 @@ const CHANGE_FIELDS = Object.freeze({
   room_id: 'room',
   quoted_price: 'price',
   currency: 'price',
-  cancellation_reason: 'reason',
 });
-const PATCH_FIELDS = Object.freeze(Object.keys(CHANGE_FIELDS));
-const SNAPSHOT_FIELDS = PATCH_FIELDS;
+const PATCH_FIELDS = Object.freeze([
+  ...Object.keys(CHANGE_FIELDS),
+  'cancellation_reason',
+]);
+const SNAPSHOT_FIELDS = Object.freeze(Object.keys(CHANGE_FIELDS));
 
 function optionalUuid(value, fieldName) {
   if (value == null) return null;

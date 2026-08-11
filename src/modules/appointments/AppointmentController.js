@@ -21,12 +21,12 @@ class AppointmentController {
 
     async updateAppointmentStatus(request, reply) {
         const { clinicId, appointmentId } = request.params;
-        const { status } = request.body || {};
+        const { status, reason = null } = request.body || {};
         const appointment = await this.appointmentService.updateAppointmentStatus(
             clinicId,
             appointmentId,
             status,
-            null,
+            reason,
             false,
             request.user?.id ?? null
         );

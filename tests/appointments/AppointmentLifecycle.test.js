@@ -67,27 +67,22 @@ describe('Appointment lifecycle v1', () => {
     );
   });
 
-  test('cancel and no-show wrappers retain their non-idempotent validation', async () => {
-    for (const [method, status] of [
-      ['cancelAppointment', 'cancelled'],
-      ['markAppointmentAsNoShow', 'no_show'],
-    ]) {
-      let writes = 0;
-      const repository = {
-        findByIdAndClinic: async () => ({ id: appointmentId, status }),
-        updateStatus: async () => {
-          writes += 1;
-          return { id: appointmentId, status };
-        },
-      };
-      const service = new AppointmentService(repository);
+  test('no-show wrapper retains its non-idempotent validation', async () => {
+    let writes = 0;
+    const repository = {
+      findByIdAndClinic: async () => ({ id: appointmentId, status: 'no_show' }),
+      updateStatus: async () => {
+        writes += 1;
+        return { id: appointmentId, status: 'no_show' };
+      },
+    };
+    const service = new AppointmentService(repository);
 
-      await assert.rejects(
-        service[method](clinicId, appointmentId),
-        /transition is not allowed/
-      );
-      assert.equal(writes, 0);
-    }
+    await assert.rejects(
+      service.markAppointmentAsNoShow(clinicId, appointmentId),
+      /transition is not allowed/
+    );
+    assert.equal(writes, 0);
   });
 
   test('only the cancellation entry point applies cancellation notes', async () => {
@@ -215,7 +210,14 @@ describe('Appointment lifecycle v1', () => {
     await controller.markAppointmentAsNoShow(request, reply);
 
     assert.deepEqual(calls, [
-      ['update', [clinicId, appointmentId, 'confirmed', null, false, staffId]],
+      ['update', [
+        clinicId,
+        appointmentId,
+        'confirmed',
+        'patient request',
+        false,
+        staffId,
+      ]],
       ['cancel', [clinicId, appointmentId, 'patient request', staffId]],
       ['complete', [clinicId, appointmentId, staffId]],
       ['no-show', [clinicId, appointmentId, staffId]],

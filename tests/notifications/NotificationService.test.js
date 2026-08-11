@@ -5,10 +5,62 @@ const { describe, test } = require('node:test');
 const NotificationService = require(
   '../../src/services/NotificationService'
 );
+const NotificationRepository = require(
+  '../../src/repositories/NotificationRepository'
+);
 
 const APPOINTMENT_ID = '00000000-0000-0000-0000-000000000001';
 
 describe('NotificationService', () => {
+  test('cancellation cleanup changes only pending reminders', async () => {
+    let statement;
+    const repository = new NotificationRepository({
+      query: async (sql) => {
+        statement = sql;
+        return { rows: [] };
+      },
+    });
+    await repository.cancelPendingByAppointment(APPOINTMENT_ID);
+    assert.match(statement, /status = 'pending'/);
+    assert.doesNotMatch(statement, /processing/);
+  });
+
+  test('a claimed reminder is cancelled before transport when appointment is stale', async () => {
+    const states = [];
+    let sends = 0;
+    const service = new NotificationService({
+      claimDue: async () => [{ id: 'claimed' }],
+      loadDeliveryContext: async () => ({
+        reminder_type: 'same_day',
+        reminder_status: 'processing',
+        appointment_status: 'cancelled',
+        recipient: '966500000001',
+      }),
+      markCancelled: async (id) => states.push(`cancelled:${id}`),
+    }, {
+      send: async () => {
+        sends += 1;
+        return { success: true };
+      },
+    });
+    const result = await service.processDue();
+    assert.equal(sends, 0);
+    assert.deepEqual(states, ['cancelled:claimed']);
+    assert.equal(result[0].errorCode, 'APPOINTMENT_NOT_REMINDABLE');
+  });
+
+  test('sent reminders are not rewritten during appointment cleanup', async () => {
+    let statement;
+    const repository = new NotificationRepository({
+      query: async (sql) => {
+        statement = sql;
+        return { rows: [{ id: 'pending-only' }] };
+      },
+    });
+    await repository.cancelPendingByAppointment(APPOINTMENT_ID);
+    assert.doesNotMatch(statement, /status IN/);
+    assert.match(statement, /AND status = 'pending'/);
+  });
   test('future appointment schedules day-before and same-day reminders', async (t) => {
     t.mock.timers.enable({
       apis: ['Date'],

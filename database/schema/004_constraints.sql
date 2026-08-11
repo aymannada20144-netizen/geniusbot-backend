@@ -970,15 +970,6 @@ SELECT geniusbot.add_constraint_if_missing(
 
 SELECT geniusbot.add_constraint_if_missing(
     'appointments',
-    'chk_appointments_cancellation_reason',
-    'CHECK (
-        status <> ''cancelled''
-        OR cancellation_reason IS NOT NULL
-    )'
-);
-
-SELECT geniusbot.add_constraint_if_missing(
-    'appointments',
     'excl_appointments_doctor_overlap',
     'EXCLUDE USING gist (
         doctor_id WITH =,

@@ -36,6 +36,7 @@ function baseAppointment() {
     room_id: '77777777-7777-4777-8777-777777777777',
     quoted_price: '100.00',
     currency: 'SAR',
+    notes: 'Patient requested morning appointment',
     cancellation_reason: null,
     updated_at: updatedAt,
   };
@@ -51,6 +52,16 @@ function createTransactionalDb({ failAudit = false, failOutbox = false,
 
   return {
     committed,
+    async query(sql) {
+      if (/SELECT \*/.test(sql) && /"clinic_id" = \$1/.test(sql)) {
+        return {
+          rows: committed.appointment
+            ? [structuredClone(committed.appointment)]
+            : [],
+        };
+      }
+      throw new Error(`Unexpected non-transactional SQL in test: ${sql}`);
+    },
     async transaction(callback) {
       const working = structuredClone(committed);
       const client = {
@@ -59,6 +70,9 @@ function createTransactionalDb({ failAudit = false, failOutbox = false,
             return {
               rows: working.appointment ? [structuredClone(working.appointment)] : [],
             };
+          }
+          if (/pg_catalog\.set_config/.test(sql)) {
+            return { rows: [{}] };
           }
           if (/UPDATE "geniusbot"\."appointments"/.test(sql)) {
             if (slotConflict) {
@@ -166,6 +180,98 @@ test('atomically updates appointment, audit, and appointment.changed outbox', as
   assert.deepEqual(Object.keys(result.event.before), ['doctor_id']);
   assert.deepEqual(Object.keys(result.event.after), ['doctor_id']);
 });
+
+test('atomic cancellation preserves both status and semantic outbox events', async () => {
+  const db = createTransactionalDb();
+  const repository = new AppointmentRepository(db);
+  const result = await repository.applyAtomicChange({
+    clinicId,
+    appointmentId,
+    expectedStatus: 'confirmed',
+    expectedUpdatedAt: updatedAt,
+    operation: 'cancel',
+    patch: {
+      status: 'cancelled',
+      cancellation_reason: 'Patient request',
+    },
+    actor: { staffId: null, patientId: null, source: 'api' },
+    reason: 'Patient request',
+  });
+
+  assert.equal(result.appointment.status, 'cancelled');
+  assert.deepEqual(result.event.changeTypes, ['status']);
+  assert.deepEqual(result.event.before, { status: 'confirmed' });
+  assert.deepEqual(result.event.after, { status: 'cancelled' });
+  assert.deepEqual(
+    db.committed.events.map((event) => event.name),
+    [AppointmentEvents.STATUS_CHANGED, AppointmentEvents.CHANGED]
+  );
+  assert.equal(db.committed.audits[0].operation, 'cancel');
+});
+
+test('generic cancelled status persists AM-02 audit and outbox atomically', async () => {
+  const db = createTransactionalDb();
+  let notificationCleanups = 0;
+  const service = new AppointmentService(
+    new AppointmentRepository(db),
+    null,
+    {
+      cancelAppointmentNotifications: async () => {
+        notificationCleanups += 1;
+      },
+    }
+  );
+
+  const result = await service.updateAppointmentStatus(
+    clinicId,
+    appointmentId,
+    'cancelled',
+    'Travel',
+    false,
+    null
+  );
+
+  assert.equal(result.status, 'cancelled');
+  assert.equal(db.committed.appointment.status, 'cancelled');
+  assert.equal(db.committed.appointment.cancellation_reason, 'Travel');
+  assert.equal(
+    db.committed.appointment.notes,
+    'Patient requested morning appointment'
+  );
+  assert.equal(notificationCleanups, 1);
+  assert.equal(db.committed.audits.length, 1);
+  assert.equal(db.committed.audits[0].operation, 'cancel');
+  assert.deepEqual(db.committed.audits[0].changeTypes, ['status']);
+  assert.deepEqual(
+    db.committed.events.map((event) => event.name),
+    [AppointmentEvents.STATUS_CHANGED, AppointmentEvents.CHANGED]
+  );
+  assert.equal(db.committed.events[1].payload.reason, 'Travel');
+});
+
+for (const failure of ['audit', 'outbox']) {
+  test(`atomic cancellation rolls back when ${failure} persistence fails`, async () => {
+    const db = createTransactionalDb({
+      failAudit: failure === 'audit',
+      failOutbox: failure === 'outbox',
+    });
+    const repository = new AppointmentRepository(db);
+    await assert.rejects(repository.applyAtomicChange({
+      clinicId,
+      appointmentId,
+      operation: 'cancel',
+      patch: {
+        status: 'cancelled',
+        cancellation_reason: 'Patient request',
+      },
+      actor: { source: 'api' },
+      reason: 'Patient request',
+    }));
+    assert.equal(db.committed.appointment.status, 'confirmed');
+    assert.equal(db.committed.audits.length, 0);
+    assert.equal(db.committed.events.length, 0);
+  });
+}
 
 for (const failure of ['audit', 'outbox']) {
   test(`${failure} failure rolls back appointment and all foundation writes`, async () => {
@@ -330,4 +436,21 @@ test('migration defines minimal non-destructive change audit infrastructure', ()
   assert.match(migration, /appointment_id, created_at DESC/);
   assert.match(migration, /clinic_id, created_at DESC/);
   assert.doesNotMatch(migration, /DROP TABLE|DELETE FROM|TRUNCATE/i);
+});
+
+test('cancellation reason migration is nullable and does not rewrite notes', () => {
+  const migration = fs.readFileSync(path.join(
+    __dirname,
+    '../../database/migrations/021_appointment_cancellation_reason.sql'
+  ), 'utf8');
+  assert.match(
+    migration,
+    /ADD COLUMN IF NOT EXISTS cancellation_reason text NULL/
+  );
+  assert.match(
+    migration,
+    /DROP CONSTRAINT IF EXISTS chk_appointments_cancellation_reason/
+  );
+  assert.doesNotMatch(migration, /UPDATE|DELETE FROM|TRUNCATE/i);
+  assert.doesNotMatch(migration, /SET\s+notes|cancellation_reason\s*=\s*notes/i);
 });

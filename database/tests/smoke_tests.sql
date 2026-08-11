@@ -237,6 +237,7 @@ SELECT pg_temp.assert_true(
                 ('status'),
                 ('source'),
                 ('notes'),
+                ('cancellation_reason'),
                 ('created_at'),
                 ('updated_at')
         ) AS required_column(column_name)

@@ -413,6 +413,19 @@ class AppointmentRepository extends BaseRepository {
           throw error;
         }
 
+        if (Object.prototype.hasOwnProperty.call(validatedPatch, 'status')) {
+          await client.query(
+            `SELECT
+               pg_catalog.set_config(
+                 'geniusbot.changed_by_staff_id', $1, true
+               ),
+               pg_catalog.set_config(
+                 'geniusbot.status_change_notes', $2, true
+               )`,
+            [actor.staffId || '', reason || '']
+          );
+        }
+
         const fields = Object.keys(validatedPatch);
         const values = Object.values(validatedPatch);
         const setClause = fields
@@ -477,6 +490,23 @@ class AppointmentRepository extends BaseRepository {
           actor: { type: actorType, id: actorId, source: actor.source },
           ...(reason ? { reason } : {}),
         };
+
+        if (changeTypes.includes('status')) {
+          await client.query(
+            `INSERT INTO geniusbot.outbox_events (
+               event_name, aggregate_type, aggregate_id, payload
+             ) VALUES ($1, 'appointment', $2, $3)`,
+            [
+              AppointmentEvents.STATUS_CHANGED,
+              appointmentId,
+              {
+                appointmentId,
+                fromStatus: before.status,
+                toStatus: after.status,
+              },
+            ]
+          );
+        }
 
         await client.query(
           `INSERT INTO geniusbot.outbox_events (

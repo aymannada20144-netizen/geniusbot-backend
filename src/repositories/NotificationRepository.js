@@ -50,7 +50,7 @@ class NotificationRepository extends BaseRepository {
           SET status = 'cancelled',
               updated_at = CURRENT_TIMESTAMP
         WHERE appointment_id = $1
-          AND status IN ('pending', 'processing')
+          AND status = 'pending'
        RETURNING *`,
       [appointmentId]
     );
@@ -97,7 +97,9 @@ class NotificationRepository extends BaseRepository {
     const result = await this.query(
       `SELECT
          ar.*,
+         ar.status AS reminder_status,
          a.clinic_id,
+         a.status AS appointment_status,
          a.booking_reference AS appointment_reference,
          a.appointment_start,
          p.id AS patient_id,
@@ -159,6 +161,20 @@ class NotificationRepository extends BaseRepository {
     const result = await this.query(
       `UPDATE geniusbot.appointment_reminders
           SET status = 'failed',
+              updated_at = CURRENT_TIMESTAMP
+        WHERE id = $1
+          AND status = 'processing'
+       RETURNING *`,
+      [reminderId]
+    );
+
+    return result.rows[0] || null;
+  }
+
+  async markCancelled(reminderId) {
+    const result = await this.query(
+      `UPDATE geniusbot.appointment_reminders
+          SET status = 'cancelled',
               updated_at = CURRENT_TIMESTAMP
         WHERE id = $1
           AND status = 'processing'

@@ -36,12 +36,16 @@ export async function updateAppointmentStatus(
   clinicId: string,
   appointmentId: string,
   status: 'confirmed' | 'checked_in' | 'completed' | 'cancelled',
+  reason?: string,
 ): Promise<{ id: string; status: AppointmentStatus }> {
   const response = await apiClient.patch<
     ApiSuccessResponse<{ id: string; status: AppointmentStatus }>
   >(
     `/api/clinics/${encodeURIComponent(clinicId)}/appointments/${encodeURIComponent(appointmentId)}/status`,
-    { status },
+    {
+      status,
+      ...(reason ? { reason } : {}),
+    },
   )
 
   return response.data.data

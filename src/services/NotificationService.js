@@ -130,6 +130,15 @@ class NotificationService {
       const context = await this.notificationRepository.loadDeliveryContext(
         reminder.id
       );
+      if (context && !this.#isDeliveryAllowed(context)) {
+        await this.notificationRepository.markCancelled(reminder.id);
+        results.push({
+          id: reminder.id,
+          sent: false,
+          errorCode: 'APPOINTMENT_NOT_REMINDABLE',
+        });
+        continue;
+      }
       if (!context?.recipient) {
         await this.notificationRepository.markFailed(reminder.id);
         results.push({
@@ -310,6 +319,16 @@ class NotificationService {
       error.code = 'REMINDER_CONTEXT_INCOMPLETE';
       throw error;
     }
+  }
+
+  #isDeliveryAllowed(context) {
+    if (['day_before', 'same_day'].includes(context.reminder_type)) {
+      return ['pending', 'confirmed'].includes(context.appointment_status);
+    }
+    if (['followup', 'google_review'].includes(context.reminder_type)) {
+      return context.appointment_status === 'completed';
+    }
+    return true;
   }
 
   #validateGoogleReviewPayload(payload) {
