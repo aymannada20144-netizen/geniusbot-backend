@@ -1,5 +1,12 @@
 const BaseRepository = require('../../core/BaseRepository');
+const { ConflictError, NotFoundError } = require('../../core/errors');
+const mapPostgresError = require('../../core/errors/postgresErrorMapper');
 const AppointmentEvents = require('./AppointmentEvents');
+const {
+  deriveChangeTypes,
+  semanticSnapshot,
+  validateResolvedPatch,
+} = require('./AppointmentChange');
 
 class AppointmentRepository extends BaseRepository {
   constructor(db) {
@@ -350,6 +357,141 @@ class AppointmentRepository extends BaseRepository {
       appointment_start: data.appointment_start,
       appointment_end: data.appointment_end,
     });
+  }
+
+  async applyAtomicChange({
+    clinicId,
+    appointmentId,
+    expectedStatus = null,
+    expectedUpdatedAt = null,
+    operation,
+    patch,
+    actor,
+    reason = null,
+  }) {
+    if (!this.db || typeof this.db.transaction !== 'function') {
+      throw new TypeError(
+        'AppointmentRepository.applyAtomicChange requires db.transaction().'
+      );
+    }
+
+    const validatedPatch = validateResolvedPatch(patch);
+
+    try {
+      return await this.db.transaction(async (client) => {
+        const lockedResult = await client.query(
+          `SELECT *
+             FROM ${this.fullTableName}
+            WHERE "id" = $1
+            FOR UPDATE`,
+          [appointmentId]
+        );
+        const beforeAppointment = lockedResult.rows[0];
+
+        if (!beforeAppointment) {
+          const error = new NotFoundError('Appointment not found.');
+          error.code = 'APPOINTMENT_NOT_FOUND';
+          throw error;
+        }
+        if (beforeAppointment.clinic_id !== clinicId) {
+          const error = new NotFoundError(
+            'Appointment was not found in the requested clinic.'
+          );
+          error.code = 'APPOINTMENT_CLINIC_SCOPE_VIOLATION';
+          throw error;
+        }
+
+        const actualUpdatedAt = new Date(beforeAppointment.updated_at).toISOString();
+        if (
+          (expectedStatus != null && beforeAppointment.status !== expectedStatus) ||
+          (expectedUpdatedAt != null && actualUpdatedAt !== expectedUpdatedAt)
+        ) {
+          const error = new ConflictError(
+            'The appointment changed after it was reviewed.'
+          );
+          error.code = 'APPOINTMENT_STALE';
+          throw error;
+        }
+
+        const fields = Object.keys(validatedPatch);
+        const values = Object.values(validatedPatch);
+        const setClause = fields
+          .map((field, index) => `${this.quoteIdentifier(field)} = $${index + 1}`)
+          .join(', ');
+        const updatedResult = await client.query(
+          `UPDATE ${this.fullTableName}
+              SET ${setClause}, "updated_at" = NOW()
+            WHERE "id" = $${fields.length + 1}
+              AND "clinic_id" = $${fields.length + 2}
+          RETURNING *`,
+          [...values, appointmentId, clinicId]
+        );
+        const afterAppointment = updatedResult.rows[0];
+        const before = semanticSnapshot(beforeAppointment);
+        const after = semanticSnapshot(afterAppointment);
+        const changeTypes = deriveChangeTypes(before, after);
+
+        if (changeTypes.length === 0) {
+          const error = new ConflictError(
+            'The requested appointment change has no effect.'
+          );
+          error.code = 'APPOINTMENT_CHANGE_EMPTY';
+          throw error;
+        }
+
+        const actorType = actor.staffId
+          ? 'staff'
+          : actor.patientId
+            ? 'patient'
+            : 'system';
+        const actorId = actor.staffId || actor.patientId || null;
+        const auditResult = await client.query(
+          `INSERT INTO geniusbot.appointment_change_logs (
+             appointment_id, clinic_id, operation, change_types,
+             before_state, after_state, changed_by_staff_id,
+             actor_type, actor_id, source, reason
+           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+           RETURNING id, created_at`,
+          [
+            appointmentId, clinicId, operation, changeTypes, before, after,
+            actor.staffId || null, actorType, actorId, actor.source, reason,
+          ]
+        );
+        const audit = auditResult.rows[0];
+        const changedFields = Object.keys(after).filter(
+          (field) => before[field] !== after[field]
+        );
+        const eventBefore = Object.fromEntries(
+          changedFields.map((field) => [field, before[field]])
+        );
+        const eventAfter = Object.fromEntries(
+          changedFields.map((field) => [field, after[field]])
+        );
+        const eventPayload = {
+          clinicId,
+          appointmentId,
+          operation,
+          changeTypes,
+          before: eventBefore,
+          after: eventAfter,
+          actor: { type: actorType, id: actorId, source: actor.source },
+          ...(reason ? { reason } : {}),
+        };
+
+        await client.query(
+          `INSERT INTO geniusbot.outbox_events (
+             event_name, aggregate_type, aggregate_id, payload
+           ) VALUES ($1, 'appointment', $2, $3)`,
+          [AppointmentEvents.CHANGED, appointmentId, eventPayload]
+        );
+
+        return { appointment: afterAppointment, audit, event: eventPayload };
+      });
+    } catch (error) {
+      const mapped = mapPostgresError(error);
+      if (mapped) throw mapped;
+      throw error;
+    }
   }
 }
 

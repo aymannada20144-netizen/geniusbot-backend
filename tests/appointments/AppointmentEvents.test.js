@@ -12,6 +12,7 @@ test('defines the immutable appointment status-changed event name', () => {
     'appointment.status_changed'
   );
   assert.equal(Object.isFrozen(AppointmentEvents), true);
+  assert.equal(AppointmentEvents.CHANGED, 'appointment.changed');
   assert.throws(() => {
     AppointmentEvents.STATUS_CHANGED = 'changed';
   }, TypeError);

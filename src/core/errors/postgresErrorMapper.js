@@ -3,6 +3,21 @@
 const { ConflictError } = require('./index');
 
 const POSTGRES_CONSTRAINT_MAP = Object.freeze({
+  excl_appointments_doctor_overlap: {
+    ErrorClass: ConflictError,
+    code: 'APPOINTMENT_SLOT_NO_LONGER_AVAILABLE',
+    message: 'The requested appointment slot is no longer available.',
+  },
+  excl_appointments_room_overlap: {
+    ErrorClass: ConflictError,
+    code: 'APPOINTMENT_SLOT_NO_LONGER_AVAILABLE',
+    message: 'The requested appointment slot is no longer available.',
+  },
+  excl_appointments_patient_overlap: {
+    ErrorClass: ConflictError,
+    code: 'APPOINTMENT_SLOT_NO_LONGER_AVAILABLE',
+    message: 'The requested appointment slot is no longer available.',
+  },
   no_patient_schedule_overlap: {
     ErrorClass: ConflictError,
     message: 'Patient already has another appointment at this time.',

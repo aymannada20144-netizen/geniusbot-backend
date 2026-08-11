@@ -11,6 +11,12 @@ const {
   validateAppointmentTransition,
 } = require('./appointmentLifecycle');
 const {
+  deriveChangeTypes,
+  normalizeAppointmentChangeCommand,
+  semanticSnapshot,
+  validateResolvedPatch,
+} = require('./AppointmentChange');
+const {
   normalizeSaudiMobileDigits,
 } = require('../../core/validators/saudiMobile');
 const {
@@ -537,6 +543,33 @@ class AppointmentService {
         appointment_end: appointmentEnd,
       }
     );
+  }
+
+  normalizeChangeCommand(command) {
+    return normalizeAppointmentChangeCommand(command);
+  }
+
+  deriveSemanticChangeTypes(before, after) {
+    return deriveChangeTypes(
+      semanticSnapshot(before),
+      semanticSnapshot(after)
+    );
+  }
+
+  async applyValidatedChange(command, resolvedPatch) {
+    const normalized = this.normalizeChangeCommand(command);
+    const patch = validateResolvedPatch(resolvedPatch);
+
+    return this.appointmentRepository.applyAtomicChange({
+      clinicId: normalized.clinicId,
+      appointmentId: normalized.appointmentId,
+      expectedStatus: normalized.expected.status,
+      expectedUpdatedAt: normalized.expected.updatedAt,
+      operation: normalized.operation,
+      patch,
+      actor: normalized.actor,
+      reason: normalized.changes.reason,
+    });
   }
 }
 
