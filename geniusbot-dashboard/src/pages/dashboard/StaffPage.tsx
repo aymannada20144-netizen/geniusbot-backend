@@ -195,7 +195,7 @@ export function StaffPage() {
                 }}
               >
                 <option value="">{branchesQuery.isLoading ? 'Loading branches...' : 'Select branch'}</option>
-        {activeBranches.map((branch) => <option key={branch.id} value={branch.id}>{formatBranchLabel(branch)}</option>)}
+        {activeBranches.map((branch) => <option key={branch.id} value={branch.id} data-i18n-ignore>{formatBranchLabel(branch)}</option>)}
               </select>
               {branchesQuery.isError && <small className="operational-error">Unable to load branches. Try again before saving.</small>}
               {!branchesQuery.isLoading && !branchesQuery.isError && activeBranches.length === 0 && <small className="operational-error">No active branches are available.</small>}

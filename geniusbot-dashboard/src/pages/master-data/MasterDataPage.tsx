@@ -10,6 +10,7 @@ import { normalizeSaudiMobile, saudiMobileHint } from '../../utils/saudiMobile'
 import { formatBranchLabel } from '../../utils/branch'
 import { masterDataConfigs, roomTypeOptions } from './masterDataConfig'
 import './MasterDataPage.css'
+import { useLanguage } from '../../i18n/useLanguage'
 
 const ROOM_PAGE_SIZE = 10
 
@@ -24,6 +25,7 @@ function display(value: unknown, field: string, lookups: Record<string, Map<stri
 }
 
 export function MasterDataPage() {
+  const { t } = useLanguage()
   const { resource = '' } = useParams()
   const config = masterDataConfigs[resource]
   const { user } = useAuth()
@@ -168,19 +170,19 @@ export function MasterDataPage() {
   return (
     <section className="master-data">
       <header className="master-data__header">
-        <div><p className="master-data__eyebrow">Master Data</p><h2>{config.title}</h2><p>{config.description}</p></div>
+        <div><p className="master-data__eyebrow">Master Data</p><h2>{t(config.title)}</h2><p>{t(config.description)}</p></div>
         {canManage && !config.singleton && <button type="button" className="master-data__primary" onClick={() => open(null)}>Add {config.singular}</button>}
       </header>
       {feedback && <div className="master-data__success" role="status">{feedback}</div>}
       {(remove.isError || statusMutation.isError) && <div className="master-data__state master-data__state--error" role="alert">{(remove.error ?? statusMutation.error)?.message}</div>}
       <div className="master-data__toolbar">
-        <label><span className="sr-only">Search</span><input value={search} onChange={(event) => { setSearch(event.target.value); setPage(1) }} placeholder={`Search ${config.title.toLowerCase()}`} /></label>
+        <label><span className="sr-only">Search</span><input value={search} onChange={(event) => { setSearch(event.target.value); setPage(1) }} placeholder={t(`Search ${config.title.toLowerCase()}`)} /></label>
         {resource === 'rooms' && <>
           <select aria-label="Filter by branch" value={branchFilter} onChange={(event) => { setBranchFilter(event.target.value); setPage(1) }}><option value="">All branches</option>{sourceQueries.find((item) => item.source === 'branches')?.result.data?.map((record) => <option key={record.id} value={record.id}>{formatBranchLabel(record)}</option>)}</select>
           <select aria-label="Filter by status" value={statusFilter} onChange={(event) => { setStatusFilter(event.target.value); setPage(1) }}><option value="">All statuses</option><option value="true">Active</option><option value="false">Inactive</option></select>
           <select aria-label="Filter by room type" value={typeFilter} onChange={(event) => { setTypeFilter(event.target.value); setPage(1) }}><option value="">All room types</option>{roomTypeOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select>
         </>}
-        {resource === 'branches' && <select aria-label="Filter by city" value={cityFilter} onChange={(event) => setCityFilter(event.target.value)}><option value="">All cities</option>{existingCities.map((city) => <option key={city} value={city}>{city}</option>)}</select>}
+        {resource === 'branches' && <select aria-label="Filter by city" value={cityFilter} onChange={(event) => setCityFilter(event.target.value)}><option value="">All cities</option>{existingCities.map((city) => <option key={city} value={city} data-i18n-ignore>{city}</option>)}</select>}
         <button onClick={() => query.refetch()} disabled={query.isFetching}>Refresh</button>
       </div>
       {query.isLoading && <div className="master-data__state">Loading {config.title.toLowerCase()}…</div>}
@@ -197,8 +199,8 @@ export function MasterDataPage() {
               {field.type === 'boolean' ? <><input type="checkbox" disabled={resource === 'rooms' && field.name === 'is_active'} checked={Boolean(form[field.name])} onChange={(event) => setForm({ ...form, [field.name]: event.target.checked })} /> {field.label}</> : <>
                 <span>{field.label}{field.required ? ' *' : ''}</span>
                 {field.type === 'textarea' ? <textarea required={field.required} value={String(form[field.name] ?? '')} onChange={(event) => setForm({ ...form, [field.name]: event.target.value })} /> : field.type === 'select' ? <select required={field.required} disabled={Boolean(editing && field.readOnlyOnEdit)} value={String(form[field.name] ?? '')} onChange={(event) => setForm({ ...form, [field.name]: event.target.value })}><option value="">Select…</option>{(field.options ?? sourceQueries.find((item) => item.source === field.source)?.result.data?.filter((record) => resource !== 'rooms' || field.name !== 'branch_id' || record.is_active || (editing && record.id === form.branch_id)).map((record) => ({ value: record.id, label: field.source === 'branches' ? formatBranchLabel(record) : String(record[field.sourceLabel ?? 'name'] ?? 'Unavailable') })) ?? []).map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select> : <input list={resource === 'branches' && field.name === 'city' ? 'branch-city-options' : undefined} type={field.type === 'array' ? 'text' : field.type ?? 'text'} required={field.required} value={String(form[field.name] ?? '')} onChange={(event) => setForm({ ...form, [field.name]: event.target.value })} />}
-                {resource === 'branches' && field.name === 'city' && <datalist id="branch-city-options">{existingCities.map((city) => <option key={city} value={city} />)}</datalist>}
-                {field.helper && <small>{field.helper}</small>}
+                {resource === 'branches' && field.name === 'city' && <datalist id="branch-city-options">{existingCities.map((city) => <option key={city} value={city} data-i18n-ignore />)}</datalist>}
+                {field.helper && <small>{t(field.helper)}</small>}
                 {fieldErrors[field.name] && <small className="master-data__form-error">{fieldErrors[field.name]}</small>}
               </>}
             </label>)}</div>

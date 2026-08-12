@@ -736,6 +736,15 @@
   }
 }
 
+.app-header__language { display: flex; flex-direction: column; gap: var(--space-1); color: var(--color-text-muted); font-size: var(--font-size-xs); }
+.app-header__language select { min-height: var(--control-height-sm); padding-inline: var(--space-2); border: 1px solid var(--color-border); border-radius: var(--radius-md); color: var(--color-text-primary); font: inherit; background: var(--color-surface); }
+.app-header__language select:focus { outline: var(--focus-ring-width) solid var(--color-focus-ring); }
+
+[dir='rtl'] .dashboard-sidebar { border-right: 0; border-left: 1px solid var(--color-border); }
+[dir='rtl'] .app-header__clinic { align-items: flex-start; }
+[dir='rtl'] .app-header__user-details { align-items: flex-end; }
+[dir='rtl'] table th, [dir='rtl'] table td { text-align: right; }
+
 .app-header__logout {
   min-height: var(--control-height-sm);
   padding-inline: var(--space-3);

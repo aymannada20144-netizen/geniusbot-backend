@@ -297,7 +297,7 @@ export function DoctorWorkingHoursPage() {
         clearResultMessages()
       }}>
         <option value="">Select doctor…</option>
-        {(doctors.data ?? []).map((doctor) => <option key={doctor.id} value={doctor.id}>{String(doctor.full_name)}</option>)}
+        {(doctors.data ?? []).map((doctor) => <option key={doctor.id} value={doctor.id} data-i18n-ignore>{String(doctor.full_name)}</option>)}
       </select></label>
     </header>
 
@@ -308,7 +308,7 @@ export function DoctorWorkingHoursPage() {
       <h3>Quick Apply</h3>
       <label>Branch<select value={quickBranch} onChange={(event) => setQuickBranch(event.target.value)}>
         <option value="">Select branch…</option>
-        {activeBranches.map((branch) => <option key={branch.id} value={branch.id}>{formatBranchLabel(branch)}</option>)}
+        {activeBranches.map((branch) => <option key={branch.id} value={branch.id} data-i18n-ignore>{formatBranchLabel(branch)}</option>)}
       </select></label>
       <fieldset><legend>Selected Days</legend>
         <div className="doctor-hours__days">{days.map((day, index) => <label key={day}><input type="checkbox" checked={quickDays.includes(index)} onChange={(event) => setQuickDays((current) => event.target.checked ? [...current, index] : current.filter((value) => value !== index))} />{day}</label>)}</div>
@@ -330,7 +330,7 @@ export function DoctorWorkingHoursPage() {
           <div className="doctor-hours__day-title"><h3>{day}</h3>{canManage && <button type="button" onClick={() => addPeriod(dayIndex)}>Add Period</button>}</div>
           {dayPeriods.length === 0 && <p>Not Working</p>}
           {dayPeriods.map((period) => <div className="doctor-hours__period" key={period.key}>
-            <label>Branch<select disabled={!canManage} value={period.branch_id} onChange={(event) => updatePeriod(period.key, { branch_id: event.target.value })}><option value="">Select branch…</option>{activeBranches.map((branch) => <option key={branch.id} value={branch.id}>{formatBranchLabel(branch)}</option>)}</select></label>
+            <label>Branch<select disabled={!canManage} value={period.branch_id} onChange={(event) => updatePeriod(period.key, { branch_id: event.target.value })}><option value="">Select branch…</option>{activeBranches.map((branch) => <option key={branch.id} value={branch.id} data-i18n-ignore>{formatBranchLabel(branch)}</option>)}</select></label>
             <label>From<input disabled={!canManage} type="time" value={period.start_time} onChange={(event) => updatePeriod(period.key, { start_time: event.target.value })} /></label>
             <label>To<input disabled={!canManage} type="time" value={period.end_time} onChange={(event) => updatePeriod(period.key, { end_time: event.target.value })} /></label>
             {canManage && <button type="button" onClick={() => { setPeriods(currentPeriods.filter((item) => item.key !== period.key)); setEditedDoctorId(doctorId) }}>Delete</button>}

@@ -231,7 +231,7 @@ export function AppointmentsPage() {
       <div className="appointments-summary" aria-label="Appointment summary">
         {Object.entries(summary).map(([label, value]) => (
           <article key={label}>
-            <span>{label}</span>
+            <span data-i18n-domain-value>{label}</span>
             <strong>{value}</strong>
           </article>
         ))}
@@ -312,14 +312,14 @@ export function AppointmentsPage() {
 
                 return (
                   <tr key={appointment.id}>
-                    <td data-label="Patient" title={appointment.patientName}><strong>{appointment.patientName}</strong></td>
-                    <td data-label="Phone">{appointment.phoneNumber}</td>
-                    <td data-label="Service" title={appointment.serviceName}>{appointment.serviceName}</td>
-                    <td data-label="Doctor" title={appointment.doctorName ?? '—'}>{appointment.doctorName ?? '—'}</td>
-                    <td data-label="Room" title={appointment.roomName ?? '—'}>{appointment.roomName ?? '—'}</td>
+                    <td data-label="Patient" title={appointment.patientName} data-i18n-ignore><strong>{appointment.patientName}</strong></td>
+                    <td data-label="Phone" data-i18n-ignore>{appointment.phoneNumber}</td>
+                    <td data-label="Service" title={appointment.serviceName} data-i18n-ignore>{appointment.serviceName}</td>
+                    <td data-label="Doctor" title={appointment.doctorName ?? '—'} data-i18n-ignore>{appointment.doctorName ?? '—'}</td>
+                    <td data-label="Room" title={appointment.roomName ?? '—'} data-i18n-ignore>{appointment.roomName ?? '—'}</td>
                     <td data-label="Date">{formatDate(appointment.appointmentStart)}</td>
                     <td data-label="Time">{formatTime(appointment.appointmentStart, appointment.appointmentEnd)}</td>
-                    <td data-label="Payment" title={appointment.paymentMethod ?? '—'}>{appointment.paymentMethod ?? '—'}</td>
+                    <td data-label="Payment" title={appointment.paymentMethod ?? '—'} data-i18n-ignore>{appointment.paymentMethod ?? '—'}</td>
                     <td data-label="Status"><span className={`appointment-status appointment-status--${appointment.status}`}>{STATUS_LABELS[appointment.status]}</span></td>
                     <td data-label="Actions">
                       <div className="appointment-actions">

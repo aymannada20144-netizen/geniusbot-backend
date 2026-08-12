@@ -8,6 +8,7 @@ import { listMasterData } from '../../api/masterDataApi'
 import { masterDataConfigs } from '../../pages/master-data/masterDataConfig'
 import { changeOwnPassword } from '../../auth/api/passwordApi'
 import '../../pages/dashboard/OperationalPages.css'
+import { useLanguage } from '../../i18n/useLanguage'
 
 const pageTitles: Array<[RegExp, string]> = [
   [/^\/dashboard\/patients\/[^/]+\/conversation\/?$/, 'Conversation'],
@@ -21,6 +22,7 @@ const pageTitles: Array<[RegExp, string]> = [
 ]
 
 export function AppHeader() {
+  const { language, setLanguage, t } = useLanguage()
   const [passwordOpen, setPasswordOpen] = useState(false)
   const [passwordForm, setPasswordForm] = useState({
     currentPassword: '',
@@ -62,22 +64,35 @@ export function AppHeader() {
     <div className="app-header">
       <div className="app-header__page">
         <p className="app-header__eyebrow">
-          Overview
+          {t('Overview')}
         </p>
 
         <h1 className="app-header__title">
-          {resolvedTitle}
+          {t(resolvedTitle)}
         </h1>
       </div>
 
       <div className="app-header__actions">
+        <label className="app-header__language" data-i18n-ignore>
+          <span className="app-header__language-label">
+            {language === 'ar' ? 'اللغة' : 'Language'}
+          </span>
+          <select
+            aria-label={language === 'ar' ? 'اختيار اللغة' : 'Select language'}
+            value={language}
+            onChange={(event) => setLanguage(event.target.value as 'ar' | 'en')}
+          >
+            <option value="ar">العربية</option>
+            <option value="en">English</option>
+          </select>
+        </label>
         <div className="app-header__clinic">
           <span className="app-header__clinic-label">
-            Current clinic
+            {t('Current Clinic')}
           </span>
 
-          <span className="app-header__clinic-name">
-            {String(clinicQuery.data?.[0]?.name ?? 'Current clinic')}
+          <span className="app-header__clinic-name" data-i18n-ignore>
+            {String(clinicQuery.data?.[0]?.name ?? '—')}
           </span>
         </div>
 
@@ -95,7 +110,7 @@ export function AppHeader() {
           </span>
 
           <span className="app-header__user-details">
-            <span className="app-header__user-name">
+            <span className="app-header__user-name" data-i18n-ignore>
               {user?.name ?? 'Clinic Owner'}
             </span>
 
