@@ -2,6 +2,10 @@
 
 const ShadenPolicy = require('./ShadenPolicy');
 const {
+  extractBookingReference,
+  isAppointmentManagementCancellation,
+} = require('./ShadenIntentResolver');
+const {
   parsePreferredStart: parseBookingPreferredStart,
   DEFAULT_TIME_ZONE,
 } = require('./BookingDateTimeParser');
@@ -10,11 +14,13 @@ class ShadenEngine {
   constructor({
     policy = new ShadenPolicy(),
     bookingEngine = null,
+    appointmentService = null,
     priceService = null,
     clock = null,
   } = {}) {
     this.policy = policy;
     this.bookingEngine = bookingEngine;
+    this.appointmentService = appointmentService;
     this.priceService = priceService;
     this.clock = clock && typeof clock.now === 'function'
       ? clock
@@ -38,6 +44,83 @@ class ShadenEngine {
       ? message.rawPayload?.value
       : null;
     let inquiry = this.policy.recognize(text);
+
+    if (isCurrentChangeServiceInteractiveReply(nextState.changeService, interactiveReplyId)) {
+      inquiry = { type: 'unknown' };
+    }
+    if (isCurrentChangeBranchInteractiveReply(nextState.changeBranch, interactiveReplyId)) {
+      inquiry = { type: 'unknown' };
+    }
+
+    if (
+      nextState.context?.inquiry === 'appointment_management_clarification' &&
+      interactiveReplyId === 'management-clarify:cancel'
+    ) {
+      inquiry = { type: 'booking_cancellation_request' };
+      nextState.context = null;
+    } else if (
+      nextState.context?.inquiry === 'appointment_management_clarification' &&
+      interactiveReplyId === 'management-clarify:reschedule'
+    ) {
+      inquiry = { type: 'booking_modification_request' };
+      nextState.context = null;
+    } else if (
+      nextState.context?.inquiry === 'change_service_request' &&
+      interactiveReplyId === 'change-service:new-booking'
+    ) {
+      inquiry = { type: 'booking', serviceText: null };
+      nextState.context = null;
+    } else if (
+      nextState.context?.inquiry === 'change_service_request' &&
+      interactiveReplyId === 'change-service:cancel-current'
+    ) {
+      inquiry = { type: 'booking_cancellation_request' };
+      nextState.context = null;
+    }
+
+    interruptAppointmentManagementFlow(nextState, inquiry, interactiveReplyId);
+
+    // Availability remains a distinct resolver intent, while the current safe
+    // runtime reuses booking discovery until a dedicated availability handler exists.
+    if (inquiry.type === 'availability_request') {
+      inquiry = { ...inquiry, type: 'booking', serviceText: null };
+    }
+
+    if (inquiry.type === 'appointment_management_clarification') {
+      nextState.context = { inquiry: 'appointment_management_clarification' };
+      return {
+        reply: this.policy.appointmentManagementClarification(),
+        interaction: {
+          version: 1,
+          mode: 'reply_buttons',
+          purpose: 'clarify_appointment_management',
+          displayText: this.policy.appointmentManagementClarification(),
+          options: [
+            { id: 'management-clarify:cancel', label: 'إلغاء الموعد' },
+            { id: 'management-clarify:reschedule', label: 'تغيير الموعد' },
+          ],
+        },
+        nextState,
+      };
+    }
+
+    if (
+      nextState.booking &&
+      inquiry.type === 'booking_cancellation_request' &&
+      isAppointmentManagementCancellation(text)
+    ) {
+      delete nextState.booking;
+      nextState.step = null;
+      nextState.options = [];
+      nextState.context = null;
+    }
+
+    if (nextState.booking && inquiry.type === 'booking_modification_request') {
+      delete nextState.booking;
+      nextState.step = null;
+      nextState.options = [];
+      nextState.context = null;
+    }
 
     // ✅ تفعيل السياق: فهم أسئلة المتابعة القصيرة قبل أي شيء آخر
     if (text.length < 25) {
@@ -70,6 +153,83 @@ class ShadenEngine {
       insuranceClasses: clinicData?.insuranceClasses || [],
       workingHours: clinicData?.workingHours || [],
     };
+
+    const knownPatientId = patientIdentity?.patient?.id || null;
+    if (
+      inquiry.type === 'change_branch_request' ||
+      nextState.changeBranch
+    ) {
+      return handleChangeBranch({
+        text, interactiveReplyId, inquiry, state: nextState,
+        policy: this.policy, appointmentService: this.appointmentService,
+        bookingEngine: this.bookingEngine, clinicId: bookingContext?.clinicId,
+        patientId: knownPatientId, conversationId: bookingContext?.conversationId,
+        branches: safeData.branches, now: this.clock.now(),
+      }).then((result) => normalizeEngineReply(result, nextState));
+    }
+    if (
+      inquiry.type === 'change_service_request' ||
+      nextState.changeService
+    ) {
+      return handleChangeService({
+        text, interactiveReplyId, inquiry, state: nextState,
+        policy: this.policy, appointmentService: this.appointmentService,
+        bookingEngine: this.bookingEngine, clinicId: bookingContext?.clinicId,
+        patientId: knownPatientId, conversationId: bookingContext?.conversationId,
+        services: safeData.services, now: this.clock.now(),
+      }).then((result) => normalizeEngineReply(result, nextState));
+    }
+    if (
+      !nextState.booking &&
+      (inquiry.type === 'booking_modification_request' || nextState.reschedule)
+    ) {
+      return handleAppointmentReschedule({
+        text,
+        interactiveReplyId,
+        inquiry,
+        state: nextState,
+        policy: this.policy,
+        appointmentService: this.appointmentService,
+        bookingEngine: this.bookingEngine,
+        clinicId: bookingContext?.clinicId,
+        patientId: knownPatientId,
+        conversationId: bookingContext?.conversationId,
+        now: this.clock.now(),
+      }).then((result) => normalizeEngineReply(result, nextState));
+    }
+    if (
+      !nextState.booking &&
+      (
+        inquiry.type === 'booking_cancellation_request' ||
+        nextState.cancellation
+      )
+    ) {
+      const handler = knownPatientId
+        ? handleKnownPhoneCancellation({
+          text,
+          interactiveReplyId,
+          inquiry,
+          state: nextState,
+          policy: this.policy,
+          appointmentService: this.appointmentService,
+          clinicId: bookingContext?.clinicId,
+          patientId: knownPatientId,
+          conversationId: bookingContext?.conversationId,
+        })
+        : handleUnknownPhoneCancellation({
+          text,
+          interactiveReplyId,
+          inquiry,
+          state: nextState,
+          policy: this.policy,
+          appointmentService: this.appointmentService,
+          clinicId: bookingContext?.clinicId,
+          conversationId: bookingContext?.conversationId,
+        });
+      return handler.then((result) =>
+        normalizeEngineReply(result, nextState)
+      );
+    }
 
     const priceText = normalizePriceKeyboardInput(
       text,
@@ -114,10 +274,11 @@ class ShadenEngine {
     }
 
     if (inquiry.type === 'booking' && !nextState.booking) {
-      const requestedService = inquiry.serviceText
-        ? findNamedSelection(inquiry.serviceText, bookableServices(safeData.services), this.policy)
+      const serviceText = inquiry.serviceText === 'موعد' ? null : inquiry.serviceText;
+      const requestedService = serviceText
+        ? findNamedSelection(serviceText, bookableServices(safeData.services), this.policy)
         : null;
-      if (inquiry.serviceText && !requestedService) {
+      if (serviceText && !requestedService) {
         return { reply: this.policy.serviceExists(null), nextState };
       }
       nextState.booking = emptyBookingState();
@@ -187,6 +348,25 @@ class ShadenEngine {
       }
     }
 
+    if (inquiry.type === 'change_service_request') {
+      nextState.context = { inquiry: 'change_service_request' };
+      const reply = this.policy.changeServiceUnsupported();
+      return {
+        reply,
+        interaction: {
+          version: 1,
+          mode: 'reply_buttons',
+          purpose: 'change_service_fallback',
+          displayText: reply,
+          options: [
+            { id: 'change-service:new-booking', label: 'حجز موعد جديد' },
+            { id: 'change-service:cancel-current', label: 'إلغاء الموعد الحالي' },
+          ],
+        },
+        nextState,
+      };
+    }
+
     let reply;
     try {
       reply = this.replyFor(inquiry, safeData, customerName);
@@ -211,7 +391,17 @@ class ShadenEngine {
       case 'farewell': return this.policy.farewell(customerName);
       case 'acknowledgement': return this.policy.acknowledgement(customerName);
       case 'how_are_you': return this.policy.howAreYou(customerName);
-      
+      case 'booking_modification_request':
+        return this.policy.appointmentRescheduleRequested();
+      case 'cancellation_information_request':
+        return this.policy.cancellationInformationUnavailable();
+      case 'change_service_request':
+        return this.policy.changeServiceUnsupported();
+      case 'change_branch_request':
+        return this.policy.changeBranchUnsupported();
+      case 'change_provider_request':
+        return this.policy.changeProviderUnsupported();
+
       case 'branches':
         if (inquiry.city) {
           const branchesInCity = data.branches.filter(
@@ -221,7 +411,7 @@ class ShadenEngine {
           return this.policy.noActiveBranches(inquiry.city);
         }
         return this.policy.branches(data.branches);
-        
+
       case 'specialties': return this.policy.specialties(data.specialties, data.clinic);
       case 'services': return this.policy.services(data.services, data.clinic);
       case 'services_under_specialty':
@@ -234,7 +424,7 @@ class ShadenEngine {
         let specExists = findExactService(inquiry.specialtyText, data.specialties, this.policy);
         if (specExists) return `نعم، تخصص ${this.policy.display(specExists.name)} متوفر لدينا، لكن لا توجد خدمات مفصلة مسجلة تحته حالياً. 🌸`;
         return this.policy.serviceExists(null);
-        
+
             case 'service_exists':
         // ✅ منع اعتبار أسماء الشركات كخدمات طبية
         const serviceKeywords = /^(كشف|قسم|علاج|حجز|عملية|ليزر|تنظيف|تقشير|شد|حقن|فيلر|بوتوكس|استشاره|استشارة|اطفال|اسنان|جلديه|تجميل)/;
@@ -242,18 +432,18 @@ class ShadenEngine {
           // إذا لم تكن كلمة طبية، اتركها لتسقط في الـ Unknown (حيث سيلتقطها سياق التأمين)
           return this.policy.unknown();
         }
-        
+
         let foundService = findExactService(inquiry.value, data.services, this.policy);
         if (foundService) return this.policy.serviceExists(foundService);
         let foundSpecialty = findExactService(inquiry.value, data.specialties, this.policy);
         if (foundSpecialty) return `نعم، تخصص ${this.policy.display(foundSpecialty.name)} متوفر لدينا.`;
         return this.policy.serviceExists(null);
-        
+
       case 'payment_methods': return this.policy.paymentMethods(data.paymentMethods);
       case 'insurance_companies': return this.policy.insuranceCompanies(data.insuranceCompanies);
       case 'insurance_classes': return this.policy.insuranceClasses(data.insuranceClasses.filter(item => item.isAccepted));
       case 'insurance_class_check': return this.policy.insuranceClassStatus(findInsuranceClass(inquiry.value, data.insuranceClasses, this.policy), inquiry.value);
-      
+
       // ✅ الرد على سؤال السياق لشركات التأمين
       case 'insurance_company_check':
         const cleanCompanyName = this.policy.normalize(inquiry.companyName);
@@ -261,15 +451,15 @@ class ShadenEngine {
           const dbName = this.policy.normalize(c.name);
           return dbName === cleanCompanyName || dbName.includes(cleanCompanyName) || cleanCompanyName.includes(dbName);
         });
-        
+
         if (matchedCompany) {
           return `نعم، شركة ${this.policy.display(matchedCompany.name)} معتمدة لدينا. 🌸`;
         }
         return `عذراً، شركة ${this.policy.display(inquiry.companyName)} ليست من شركات التأمين المعتمدة لدينا حالياً. 🌸`;
-        
+
       case 'working_hours': return this.policy.allWorkingHours(data);
       case 'working_hours_city': return this.policy.allWorkingHours(data, inquiry.city);
-      case 'working_hours_branch': 
+      case 'working_hours_branch':
         const branch = findBranch(inquiry.branchText, data, this.policy);
         if (!branch) {
           const city = extractCity(inquiry.branchText);
@@ -278,16 +468,1564 @@ class ShadenEngine {
         }
         return workingBranchReply(inquiry, data, this.policy);
       case 'working_day': return workingDayReply(inquiry, data, this.policy);
-      
+
       case 'branch_address': return this.policy.branchAddress(inquiry.branchText ? findBranch(inquiry.branchText, data, this.policy) : (data.branches[0] || null));
       case 'holiday_day': return this.policy.holidayDay(data);
       case 'empathy': return this.policy.empathy();
       case 'context_holiday_all': return "نعم، الإجازة تشمل جميع الفروع حاليًا 🌸";
-        
+
       case 'booking': return this.policy.bookingChooseService(data.services, data.clinic);
       default: return this.policy.unknown();
     }
   }
+}
+
+async function handleAppointmentReschedule({
+  text, interactiveReplyId, inquiry, state, policy, appointmentService,
+  bookingEngine, clinicId, patientId, conversationId, now,
+}) {
+  if (!appointmentService || !bookingEngine || !clinicId) {
+    clearRescheduleState(state);
+    return policy.rescheduleUnavailable();
+  }
+  if (inquiry.type === 'booking_modification_request') {
+    clearCancellationState(state);
+    state.reschedule = createRescheduleState({
+      bookingReference: inquiry.bookingReference || null,
+      verificationRequired: !patientId,
+      dateTimeExpressions: inquiry.dateTimeExpressions || [],
+    });
+    if (!patientId) return policy.rescheduleAskBookingReference();
+    let candidates = await loadRescheduleCandidates({
+      appointmentService, clinicId, patientId,
+    });
+    if (inquiry.bookingReference) {
+      const resolved = await appointmentService
+        .resolveAppointmentForManagementByBookingReference(
+          clinicId, inquiry.bookingReference
+        );
+      if (!resolved || resolved.patientId !== patientId || resolved.clinicId !== clinicId) {
+        return resetUnavailableReschedule(state, policy);
+      }
+      candidates = candidates.filter(({ id }) => id === resolved.appointmentId);
+    }
+    if (candidates.length === 1) {
+      state.reschedule.candidateAppointmentIds = [candidates[0].id];
+      state.reschedule.selectedAppointmentId = candidates[0].id;
+      state.reschedule.bookingReference = candidates[0].booking_reference || null;
+      state.reschedule.ownershipVerified = true;
+      return loadRescheduleDates({
+        selected: candidates[0], state, policy, bookingEngine, clinicId, now,
+      });
+    }
+    return beginRescheduleSelection(candidates, state, policy);
+  }
+
+  const flow = state.reschedule;
+  if (!flow) return policy.rescheduleUnavailable();
+  if (isCancellationAbandonment(text, policy)) {
+    clearRescheduleState(state);
+    return policy.rescheduleDeclined();
+  }
+
+  if (flow.step === 'awaiting_reference') {
+    flow.bookingReference = extractBookingReference(text);
+    flow.step = 'awaiting_verification';
+    return policy.rescheduleAskRegisteredMobile();
+  }
+  if (flow.step === 'awaiting_verification') {
+    const verification = await appointmentService.verifyAppointmentOwnership(
+      clinicId, flow.bookingReference, text
+    );
+    if (!verification?.verified) {
+      flow.verificationAttempts += 1;
+      if (flow.verificationAttempts >= 3) {
+        clearRescheduleState(state);
+        return policy.rescheduleVerificationExhausted();
+      }
+      return policy.rescheduleVerificationFailed();
+    }
+    const candidates = await loadRescheduleCandidates({
+      appointmentService, clinicId, patientId: verification.patientId,
+    });
+    const selected = candidates.find(({ id }) => id === verification.appointmentId);
+    if (!selected) {
+      clearRescheduleState(state);
+      return policy.rescheduleUnavailable();
+    }
+    flow.ownershipVerified = true;
+    flow.candidateAppointmentIds = [selected.id];
+    flow.selectedAppointmentId = selected.id;
+    flow.bookingReference = selected.booking_reference || flow.bookingReference;
+    return loadRescheduleDates({ selected, state, policy, bookingEngine, clinicId, now });
+  }
+  if (flow.step === 'awaiting_selection') {
+    const index = parseManagementSelection(
+      text, interactiveReplyId, flow.candidateAppointmentIds,
+      'reschedule-appointment:', policy
+    );
+    if (index === null) return policy.rescheduleInvalidSelection(flow.candidateAppointmentIds.length);
+    const candidates = await loadRescheduleCandidates({ appointmentService, clinicId, patientId });
+    const selected = candidates.find(({ id }) => id === flow.candidateAppointmentIds[index]);
+    if (!selected) {
+      clearRescheduleState(state);
+      return policy.rescheduleUnavailable();
+    }
+    flow.selectedAppointmentId = selected.id;
+    flow.bookingReference = selected.booking_reference || null;
+    flow.ownershipVerified = true;
+    return loadRescheduleDates({ selected, state, policy, bookingEngine, clinicId, now });
+  }
+  if (flow.step === 'awaiting_date') {
+    const date = parseOptionChoice(text, interactiveReplyId, flow.availableDates, 'reschedule-date:', policy);
+    if (!date) return policy.rescheduleInvalidDate();
+    flow.selectedDate = date;
+    const candidate = await reloadRescheduleCandidate({ appointmentService, clinicId, patientId, flow });
+    if (!candidate) return resetUnavailableReschedule(state, policy);
+    const result = await bookingEngine.getAvailableTimes({
+      clinicId, service: { id: candidate.service_id }, branch: { id: candidate.branch_id },
+      doctor: candidate.doctor_id ? { id: candidate.doctor_id } : null,
+      room: candidate.room_id ? { id: candidate.room_id } : null,
+      date, excludeAppointmentId: candidate.id,
+    });
+    flow.availableTimes = result.times || [];
+    flow.step = 'awaiting_time';
+    return interactionOptions(policy.rescheduleChooseTime(), 'select_reschedule_time',
+      flow.availableTimes, 'reschedule-time:', formatArabicRescheduleTime);
+  }
+  if (flow.step === 'awaiting_time') {
+    const time = parseOptionChoice(text, interactiveReplyId, flow.availableTimes, 'reschedule-time:', policy);
+    if (!time) return policy.rescheduleInvalidTime();
+    flow.selectedTime = time;
+    flow.step = 'awaiting_confirmation';
+    flow.confirmationPending = true;
+    const candidate = await reloadRescheduleCandidate({
+      appointmentService, clinicId, patientId, flow,
+    });
+    if (!candidate) return resetUnavailableReschedule(state, policy);
+    return {
+      reply: policy.rescheduleReview({
+        bookingReference: candidate.booking_reference,
+        previousStart: candidate.appointment_start,
+        newDate: flow.selectedDate,
+        newTime: flow.selectedTime,
+      }),
+      interaction: {
+        version: 1,
+        mode: 'reply_buttons',
+        purpose: 'confirm_appointment_reschedule',
+        displayText: 'تأكيد تغيير الموعد؟',
+        options: [
+          { id: 'reschedule-confirm:yes', label: 'تأكيد تغيير الموعد' },
+          { id: 'reschedule-confirm:keep', label: 'الاحتفاظ بالموعد' },
+        ],
+      },
+    };
+  }
+  if (flow.step === 'awaiting_confirmation') {
+    const normalized = interactiveReplyId === 'reschedule-confirm:yes'
+      ? 'نعم' : interactiveReplyId === 'reschedule-confirm:keep' ? 'لا' : policy.normalize(text);
+    if (['لا', 'تراجع', 'الغاء'].includes(normalized)) {
+      clearRescheduleState(state);
+      return policy.rescheduleDeclined();
+    }
+    if (!['نعم', 'اوافق', 'تاكيد', 'اكد'].includes(normalized)) {
+      return policy.rescheduleAskConfirmation();
+    }
+    const candidate = await reloadRescheduleCandidate({ appointmentService, clinicId, patientId, flow });
+    if (!candidate) return resetUnavailableReschedule(state, policy);
+    try {
+      const parsed = parseBookingPreferredStart(
+        `${flow.selectedDate} ${flow.selectedTime}`, null, policy,
+        { timeZone: DEFAULT_TIME_ZONE, now }
+      );
+      if (!parsed.complete || !parsed.value) return policy.rescheduleInvalidTime();
+      const start = new Date(parsed.value);
+      const duration = new Date(candidate.appointment_end) - new Date(candidate.appointment_start);
+      const result = await appointmentService.rescheduleAppointment(
+        clinicId, candidate.id, start.toISOString(),
+        new Date(start.getTime() + duration).toISOString(), null,
+        { patientId: patientId || (await resolveRescheduleOwner(appointmentService, clinicId, flow))?.patientId,
+          source: 'shaden', ...(conversationId ? { conversationId } : {}) }
+      );
+      clearRescheduleState(state);
+      return policy.rescheduleSuccessful(result);
+    } catch (error) {
+      clearRescheduleState(state);
+      return String(error?.code || '').includes('SLOT') || error?.name === 'ConflictError'
+        ? policy.rescheduleSlotUnavailable()
+        : policy.rescheduleExecutionFailed();
+    }
+  }
+  return resetUnavailableReschedule(state, policy);
+}
+
+async function handleChangeBranch({
+  text, interactiveReplyId, inquiry, state, policy, appointmentService,
+  bookingEngine, clinicId, patientId, conversationId, branches, now,
+}) {
+  if (!appointmentService || !bookingEngine || !clinicId) {
+    clearChangeBranchState(state);
+    return policy.changeBranchUnavailable();
+  }
+  if (inquiry.type === 'change_branch_request') {
+    clearCancellationState(state);
+    clearRescheduleState(state);
+    clearChangeServiceState(state);
+    state.changeBranch = createChangeBranchState({
+      verificationRequired: !patientId,
+      targetBranchId: resolveTargetBranchHint(text, branches, policy)?.id || null,
+    });
+    if (!patientId) return policy.changeBranchAskBookingReference();
+    const candidates = (await loadKnownPatientCandidates({ appointmentService, clinicId, patientId }))
+      .filter(({ status }) => ['pending', 'confirmed'].includes(status));
+    return beginChangeBranchAppointmentSelection(
+      candidates, state, policy, branches, appointmentService, bookingEngine,
+      clinicId, patientId, now
+    );
+  }
+  const flow = state.changeBranch;
+  if (!flow) return policy.changeBranchUnavailable();
+  if (isCancellationAbandonment(text, policy)) {
+    clearChangeBranchState(state);
+    return policy.changeBranchDeclined();
+  }
+  if (flow.step === 'awaiting_reference') {
+    const reference = extractBookingReference(text);
+    if (!reference) return policy.changeBranchAskBookingReference();
+    flow.bookingReference = reference;
+    flow.step = 'awaiting_verification';
+    return policy.changeBranchAskRegisteredMobile();
+  }
+  if (flow.step === 'awaiting_verification') {
+    const verified = await appointmentService.verifyAppointmentOwnership(
+      clinicId, flow.bookingReference, text
+    );
+    if (!verified?.verified) {
+      flow.verificationAttempts += 1;
+      if (flow.verificationAttempts >= 3) {
+        clearChangeBranchState(state);
+        return policy.changeBranchVerificationExhausted();
+      }
+      return policy.changeBranchVerificationFailed();
+    }
+    const candidates = (await loadKnownPatientCandidates({
+      appointmentService, clinicId, patientId: verified.patientId,
+    })).filter(({ id, status }) =>
+      id === verified.appointmentId && ['pending', 'confirmed'].includes(status)
+    );
+    flow.ownershipVerified = true;
+    return beginChangeBranchAppointmentSelection(
+      candidates, state, policy, branches, appointmentService, bookingEngine,
+      clinicId, verified.patientId, now
+    );
+  }
+  if (flow.step === 'awaiting_appointment') {
+    const index = parseManagementSelection(
+      text, interactiveReplyId, flow.candidateAppointmentIds,
+      'change-branch-appointment:', policy
+    );
+    if (index === null) return policy.changeBranchInvalidSelection();
+    flow.selectedAppointmentId = flow.candidateAppointmentIds[index];
+    const candidate = await changeBranchCandidate(appointmentService, clinicId, patientId, flow);
+    if (!candidate) return terminalChangeBranchFailure(state, policy);
+    flow.bookingReference = candidate.booking_reference || flow.bookingReference;
+    return continueWithTargetBranchHint(
+      flow, state, policy, branches, candidate, appointmentService, clinicId,
+      patientId || candidate.patient_id, bookingEngine, now
+    );
+  }
+  if (flow.step === 'awaiting_branch') {
+    const branch = selectChangeBranch(text, interactiveReplyId, branches, flow, policy);
+    if (!branch) return policy.changeBranchInvalidSelection();
+    const ownerId = patientId || (await appointmentService
+      .resolveAppointmentForManagementByBookingReference(clinicId, flow.bookingReference))?.patientId;
+    return advanceChangeBranchTarget({
+      branch, flow, state, policy, appointmentService, bookingEngine,
+      clinicId, patientId: ownerId, now,
+    });
+  }
+  if (flow.step === 'awaiting_date') {
+    const date = parseOptionChoice(text, interactiveReplyId, flow.availableDates,
+      'change-branch-date:', policy);
+    if (!date) return policy.changeBranchInvalidDate();
+    flow.proposedDate = date;
+    const candidate = await changeBranchCandidate(appointmentService, clinicId, patientId, flow);
+    if (!candidate) return terminalChangeBranchFailure(state, policy);
+    const times = await bookingEngine.getAvailableTimes({
+      clinicId, service: { id: candidate.service_id },
+      branch: { id: flow.targetBranchId }, date,
+      excludeAppointmentId: candidate.id,
+    });
+    flow.availableTimes = times.times || [];
+    flow.step = 'awaiting_time';
+    return interactionOptions(policy.changeBranchChooseTime(), 'select_change_branch_time',
+      flow.availableTimes, 'change-branch-time:', formatArabicRescheduleTime);
+  }
+  if (flow.step === 'awaiting_time') {
+    const time = parseOptionChoice(text, interactiveReplyId, flow.availableTimes,
+      'change-branch-time:', policy);
+    if (!time) return policy.changeBranchInvalidTime();
+    const candidate = await changeBranchCandidate(appointmentService, clinicId, patientId, flow);
+    if (!candidate) return terminalChangeBranchFailure(state, policy);
+    const parsed = parseBookingPreferredStart(`${flow.proposedDate} ${time}`, null, policy,
+      { timeZone: DEFAULT_TIME_ZONE, now });
+    if (!parsed.complete) return policy.changeBranchInvalidTime();
+    flow.proposedStart = parsed.value;
+    try {
+      const proposal = await appointmentService.previewBranchChange(
+        clinicId, candidate.id, flow.targetBranchId, flow.proposedStart,
+        patientId || candidate.patient_id
+      );
+      if (proposal.requiresNewSlot) return policy.changeBranchSlotUnavailable();
+      return prepareChangeBranchReview(proposal, flow, policy);
+    } catch {
+      return terminalChangeBranchFailure(state, policy);
+    }
+  }
+  if (flow.step === 'awaiting_confirmation') {
+    const answer = interactiveReplyId === 'change-branch-confirm:yes' ? 'نعم'
+      : interactiveReplyId === 'change-branch-confirm:keep' ? 'لا' : policy.normalize(text);
+    if (answer === 'لا') {
+      clearChangeBranchState(state);
+      return policy.changeBranchDeclined();
+    }
+    if (!['نعم', 'اوافق', 'تاكيد', 'اكد'].includes(answer)) {
+      return policy.changeBranchAskConfirmation();
+    }
+    flow.confirmationPending = false;
+    try {
+      const result = await appointmentService.changeAppointmentBranch(
+        clinicId, flow.selectedAppointmentId, flow.targetBranchId,
+        flow.proposedStart, {
+          patientId: patientId || (await appointmentService
+            .resolveAppointmentForManagementByBookingReference(clinicId, flow.bookingReference))?.patientId,
+          source: 'shaden', conversationId,
+        }, flow.reviewedUpdatedAt
+      );
+      clearChangeBranchState(state);
+      return policy.changeBranchSuccessful(result.booking_reference);
+    } catch {
+      return terminalChangeBranchFailure(state, policy);
+    }
+  }
+  return terminalChangeBranchFailure(state, policy);
+}
+
+async function beginChangeBranchAppointmentSelection(
+  candidates, state, policy, branches, appointmentService, bookingEngine,
+  clinicId, patientId, now
+) {
+  if (!candidates.length) return terminalChangeBranchNoCandidates(state, policy);
+  const flow = state.changeBranch;
+  flow.candidateAppointmentIds = candidates.map(({ id }) => id);
+  flow.ownershipVerified = true;
+  if (candidates.length === 1) {
+    flow.selectedAppointmentId = candidates[0].id;
+    flow.bookingReference = candidates[0].booking_reference || flow.bookingReference;
+    return continueWithTargetBranchHint(
+      flow, state, policy, branches, candidates[0], appointmentService, clinicId,
+      patientId, bookingEngine, now
+    );
+  }
+  flow.step = 'awaiting_appointment';
+  return {
+    reply: policy.changeBranchChooseAppointment(),
+    interaction: {
+      version: 1, mode: 'list', purpose: 'select_change_branch_appointment',
+      displayText: policy.changeBranchChooseAppointment(), listPrompt: 'عرض المواعيد',
+      options: candidates.slice(0, 10).map((candidate) => ({
+        id: `change-branch-appointment:${candidate.id}`,
+        label: truncateInteractionText(
+          `${policy.display(candidate.service_name || 'موعد')} — ${candidate.booking_reference}`, 24),
+        description: truncateInteractionText(
+          `${bidiIsolate(formatArabicRescheduleDate(candidate.appointment_start))} · ${bidiIsolate(formatArabicRescheduleTime(candidate.appointment_start))} · ${policy.display(candidate.branch_name || '')}`, 72),
+      })),
+    },
+  };
+}
+
+async function continueWithTargetBranchHint(
+  flow, state, policy, branches, candidate, appointmentService, clinicId, patientId,
+  bookingEngine, now
+) {
+  const hinted = flow.targetBranchId
+    ? branches.find(({ id }) => id === flow.targetBranchId) : null;
+  if (!hinted || hinted.id === candidate.branch_id) {
+    flow.targetBranchId = null;
+    return showChangeBranchChoices(flow, state, policy, branches, candidate,
+      appointmentService, clinicId, patientId);
+  }
+  const eligible = await appointmentService.listEligibleBranchChanges(
+    clinicId, candidate.id, patientId
+  );
+  if (!eligible.some(({ id }) => id === hinted.id)) {
+    flow.targetBranchId = null;
+    return showChangeBranchChoices(flow, state, policy, branches, candidate,
+      appointmentService, clinicId, patientId);
+  }
+  return advanceChangeBranchTarget({
+    branch: hinted, flow, state, policy, appointmentService, bookingEngine,
+    clinicId, patientId, now,
+  });
+}
+
+async function advanceChangeBranchTarget({
+  branch, flow, state, policy, appointmentService, bookingEngine,
+  clinicId, patientId, now,
+}) {
+  let proposal;
+  try {
+    proposal = await appointmentService.previewBranchChange(
+      clinicId, flow.selectedAppointmentId, branch.id, null, patientId
+    );
+  } catch (error) {
+    if (error?.code === 'APPOINTMENT_BRANCH_UNCHANGED') {
+      flow.targetBranchId = null;
+      return policy.changeBranchSameBranch();
+    }
+    return terminalChangeBranchFailure(state, policy);
+  }
+  flow.targetBranchId = branch.id;
+  if (!proposal.requiresNewSlot) return prepareChangeBranchReview(proposal, flow, policy);
+  if (String(proposal.reason || '').includes('assignment_not_found')) {
+    flow.targetBranchId = null;
+    const candidate = proposal.appointment;
+    return showChangeBranchChoices(flow, state, policy, [], candidate,
+      appointmentService, clinicId, patientId);
+  }
+  const dates = await bookingEngine.getAvailableDates({
+    clinicId, service: { id: proposal.appointment.service_id }, branch: { id: branch.id },
+    fromDate: localDateString(now), searchDays: 31, limit: 31,
+    excludeAppointmentId: proposal.appointment.id,
+  });
+  flow.availableDates = dates.dates || [];
+  flow.step = 'awaiting_date';
+  return interactionOptions(policy.changeBranchChooseDate(), 'select_change_branch_date',
+    flow.availableDates, 'change-branch-date:', formatArabicRescheduleDate);
+}
+
+async function showChangeBranchChoices(
+  flow, state, policy, branches, candidate, appointmentService, clinicId, patientId
+) {
+  flow.step = 'awaiting_branch';
+  const authoritative = await appointmentService.listEligibleBranchChanges(
+    clinicId, candidate.id, patientId
+  );
+  const options = authoritative.slice(0, 10);
+  if (!options.length) return terminalChangeBranchFailure(state, policy);
+  const summary = policy.changeBranchCurrentSummary(candidate);
+  return {
+    reply: summary,
+    interaction: {
+      version: 1, mode: 'list', purpose: 'select_change_branch_branch',
+      displayText: summary, listPrompt: 'عرض الفروع',
+      options: options.map((branch) => ({
+        id: `change-branch-branch:${branch.id}`,
+        label: truncateInteractionText(policy.display(branch.name), 24),
+        description: truncateInteractionText(policy.display(branch.city || ''), 72),
+      })),
+    },
+  };
+}
+
+function selectChangeBranch(text, replyId, branches, flow, policy) {
+  if (replyId?.startsWith('change-branch-branch:')) {
+    return branches.find(({ id }) => id === replyId.slice(21)) || null;
+  }
+  const normalized = policy.normalize(text);
+  const matches = branches.filter(({ name }) => policy.normalize(name) === normalized);
+  return matches.length === 1 ? matches[0] : null;
+}
+
+function resolveTargetBranchHint(text, branches, policy) {
+  const normalized = policy.normalize(text);
+  const compact = normalized.replace(/\s+/gu, '');
+  const matches = branches.filter(({ name }) => {
+    const full = policy.normalize(name).replace(/\s+/gu, '');
+    const short = full.replace(/^فرع/u, '').replace(/^ال/u, '');
+    return full && (compact.includes(full) || (short.length > 2 && compact.includes(short)));
+  });
+  return matches.length === 1 ? matches[0] : null;
+}
+
+function isCurrentChangeBranchInteractiveReply(flow, replyId) {
+  if (!flow || !replyId) return false;
+  const prefixes = {
+    awaiting_appointment: 'change-branch-appointment:', awaiting_branch: 'change-branch-branch:',
+    awaiting_date: 'change-branch-date:', awaiting_time: 'change-branch-time:',
+  };
+  if (prefixes[flow.step]) return replyId.startsWith(prefixes[flow.step]);
+  return flow.step === 'awaiting_confirmation' && flow.confirmationPending === true &&
+    ['change-branch-confirm:yes', 'change-branch-confirm:keep'].includes(replyId);
+}
+
+function prepareChangeBranchReview(proposal, flow, policy) {
+  flow.proposedStart = proposal.appointmentStart;
+  flow.reviewedUpdatedAt = new Date(proposal.appointment.updated_at).toISOString();
+  flow.step = 'awaiting_confirmation';
+  flow.confirmationPending = true;
+  const review = policy.changeBranchReview(proposal);
+  return {
+    reply: review,
+    interaction: {
+      version: 1, mode: 'reply_buttons', purpose: 'confirm_change_branch',
+      displayText: review,
+      options: [
+        { id: 'change-branch-confirm:yes', label: 'تأكيد تغيير الفرع' },
+        { id: 'change-branch-confirm:keep', label: 'الاحتفاظ بالفرع' },
+      ],
+    },
+  };
+}
+
+async function changeBranchCandidate(appointmentService, clinicId, patientId, flow) {
+  const ownerId = patientId || (await appointmentService
+    .resolveAppointmentForManagementByBookingReference(clinicId, flow.bookingReference))?.patientId;
+  if (!ownerId) return null;
+  return (await loadKnownPatientCandidates({ appointmentService, clinicId, patientId: ownerId }))
+    .find(({ id, status }) => id === flow.selectedAppointmentId &&
+      ['pending', 'confirmed'].includes(status)) || null;
+}
+function terminalChangeBranchFailure(state, policy) {
+  clearChangeBranchState(state);
+  return policy.changeBranchUnavailable();
+}
+function terminalChangeBranchNoCandidates(state, policy) {
+  clearChangeBranchState(state);
+  return policy.changeBranchNoCandidates();
+}
+
+async function handleChangeService({
+  text, interactiveReplyId, inquiry, state, policy, appointmentService,
+  bookingEngine, clinicId, patientId, conversationId, services, now,
+}) {
+  if (!appointmentService || !bookingEngine || !clinicId) {
+    clearChangeServiceState(state);
+    return policy.changeServiceUnavailable();
+  }
+  if (inquiry.type === 'change_service_request') {
+    clearCancellationState(state);
+    clearRescheduleState(state);
+    state.changeService = createChangeServiceState({
+      verificationRequired: !patientId,
+      targetServiceId: resolveTargetServiceHint(text, services, policy)?.id || null,
+    });
+    if (!patientId) return policy.changeServiceAskBookingReference();
+    const candidates = (await loadKnownPatientCandidates({
+      appointmentService, clinicId, patientId,
+    })).filter(({ status }) => ['pending', 'confirmed'].includes(status));
+    return beginChangeServiceAppointmentSelection(
+      candidates, state, policy, services, appointmentService, bookingEngine,
+      clinicId, patientId, now
+    );
+  }
+  const flow = state.changeService;
+  if (!flow) return policy.changeServiceUnavailable();
+  if (isCancellationAbandonment(text, policy)) {
+    clearChangeServiceState(state);
+    return policy.changeServiceDeclined();
+  }
+  if (flow.step === 'awaiting_reference') {
+    const reference = extractBookingReference(text);
+    if (!reference) return policy.changeServiceAskBookingReference();
+    flow.bookingReference = reference;
+    flow.step = 'awaiting_verification';
+    return policy.changeServiceAskRegisteredMobile();
+  }
+  if (flow.step === 'awaiting_verification') {
+    const verified = await appointmentService.verifyAppointmentOwnership(
+      clinicId, flow.bookingReference, text
+    );
+    if (!verified?.verified) {
+      flow.verificationAttempts += 1;
+      if (flow.verificationAttempts >= 3) {
+        clearChangeServiceState(state);
+        return policy.changeServiceVerificationExhausted();
+      }
+      return policy.changeServiceVerificationFailed();
+    }
+    const candidates = (await loadKnownPatientCandidates({
+      appointmentService, clinicId, patientId: verified.patientId,
+    })).filter(({ id, status }) =>
+      id === verified.appointmentId && ['pending', 'confirmed'].includes(status)
+    );
+    flow.ownershipVerified = true;
+    return beginChangeServiceAppointmentSelection(
+      candidates, state, policy, services, appointmentService, bookingEngine,
+      clinicId, verified.patientId, now
+    );
+  }
+  if (flow.step === 'awaiting_appointment') {
+    const index = parseManagementSelection(
+      text, interactiveReplyId, flow.candidateAppointmentIds,
+      'change-service-appointment:', policy
+    );
+    if (index === null) return policy.changeServiceInvalidSelection();
+    flow.selectedAppointmentId = flow.candidateAppointmentIds[index];
+    const candidate = await changeServiceCandidate(
+      appointmentService, clinicId, patientId, flow
+    );
+    if (!candidate) return terminalChangeServiceFailure(state, policy);
+    flow.bookingReference = candidate.booking_reference || flow.bookingReference;
+    return continueWithTargetServiceHint(
+      flow, state, policy, services, candidate, appointmentService, clinicId,
+      patientId || candidate.patient_id, bookingEngine, now
+    );
+  }
+  if (flow.step === 'awaiting_service') {
+    const service = selectChangeService(text, interactiveReplyId, services, flow, policy);
+    if (!service) return policy.changeServiceInvalidSelection();
+    const ownerId = patientId || (await appointmentService
+      .resolveAppointmentForManagementByBookingReference(clinicId, flow.bookingReference))?.patientId;
+    return advanceChangeServiceTarget({
+      service, flow, state, policy, appointmentService, bookingEngine,
+      clinicId, patientId: ownerId, now,
+    });
+  }
+  if (flow.step === 'awaiting_date') {
+    const date = parseOptionChoice(text, interactiveReplyId, flow.availableDates,
+      'change-service-date:', policy);
+    if (!date) return policy.changeServiceInvalidDate();
+    flow.proposedDate = date;
+    const candidate = await changeServiceCandidate(appointmentService, clinicId, patientId, flow);
+    if (!candidate) return terminalChangeServiceFailure(state, policy);
+    const times = await bookingEngine.getAvailableTimes({
+      clinicId, service: { id: flow.targetServiceId },
+      branch: { id: candidate.branch_id }, date,
+      excludeAppointmentId: candidate.id,
+    });
+    flow.availableTimes = times.times || [];
+    flow.step = 'awaiting_time';
+    return interactionOptions(policy.changeServiceChooseTime(), 'select_change_service_time',
+      flow.availableTimes, 'change-service-time:', formatArabicRescheduleTime);
+  }
+  if (flow.step === 'awaiting_time') {
+    const time = parseOptionChoice(text, interactiveReplyId, flow.availableTimes,
+      'change-service-time:', policy);
+    if (!time) return policy.changeServiceInvalidTime();
+    const candidate = await changeServiceCandidate(appointmentService, clinicId, patientId, flow);
+    if (!candidate) return terminalChangeServiceFailure(state, policy);
+    const parsed = parseBookingPreferredStart(`${flow.proposedDate} ${time}`, null, policy,
+      { timeZone: DEFAULT_TIME_ZONE, now });
+    if (!parsed.complete) return policy.changeServiceInvalidTime();
+    flow.proposedStart = parsed.value;
+    try {
+      const proposal = await appointmentService.previewServiceChange(
+        clinicId, candidate.id, flow.targetServiceId, flow.proposedStart,
+        patientId || candidate.patient_id
+      );
+      if (proposal.requiresNewSlot) return policy.changeServiceSlotUnavailable();
+      return prepareChangeServiceReview(proposal, flow, state, policy);
+    } catch {
+      return terminalChangeServiceFailure(state, policy);
+    }
+  }
+  if (flow.step === 'awaiting_confirmation') {
+    const answer = interactiveReplyId === 'change-service-confirm:yes' ? 'نعم'
+      : interactiveReplyId === 'change-service-confirm:keep' ? 'لا' : policy.normalize(text);
+    if (answer === 'لا') {
+      clearChangeServiceState(state);
+      return policy.changeServiceDeclined();
+    }
+    if (!['نعم', 'اوافق', 'تاكيد', 'اكد'].includes(answer)) {
+      return policy.changeServiceAskConfirmation();
+    }
+    try {
+      const result = await appointmentService.changeAppointmentService(
+        clinicId, flow.selectedAppointmentId, flow.targetServiceId,
+        flow.proposedStart, {
+          patientId: patientId || (await appointmentService
+            .resolveAppointmentForManagementByBookingReference(clinicId, flow.bookingReference))?.patientId,
+          source: 'shaden', conversationId,
+        }, flow.reviewedUpdatedAt
+      );
+      clearChangeServiceState(state);
+      return policy.changeServiceSuccessful(result.booking_reference);
+    } catch {
+      return terminalChangeServiceFailure(state, policy);
+    }
+  }
+  return terminalChangeServiceFailure(state, policy);
+}
+
+async function beginChangeServiceAppointmentSelection(
+  candidates, state, policy, services, appointmentService, bookingEngine,
+  clinicId, patientId, now
+) {
+  if (!candidates.length) return terminalChangeServiceNoCandidates(state, policy);
+  const flow = state.changeService;
+  flow.candidateAppointmentIds = candidates.map(({ id }) => id);
+  flow.ownershipVerified = true;
+  if (candidates.length === 1) {
+    flow.selectedAppointmentId = candidates[0].id;
+    flow.bookingReference = candidates[0].booking_reference || flow.bookingReference;
+    return continueWithTargetServiceHint(
+      flow, state, policy, services, candidates[0], appointmentService, clinicId, patientId
+      , bookingEngine, now
+    );
+  }
+  flow.step = 'awaiting_appointment';
+  return {
+    reply: policy.changeServiceChooseAppointment(),
+    interaction: {
+      version: 1, mode: 'list', purpose: 'select_change_service_appointment',
+      displayText: policy.changeServiceChooseAppointment(), listPrompt: 'عرض المواعيد',
+      options: candidates.slice(0, 10).map((candidate) => ({
+        id: `change-service-appointment:${candidate.id}`,
+        label: truncateInteractionText(
+          `${policy.display(candidate.service_name || 'موعد')} — ${candidate.booking_reference}`, 24),
+        description: truncateInteractionText(
+          `${bidiIsolate(formatArabicRescheduleDate(candidate.appointment_start))} · ${bidiIsolate(formatArabicRescheduleTime(candidate.appointment_start))} · ${policy.display(candidate.branch_name || '')}`, 72),
+      })),
+    },
+  };
+}
+
+async function continueWithTargetServiceHint(
+  flow, state, policy, services, candidate, appointmentService, clinicId, patientId,
+  bookingEngine, now
+) {
+  const hinted = flow.targetServiceId
+    ? services.find(({ id }) => id === flow.targetServiceId)
+    : null;
+  if (!hinted || hinted.id === candidate.service_id) {
+    flow.targetServiceId = null;
+    return showChangeServiceChoices(
+      flow, state, policy, services, candidate, appointmentService, clinicId, patientId
+    );
+  }
+  const eligible = appointmentService?.listEligibleServiceChanges
+    ? await appointmentService.listEligibleServiceChanges(clinicId, candidate.id, patientId)
+    : services;
+  if (!eligible.some(({ id }) => id === hinted.id)) {
+    flow.targetServiceId = null;
+    return showChangeServiceChoices(
+      flow, state, policy, services, candidate, appointmentService, clinicId, patientId
+    );
+  }
+  return advanceChangeServiceTarget({
+    service: hinted, flow, state, policy, appointmentService, bookingEngine,
+    clinicId, patientId, now,
+  });
+}
+
+async function advanceChangeServiceTarget({
+  service, flow, state, policy, appointmentService, bookingEngine,
+  clinicId, patientId, now,
+}) {
+  let proposal;
+  try {
+    proposal = await appointmentService.previewServiceChange(
+      clinicId, flow.selectedAppointmentId, service.id, null, patientId
+    );
+  } catch (error) {
+    return error?.code === 'APPOINTMENT_SERVICE_UNCHANGED'
+      ? policy.changeServiceSameService()
+      : terminalChangeServiceFailure(state, policy);
+  }
+  flow.targetServiceId = service.id;
+  if (!proposal.requiresNewSlot) {
+    return prepareChangeServiceReview(proposal, flow, state, policy);
+  }
+  if (String(proposal.reason || '').includes('assignment_not_found')) {
+    return terminalChangeServiceFailure(state, policy);
+  }
+  const dates = await bookingEngine.getAvailableDates({
+    clinicId, service: { id: service.id },
+    branch: { id: proposal.appointment.branch_id }, fromDate: localDateString(now),
+    searchDays: 31, limit: 31, excludeAppointmentId: proposal.appointment.id,
+  });
+  flow.availableDates = dates.dates || [];
+  flow.step = 'awaiting_date';
+  return interactionOptions(policy.changeServiceChooseDate(), 'select_change_service_date',
+    flow.availableDates, 'change-service-date:', formatArabicRescheduleDate);
+}
+
+async function showChangeServiceChoices(
+  flow, state, policy, services, candidate = null,
+  appointmentService = null, clinicId = null, patientId = null
+) {
+  flow.step = 'awaiting_service';
+  const authoritative = candidate && appointmentService?.listEligibleServiceChanges
+    ? await appointmentService.listEligibleServiceChanges(
+      clinicId, candidate.id, patientId
+    )
+    : services;
+  const options = authoritative.filter(({ id, isBookingEnabled, is_booking_enabled }) =>
+    id && id !== candidate?.service_id && isBookingEnabled !== false && is_booking_enabled !== false
+  ).slice(0, 10);
+  if (!options.length) return terminalChangeServiceFailure(state, policy);
+  const summary = candidate ? policy.changeServiceCurrentSummary(candidate) : policy.changeServiceChooseService();
+  return {
+    reply: summary,
+    interaction: {
+      version: 1, mode: 'list', purpose: 'select_change_service_service',
+      displayText: summary, listPrompt: 'عرض الخدمات',
+      options: options.map((service) => ({
+        id: `change-service-service:${service.id}`,
+        label: truncateInteractionText(policy.display(service.name), 24),
+      })),
+    },
+  };
+}
+
+function selectChangeService(text, replyId, services, flow, policy) {
+  if (replyId?.startsWith('change-service-service:')) {
+    return services.find(({ id }) => id === replyId.slice(23)) || null;
+  }
+  const normalized = policy.normalize(text);
+  const matches = services.filter(({ name }) => policy.normalize(name) === normalized);
+  return matches.length === 1 ? matches[0] : null;
+}
+
+function resolveTargetServiceHint(text, services, policy) {
+  const normalized = policy.normalize(text);
+  const tail = normalized.match(/(?:\sل|\sالي\s|\sالى\s|\sto\s)([^\s].*)$/u)?.[1];
+  if (!tail) return null;
+  const matches = services.filter(({ name }) => {
+    const serviceName = policy.normalize(name);
+    return serviceName && (tail === serviceName || tail.includes(serviceName));
+  });
+  return matches.length === 1 ? matches[0] : null;
+}
+
+function isCurrentChangeServiceInteractiveReply(flow, replyId) {
+  if (!flow || !replyId) return false;
+  const prefixes = {
+    awaiting_appointment: 'change-service-appointment:',
+    awaiting_service: 'change-service-service:',
+    awaiting_date: 'change-service-date:',
+    awaiting_time: 'change-service-time:',
+  };
+  if (prefixes[flow.step]) return replyId.startsWith(prefixes[flow.step]);
+  return flow.step === 'awaiting_confirmation' && flow.confirmationPending === true &&
+    ['change-service-confirm:yes', 'change-service-confirm:keep'].includes(replyId);
+}
+
+function prepareChangeServiceReview(proposal, flow, state, policy) {
+  flow.proposedStart = proposal.appointmentStart;
+  flow.reviewedUpdatedAt = new Date(proposal.appointment.updated_at).toISOString();
+  flow.step = 'awaiting_confirmation';
+  flow.confirmationPending = true;
+  return {
+    reply: policy.changeServiceReview(proposal),
+    interaction: {
+      version: 1, mode: 'reply_buttons', purpose: 'confirm_change_service',
+      displayText: policy.changeServiceReview(proposal),
+      options: [
+        { id: 'change-service-confirm:yes', label: 'تأكيد تغيير الخدمة' },
+        { id: 'change-service-confirm:keep', label: 'الاحتفاظ بالخدمة' },
+      ],
+    },
+  };
+}
+
+async function changeServiceCandidate(appointmentService, clinicId, patientId, flow) {
+  const ownerId = patientId || (await appointmentService
+    .resolveAppointmentForManagementByBookingReference(clinicId, flow.bookingReference))?.patientId;
+  if (!ownerId) return null;
+  return (await loadKnownPatientCandidates({ appointmentService, clinicId, patientId: ownerId }))
+    .find(({ id, status }) => id === flow.selectedAppointmentId && ['pending', 'confirmed'].includes(status)) || null;
+}
+
+function terminalChangeServiceFailure(state, policy) {
+  clearChangeServiceState(state);
+  return policy.changeServiceUnavailable();
+}
+function terminalChangeServiceNoCandidates(state, policy) {
+  clearChangeServiceState(state);
+  return policy.changeServiceNoCandidates();
+}
+
+function beginRescheduleSelection(candidates, state, policy) {
+  if (!candidates.length) return resetUnavailableReschedule(state, policy);
+  state.reschedule.candidateAppointmentIds = candidates.map(({ id }) => id);
+  state.reschedule.ownershipVerified = true;
+  state.reschedule.step = 'awaiting_selection';
+  return {
+    reply: policy.rescheduleChooseAppointment(),
+    interaction: {
+      version: 1, mode: 'list', purpose: 'select_reschedule_appointment',
+      displayText: policy.rescheduleChooseAppointment(), listPrompt: 'عرض المواعيد',
+      options: candidates.slice(0, 10).map((candidate) => ({
+        id: `reschedule-appointment:${candidate.id}`,
+        label: truncateInteractionText(
+          `${policy.display(candidate.service_name || 'موعد')} — ${candidate.booking_reference || 'بدون مرجع'}`,
+          24
+        ),
+        description: truncateInteractionText([
+          `التاريخ: ${bidiIsolate(formatArabicRescheduleDate(candidate.appointment_start))}`,
+          `الوقت: ${bidiIsolate(formatArabicRescheduleTime(candidate.appointment_start))}`,
+          `الفرع: ${policy.display(candidate.branch_name || 'غير محدد')}`,
+        ].join(' · '), 72),
+      })),
+    },
+  };
+}
+
+async function loadRescheduleDates({ selected, state, policy, bookingEngine, clinicId, now }) {
+  const result = await bookingEngine.getAvailableDates({
+    clinicId, service: { id: selected.service_id }, branch: { id: selected.branch_id },
+    doctor: selected.doctor_id ? { id: selected.doctor_id } : null,
+    room: selected.room_id ? { id: selected.room_id } : null,
+    fromDate: localDateString(now), searchDays: 31, limit: 31,
+    excludeAppointmentId: selected.id,
+  });
+  state.reschedule.availableDates = result.dates || [];
+  state.reschedule.step = 'awaiting_date';
+  return interactionOptions(policy.rescheduleChooseDate(), 'select_reschedule_date',
+    state.reschedule.availableDates, 'reschedule-date:', formatArabicRescheduleDate);
+}
+
+function interactionOptions(reply, purpose, values, prefix, label) {
+  if (!values.length) return reply;
+  return { reply, interaction: { version: 1, mode: 'list', purpose,
+    displayText: reply, listPrompt: 'عرض الخيارات', options: values.slice(0, 10).map((value, index) => ({
+      id: `${prefix}${value}`, label: label(value, index),
+    })) } };
+}
+
+function bidiIsolate(value) {
+  return `\u2068${value}\u2069`;
+}
+
+function formatArabicRescheduleDate(value) {
+  const months = [
+    'يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو',
+    'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر',
+  ];
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(value)
+    ? new Date(`${value}T00:00:00`)
+    : new Date(value);
+  return `${date.getDate()} ${months[date.getMonth()]} ${date.getFullYear()}`;
+}
+
+function formatArabicRescheduleTime(value) {
+  const date = /^\d{2}:\d{2}$/.test(value)
+    ? new Date(`2000-01-01T${value}:00`)
+    : new Date(value);
+  const hour = date.getHours();
+  return `${hour % 12 || 12}:${String(date.getMinutes()).padStart(2, '0')} ${hour < 12 ? 'ص' : 'م'}`;
+}
+
+function parseManagementSelection(text, replyId, ids, prefix, policy) {
+  if (replyId?.startsWith(prefix)) {
+    const index = ids.indexOf(replyId.slice(prefix.length));
+    return index < 0 ? null : index;
+  }
+  const match = policy.normalize(text).match(/^(\d{1,2})$/);
+  const index = match ? Number(match[1]) - 1 : -1;
+  return index >= 0 && index < ids.length ? index : null;
+}
+
+function parseOptionChoice(text, replyId, options, prefix, policy) {
+  if (replyId?.startsWith(prefix)) {
+    const value = replyId.slice(prefix.length);
+    return options.includes(value) ? value : null;
+  }
+  const normalized = policy.normalize(text);
+  if (options.includes(normalized)) return normalized;
+  const index = Number(normalized) - 1;
+  return Number.isInteger(index) && options[index] ? options[index] : null;
+}
+
+async function reloadRescheduleCandidate({ appointmentService, clinicId, patientId, flow }) {
+  let ownerId = patientId;
+  if (!ownerId) ownerId = (await resolveRescheduleOwner(appointmentService, clinicId, flow))?.patientId;
+  if (!ownerId) return null;
+  const candidates = await loadRescheduleCandidates({ appointmentService, clinicId, patientId: ownerId });
+  return candidates.find(({ id }) => id === flow.selectedAppointmentId) || null;
+}
+
+function resolveRescheduleOwner(appointmentService, clinicId, flow) {
+  return appointmentService.resolveAppointmentForManagementByBookingReference(clinicId, flow.bookingReference);
+}
+
+async function loadRescheduleCandidates(input) {
+  const candidates = await loadKnownPatientCandidates(input);
+  return candidates.filter(({ status }) => ['pending', 'confirmed'].includes(status));
+}
+
+function resetUnavailableReschedule(state, policy) {
+  clearRescheduleState(state);
+  return policy.rescheduleUnavailable();
+}
+
+function localDateString(date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
+async function handleKnownPhoneCancellation({
+  text,
+  interactiveReplyId,
+  inquiry,
+  state,
+  policy,
+  appointmentService,
+  clinicId,
+  patientId,
+  conversationId,
+}) {
+  if (
+    !appointmentService ||
+    typeof appointmentService.getFutureManagementCandidates !== 'function' ||
+    !clinicId
+  ) {
+    clearCancellationState(state);
+    return policy.cancellationUnavailable();
+  }
+
+  if (inquiry.type === 'booking_cancellation_request') {
+    replaceCancellationState(state, {
+      step: 'awaiting_selection',
+      bookingReference: inquiry.bookingReference || null,
+      verificationRequired: false,
+    });
+    const candidates = await loadKnownPatientCandidates({
+      appointmentService,
+      clinicId,
+      patientId,
+    });
+    let matchingCandidates = candidates;
+
+    if (inquiry.bookingReference) {
+      if (
+        typeof appointmentService
+          .resolveAppointmentForManagementByBookingReference !== 'function'
+      ) {
+        clearCancellationState(state);
+        return policy.cancellationNoCandidates();
+      }
+      const resolved = await appointmentService
+        .resolveAppointmentForManagementByBookingReference(
+          clinicId,
+          inquiry.bookingReference
+        );
+      if (
+        !resolved ||
+        resolved.clinicId !== clinicId ||
+        resolved.patientId !== patientId
+      ) {
+        clearCancellationState(state);
+        return policy.cancellationNoCandidates();
+      }
+      matchingCandidates = candidates.filter((candidate) =>
+        candidate.id === resolved.appointmentId &&
+        candidate.booking_reference === inquiry.bookingReference
+      );
+    }
+
+    return beginKnownCancellationSelection({
+      candidates: matchingCandidates,
+      state,
+      policy,
+    });
+  }
+
+  const cancellation = state.cancellation;
+  if (!cancellation) return policy.cancellationNoCandidates();
+
+  if (cancellation.step === 'awaiting_selection') {
+    const selection = parseCancellationSelection(
+      text,
+      interactiveReplyId,
+      cancellation.candidateAppointmentIds,
+      policy
+    );
+    if (
+      selection === null ||
+      selection < 0 ||
+      selection >= cancellation.candidateAppointmentIds.length
+    ) {
+      return policy.cancellationInvalidSelection(
+        cancellation.candidateAppointmentIds.length
+      );
+    }
+    const candidates = await loadKnownPatientCandidates({
+      appointmentService,
+      clinicId,
+      patientId,
+    });
+    const selectedId = cancellation.candidateAppointmentIds[selection];
+    const selected = candidates.find((candidate) =>
+      candidate.id === selectedId
+    );
+    if (!selected) {
+      clearCancellationState(state);
+      return policy.cancellationNoCandidates();
+    }
+    return prepareKnownCancellationReview({
+      candidate: selected,
+      candidateIds: cancellation.candidateAppointmentIds,
+      state,
+      policy,
+    });
+  }
+
+  if (cancellation.step === 'awaiting_confirmation') {
+    return handleCancellationConfirmation({
+      text,
+      interactiveReplyId,
+      state,
+      policy,
+      appointmentService,
+      clinicId,
+      patientId,
+      conversationId,
+    });
+  }
+
+  clearCancellationState(state);
+  return policy.cancellationNoCandidates();
+}
+
+async function handleUnknownPhoneCancellation({
+  text,
+  interactiveReplyId,
+  inquiry,
+  state,
+  policy,
+  appointmentService,
+  clinicId,
+  conversationId,
+}) {
+  if (!appointmentService || !clinicId) {
+    clearCancellationState(state);
+    return policy.cancellationUnavailable();
+  }
+
+  if (inquiry.type === 'booking_cancellation_request') {
+    const suppliedReference = inquiry.bookingReference ||
+      extractBookingReference(text);
+    const hasSuppliedValue = Boolean(suppliedReference) ||
+      hasCancellationReferenceSuffix(text, policy);
+    replaceCancellationState(state, {
+      step: hasSuppliedValue
+        ? 'awaiting_verification'
+        : 'awaiting_reference',
+      bookingReference: suppliedReference || null,
+      verificationRequired: true,
+    });
+    return hasSuppliedValue
+      ? policy.cancellationAskRegisteredMobile()
+      : policy.cancellationAskBookingReference();
+  }
+
+  const cancellation = state.cancellation;
+  if (!cancellation) return policy.cancellationAskBookingReference();
+  if (isCancellationAbandonment(text, policy)) {
+    clearCancellationState(state);
+    return policy.cancellationAbandoned();
+  }
+
+  if (cancellation.step === 'awaiting_reference') {
+    cancellation.bookingReference = extractBookingReference(text);
+    cancellation.step = 'awaiting_verification';
+    return policy.cancellationAskRegisteredMobile();
+  }
+
+  if (cancellation.step === 'awaiting_verification') {
+    if (
+      typeof appointmentService.verifyAppointmentOwnership !== 'function'
+    ) {
+      clearCancellationState(state);
+      return policy.cancellationUnavailable();
+    }
+    const verification = await appointmentService.verifyAppointmentOwnership(
+      clinicId,
+      cancellation.bookingReference,
+      text
+    );
+    if (!verification?.verified) {
+      return recordUnknownVerificationFailure({ state, policy });
+    }
+
+    const candidate = await loadVerifiedUnknownCandidate({
+      appointmentService,
+      clinicId,
+      verification,
+    });
+    if (!candidate) {
+      return recordUnknownVerificationFailure({ state, policy });
+    }
+
+    return prepareKnownCancellationReview({
+      candidate,
+      candidateIds: [candidate.id],
+      state,
+      policy,
+      verificationRequired: true,
+    });
+  }
+
+  if (cancellation.step === 'awaiting_confirmation') {
+    return handleCancellationConfirmation({
+      text,
+      interactiveReplyId,
+      state,
+      policy,
+      appointmentService,
+      clinicId,
+      conversationId,
+    });
+  }
+
+  clearCancellationState(state);
+  return policy.cancellationAbandoned();
+}
+
+async function loadVerifiedUnknownCandidate({
+  appointmentService,
+  clinicId,
+  verification,
+}) {
+  if (
+    !verification.appointmentId ||
+    !verification.patientId ||
+    typeof appointmentService.getFutureManagementCandidates !== 'function'
+  ) {
+    return null;
+  }
+  const candidates = await loadKnownPatientCandidates({
+    appointmentService,
+    clinicId,
+    patientId: verification.patientId,
+  });
+  return candidates.find((candidate) =>
+    candidate.id === verification.appointmentId
+  ) || null;
+}
+
+function recordUnknownVerificationFailure({ state, policy }) {
+  recordCancellationVerificationFailure(state);
+  return state.cancellation
+    ? policy.cancellationVerificationFailed()
+    : policy.cancellationVerificationExhausted();
+}
+
+function hasCancellationReferenceSuffix(text, policy) {
+  const normalized = policy.normalize(text);
+  return /^(?:الغاء|الغي|الغيه)\s+(?:الحجز|حجزي|موعد|موعدي)\s+\S/u.test(
+    normalized
+  );
+}
+
+function isCancellationAbandonment(text, policy) {
+  return ['الغاء', 'تراجع', 'خروج', 'انهاء'].includes(
+    policy.normalize(text)
+  );
+}
+
+async function handleCancellationConfirmation({
+  text,
+  interactiveReplyId,
+  state,
+  policy,
+  appointmentService,
+  clinicId,
+  patientId = null,
+  conversationId = null,
+}) {
+  const cancellation = state.cancellation;
+  const normalized = interactiveReplyId === 'cancellation-confirm:yes'
+    ? 'نعم'
+    : interactiveReplyId === 'cancellation-confirm:keep'
+      ? 'لا'
+      : policy.normalize(text);
+  if (['لا', 'الغاء', 'تراجع'].includes(normalized)) {
+    clearCancellationState(state);
+    return policy.cancellationDeclined();
+  }
+  const reason = extractVolunteeredCancellationReason(text, policy);
+  if (reason) {
+    cancellation.cancellationReason = reason;
+    return cancellationConfirmationReply(policy);
+  }
+  if (!isExplicitCancellationConfirmation(normalized)) {
+    return cancellationConfirmationReply(policy);
+  }
+  if (!isCancellationReadyForExecution(cancellation)) {
+    clearCancellationState(state);
+    return policy.cancellationUnavailable();
+  }
+
+  try {
+    let verifiedPatientId = patientId;
+    if (!verifiedPatientId) {
+      const resolved = await resolveVerifiedCancellationOwner({
+        appointmentService,
+        clinicId,
+        cancellation,
+      });
+      verifiedPatientId = resolved?.patientId || null;
+    }
+    if (
+      !verifiedPatientId ||
+      typeof appointmentService?.cancelAppointment !== 'function'
+    ) {
+      clearCancellationState(state);
+      return policy.cancellationAppointmentUnavailable();
+    }
+    const result = await appointmentService.cancelAppointment(
+      clinicId,
+      cancellation.selectedAppointmentId,
+      cancellation.cancellationReason || null,
+      null,
+      {
+        patientId: verifiedPatientId,
+        source: 'shaden',
+        ...(conversationId ? { conversationId } : {}),
+      }
+    );
+    clearCancellationState(state);
+    if (isAlreadyCancelledResult(result)) {
+      return policy.cancellationAlreadyCancelled();
+    }
+    if (result?.communication?.attempted === true) {
+      return {
+        reply: result.communication.success === false
+          ? policy.cancellationNotificationPending()
+          : null,
+        notificationAttempted: true,
+      };
+    }
+    return policy.cancellationSuccessful();
+  } catch (error) {
+    clearCancellationState(state);
+    return cancellationFailureReply(error, policy);
+  }
+}
+
+function isExplicitCancellationConfirmation(normalized) {
+  return ['نعم', 'اوافق', 'تاكيد', 'اكد', 'نعم اؤكد'].includes(normalized);
+}
+
+function isCancellationReadyForExecution(cancellation) {
+  return Boolean(
+    cancellation &&
+    cancellation.step === 'awaiting_confirmation' &&
+    cancellation.ownershipVerified === true &&
+    cancellation.confirmationPending === true &&
+    cancellation.reviewedUpdatedAt &&
+    isUuid(cancellation.selectedAppointmentId) &&
+    cancellation.candidateAppointmentIds.includes(
+      cancellation.selectedAppointmentId
+    )
+  );
+}
+
+async function resolveVerifiedCancellationOwner({
+  appointmentService,
+  clinicId,
+  cancellation,
+}) {
+  if (
+    !cancellation.verificationRequired ||
+    !cancellation.bookingReference ||
+    typeof appointmentService?.resolveAppointmentForManagementByBookingReference !== 'function'
+  ) {
+    return null;
+  }
+  const resolved = await appointmentService
+    .resolveAppointmentForManagementByBookingReference(
+      clinicId,
+      cancellation.bookingReference
+    );
+  return resolved &&
+    resolved.clinicId === clinicId &&
+    resolved.appointmentId === cancellation.selectedAppointmentId
+    ? resolved
+    : null;
+}
+
+function isAlreadyCancelledResult(result) {
+  return Boolean(
+    result?.alreadyCancelled === true ||
+    result?.idempotent === true ||
+    result?.outcome === 'already_cancelled'
+  );
+}
+
+function cancellationFailureReply(error, policy) {
+  const code = String(error?.code || '').toUpperCase();
+  const name = String(error?.name || '');
+  const message = String(error?.message || '').toLowerCase();
+  if (
+    code === 'APPOINTMENT_STALE' ||
+    code === 'APPOINTMENT_CONFLICT' ||
+    name === 'ConflictError' ||
+    message.includes('changed after it was reviewed')
+  ) {
+    return policy.cancellationStale();
+  }
+  if (code === 'APPOINTMENT_NOT_FOUND' || name === 'NotFoundError') {
+    return policy.cancellationAppointmentUnavailable();
+  }
+  if (
+    code === 'APPOINTMENT_NOT_CANCELLABLE' ||
+    code === 'INVALID_APPOINTMENT_TRANSITION' ||
+    name === 'ValidationError' ||
+    message.includes('transition') ||
+    message.includes('cannot be cancelled')
+  ) {
+    return policy.cancellationNoLongerCancellable();
+  }
+  return policy.cancellationExecutionFailed();
+}
+
+async function loadKnownPatientCandidates({
+  appointmentService,
+  clinicId,
+  patientId,
+}) {
+  const candidates = await appointmentService.getFutureManagementCandidates(
+    clinicId,
+    patientId
+  );
+  if (!Array.isArray(candidates)) return [];
+  return candidates.filter((candidate) =>
+    candidate &&
+    candidate.clinic_id === clinicId &&
+    candidate.patient_id === patientId &&
+    isUuid(candidate.id)
+  );
+}
+
+function beginKnownCancellationSelection({ candidates, state, policy }) {
+  if (candidates.length === 0) {
+    clearCancellationState(state);
+    return policy.cancellationNoCandidates();
+  }
+  if (candidates.length === 1) {
+    return prepareKnownCancellationReview({
+      candidate: candidates[0],
+      candidateIds: [candidates[0].id],
+      state,
+      policy,
+    });
+  }
+
+  state.cancellation.step = 'awaiting_selection';
+  state.cancellation.candidateAppointmentIds = candidates.map(
+    (candidate) => candidate.id
+  );
+  state.cancellation.selectedAppointmentId = null;
+  state.cancellation.confirmationPending = false;
+  const reply = policy.cancellationCandidates(candidates);
+  if (candidates.length > 10) return reply;
+  const options = candidates.map((candidate, index) => {
+    const schedule = formatCancellationSchedule(candidate.appointment_start);
+    return {
+      id: `cancellation-appointment:${candidate.id}`,
+      label: truncateInteractionText(
+        `${index + 1}. ${policy.display(candidate.service_name || 'موعد')}`,
+        24
+      ),
+      description: truncateInteractionText(
+        `${schedule} — ${policy.display(candidate.branch_name || 'فرع غير محدد')}`,
+        72
+      ),
+    };
+  });
+  if (options.some((option) =>
+    option.id.length > 200 || !option.label || !option.description
+  )) return reply;
+  return {
+    reply,
+    interaction: {
+      version: 1,
+      mode: 'list',
+      purpose: 'select_cancellation_appointment',
+      displayText: 'يرجى اختيار الموعد المراد إلغاؤه.',
+      listPrompt: 'عرض المواعيد',
+      options,
+    },
+  };
+}
+
+function prepareKnownCancellationReview({
+  candidate,
+  candidateIds,
+  state,
+  policy,
+  verificationRequired = false,
+}) {
+  const cancellation = state.cancellation;
+  cancellation.step = 'awaiting_confirmation';
+  cancellation.candidateAppointmentIds = [...candidateIds];
+  cancellation.selectedAppointmentId = candidate.id;
+  cancellation.bookingReference = candidate.booking_reference || null;
+  cancellation.verificationRequired = verificationRequired;
+  cancellation.ownershipVerified = true;
+  cancellation.confirmationPending = true;
+  cancellation.reviewedUpdatedAt = candidate.updated_at
+    ? new Date(candidate.updated_at).toISOString()
+    : null;
+  return cancellationConfirmationReply(
+    policy,
+    policy.cancellationReview(candidate)
+  );
+}
+
+function parseCancellationSelection(
+  text,
+  interactiveReplyId,
+  candidateAppointmentIds,
+  policy
+) {
+  const prefix = 'cancellation-appointment:';
+  if (
+    typeof interactiveReplyId === 'string' &&
+    interactiveReplyId.startsWith(prefix)
+  ) {
+    const appointmentId = interactiveReplyId.slice(prefix.length);
+    const index = candidateAppointmentIds.indexOf(appointmentId);
+    return index >= 0 ? index : null;
+  }
+  const normalized = policy.normalize(text);
+  const match = normalized.match(/^(?:اختيار\s*)?(\d{1,2})$/u);
+  if (!match) return null;
+  return Number(match[1]) - 1;
+}
+
+function cancellationConfirmationReply(policy, reply = null) {
+  return {
+    reply: reply || policy.cancellationAskConfirmation(),
+    interaction: {
+      version: 1,
+      mode: 'reply_buttons',
+      purpose: 'confirm_appointment_cancellation',
+      displayText: 'تأكيد إلغاء هذا الموعد؟',
+      options: [
+        { id: 'cancellation-confirm:yes', label: 'تأكيد الإلغاء' },
+        { id: 'cancellation-confirm:keep', label: 'الاحتفاظ بالموعد' },
+      ],
+    },
+  };
+}
+
+function formatCancellationSchedule(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return 'موعد غير محدد';
+  return new Intl.DateTimeFormat('ar-SA-u-ca-gregory', {
+    timeZone: 'Asia/Riyadh',
+    month: 'numeric',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  }).format(date);
+}
+
+function truncateInteractionText(value, limit) {
+  const text = String(value || '').trim();
+  return text.length <= limit ? text : text.slice(0, limit - 1).trimEnd() + '…';
+}
+
+function extractVolunteeredCancellationReason(text, policy) {
+  const normalized = policy.normalize(text);
+  const match = normalized.match(/^(?:السبب|سبب الالغاء)\s*[:\-]?\s+(.{1,200})$/u);
+  return match?.[1]?.trim() || null;
 }
 
 function advanceFromServiceSelection(booking, service, data, policy) {
@@ -1101,12 +2839,15 @@ function normalizeEngineReply(result, nextState) {
     result &&
     typeof result === 'object' &&
     !Array.isArray(result) &&
-    typeof result.reply === 'string'
+    Object.prototype.hasOwnProperty.call(result, 'reply')
   ) {
     return {
       reply: result.reply,
       nextState,
       ...(result.interaction ? { interaction: result.interaction } : {}),
+      ...(result.notificationAttempted
+        ? { notificationAttempted: true }
+        : {}),
     };
   }
   return { reply: result, nextState };
@@ -2426,7 +4167,410 @@ function normalizeState(state, policy) {
   if (booking) normalized.booking = booking;
   const priceInquiry = normalizePriceInquiryState(state.priceInquiry);
   if (priceInquiry) normalized.priceInquiry = priceInquiry;
+  const cancellation = normalizeCancellationState(state);
+  if (cancellation) normalized.cancellation = cancellation;
+  const reschedule = normalizeRescheduleState(state.reschedule);
+  if (reschedule) normalized.reschedule = reschedule;
+  const changeService = normalizeChangeServiceState(state.changeService);
+  if (changeService) normalized.changeService = changeService;
+  const changeBranch = normalizeChangeBranchState(state.changeBranch);
+  if (changeBranch) normalized.changeBranch = changeBranch;
   return normalized;
+}
+
+const CHANGE_SERVICE_STEPS = new Set([
+  'awaiting_reference', 'awaiting_verification', 'awaiting_appointment',
+  'awaiting_service', 'awaiting_date', 'awaiting_time', 'awaiting_confirmation',
+]);
+const CHANGE_SERVICE_FIELDS = Object.freeze([
+  'intent', 'step', 'candidateAppointmentIds', 'selectedAppointmentId',
+  'bookingReference', 'verificationRequired', 'ownershipVerified',
+  'verificationAttempts', 'targetServiceId', 'availableDates', 'availableTimes',
+  'proposedDate', 'proposedStart', 'reviewedUpdatedAt', 'confirmationPending',
+]);
+function createChangeServiceState({
+  verificationRequired = false, targetServiceId = null,
+} = {}) {
+  return {
+    intent: 'appointment_change_service',
+    step: verificationRequired ? 'awaiting_reference' : 'awaiting_appointment',
+    candidateAppointmentIds: [], selectedAppointmentId: null,
+    bookingReference: null, verificationRequired: Boolean(verificationRequired),
+    ownershipVerified: false, verificationAttempts: 0,
+    targetServiceId: isUuid(targetServiceId) ? targetServiceId : null,
+    availableDates: [], availableTimes: [], proposedDate: null,
+    proposedStart: null, reviewedUpdatedAt: null, confirmationPending: false,
+  };
+}
+function normalizeChangeServiceState(value) {
+  if (!isPlainObject(value) || Object.keys(value).length !== CHANGE_SERVICE_FIELDS.length ||
+      Object.keys(value).some((key) => !CHANGE_SERVICE_FIELDS.includes(key)) ||
+      value.intent !== 'appointment_change_service' ||
+      !CHANGE_SERVICE_STEPS.has(value.step) ||
+      !Array.isArray(value.candidateAppointmentIds) ||
+      !value.candidateAppointmentIds.every(isUuid) ||
+      !isNullableUuid(value.selectedAppointmentId) ||
+      !isNullableBookingReference(value.bookingReference) ||
+      typeof value.verificationRequired !== 'boolean' ||
+      typeof value.ownershipVerified !== 'boolean' ||
+      !Number.isInteger(value.verificationAttempts) || value.verificationAttempts < 0 ||
+      value.verificationAttempts >= 3 ||
+      !isNullableUuid(value.targetServiceId) ||
+      !Array.isArray(value.availableDates) || !value.availableDates.every(isIsoDate) ||
+      !Array.isArray(value.availableTimes) || !value.availableTimes.every(isClockTime) ||
+      !(value.proposedDate === null || isIsoDate(value.proposedDate)) ||
+      !(value.proposedStart === null || Number.isFinite(Date.parse(value.proposedStart))) ||
+      !(value.reviewedUpdatedAt === null || Number.isFinite(Date.parse(value.reviewedUpdatedAt))) ||
+      typeof value.confirmationPending !== 'boolean') return null;
+  return structuredClone(value);
+}
+function clearChangeServiceState(state) {
+  if (!state || typeof state !== 'object') return state;
+  delete state.changeService;
+  state.options = [];
+  if (state.step !== 'customer_name') state.step = null;
+  if (String(state.context?.inquiry || '').includes('change_service')) state.context = null;
+  return state;
+}
+
+const CHANGE_BRANCH_STEPS = new Set([
+  'awaiting_reference', 'awaiting_verification', 'awaiting_appointment',
+  'awaiting_branch', 'awaiting_date', 'awaiting_time', 'awaiting_confirmation',
+]);
+const CHANGE_BRANCH_FIELDS = Object.freeze([
+  'intent', 'step', 'candidateAppointmentIds', 'selectedAppointmentId',
+  'bookingReference', 'verificationRequired', 'ownershipVerified',
+  'verificationAttempts', 'targetBranchId', 'availableDates', 'availableTimes',
+  'proposedDate', 'proposedStart', 'reviewedUpdatedAt', 'confirmationPending',
+]);
+function createChangeBranchState({ verificationRequired = false, targetBranchId = null } = {}) {
+  return {
+    intent: 'appointment_change_branch',
+    step: verificationRequired ? 'awaiting_reference' : 'awaiting_appointment',
+    candidateAppointmentIds: [], selectedAppointmentId: null,
+    bookingReference: null, verificationRequired: Boolean(verificationRequired),
+    ownershipVerified: false, verificationAttempts: 0,
+    targetBranchId: isUuid(targetBranchId) ? targetBranchId : null,
+    availableDates: [], availableTimes: [], proposedDate: null,
+    proposedStart: null, reviewedUpdatedAt: null, confirmationPending: false,
+  };
+}
+function normalizeChangeBranchState(value) {
+  if (!isPlainObject(value) || Object.keys(value).length !== CHANGE_BRANCH_FIELDS.length ||
+      Object.keys(value).some((key) => !CHANGE_BRANCH_FIELDS.includes(key)) ||
+      value.intent !== 'appointment_change_branch' || !CHANGE_BRANCH_STEPS.has(value.step) ||
+      !Array.isArray(value.candidateAppointmentIds) || !value.candidateAppointmentIds.every(isUuid) ||
+      !isNullableUuid(value.selectedAppointmentId) || !isNullableBookingReference(value.bookingReference) ||
+      typeof value.verificationRequired !== 'boolean' || typeof value.ownershipVerified !== 'boolean' ||
+      !Number.isInteger(value.verificationAttempts) || value.verificationAttempts < 0 ||
+      value.verificationAttempts >= 3 || !isNullableUuid(value.targetBranchId) ||
+      !Array.isArray(value.availableDates) || !value.availableDates.every(isIsoDate) ||
+      !Array.isArray(value.availableTimes) || !value.availableTimes.every(isClockTime) ||
+      !(value.proposedDate === null || isIsoDate(value.proposedDate)) ||
+      !(value.proposedStart === null || Number.isFinite(Date.parse(value.proposedStart))) ||
+      !(value.reviewedUpdatedAt === null || Number.isFinite(Date.parse(value.reviewedUpdatedAt))) ||
+      typeof value.confirmationPending !== 'boolean') return null;
+  return structuredClone(value);
+}
+function clearChangeBranchState(state) {
+  if (!state || typeof state !== 'object') return state;
+  delete state.changeBranch;
+  state.options = [];
+  if (state.step !== 'customer_name') state.step = null;
+  if (String(state.context?.inquiry || '').includes('change_branch')) state.context = null;
+  return state;
+}
+
+const RESCHEDULE_STEPS = new Set([
+  'awaiting_reference', 'awaiting_verification', 'awaiting_selection',
+  'awaiting_date', 'awaiting_time', 'awaiting_confirmation',
+]);
+const RESCHEDULE_FIELDS = Object.freeze([
+  'intent', 'step', 'candidateAppointmentIds', 'selectedAppointmentId',
+  'bookingReference', 'verificationRequired', 'ownershipVerified',
+  'verificationAttempts', 'availableDates', 'availableTimes', 'selectedDate',
+  'selectedTime', 'confirmationPending', 'dateTimeExpressions',
+]);
+
+function createRescheduleState({
+  bookingReference = null, verificationRequired = false,
+  dateTimeExpressions = [],
+} = {}) {
+  return {
+    intent: 'appointment_reschedule',
+    step: verificationRequired ? (bookingReference ? 'awaiting_verification' : 'awaiting_reference') : 'awaiting_selection',
+    candidateAppointmentIds: [], selectedAppointmentId: null,
+    bookingReference: bookingReference && /^[0-9a-f]{8}$/iu.test(bookingReference)
+      ? bookingReference.toUpperCase() : null,
+    verificationRequired: Boolean(verificationRequired), ownershipVerified: false,
+    verificationAttempts: 0, availableDates: [], availableTimes: [],
+    selectedDate: null, selectedTime: null, confirmationPending: false,
+    dateTimeExpressions: Array.isArray(dateTimeExpressions)
+      ? dateTimeExpressions.filter((value) => typeof value === 'string').slice(0, 2) : [],
+  };
+}
+
+function normalizeRescheduleState(value) {
+  if (!isPlainObject(value) ||
+    Object.keys(value).length !== RESCHEDULE_FIELDS.length ||
+    Object.keys(value).some((key) => !RESCHEDULE_FIELDS.includes(key)) ||
+    value.intent !== 'appointment_reschedule' ||
+    !RESCHEDULE_STEPS.has(value.step) ||
+    !Array.isArray(value.candidateAppointmentIds) ||
+    !value.candidateAppointmentIds.every(isUuid) ||
+    !isNullableUuid(value.selectedAppointmentId) ||
+    !isNullableBookingReference(value.bookingReference) ||
+    typeof value.verificationRequired !== 'boolean' ||
+    typeof value.ownershipVerified !== 'boolean' ||
+    !Number.isInteger(value.verificationAttempts) || value.verificationAttempts < 0 ||
+    value.verificationAttempts >= 3 ||
+    !Array.isArray(value.availableDates) || !value.availableDates.every(isIsoDate) ||
+    !Array.isArray(value.availableTimes) || !value.availableTimes.every(isClockTime) ||
+    !(value.selectedDate === null || isIsoDate(value.selectedDate)) ||
+    !(value.selectedTime === null || isClockTime(value.selectedTime)) ||
+    typeof value.confirmationPending !== 'boolean' ||
+    !Array.isArray(value.dateTimeExpressions) ||
+    !value.dateTimeExpressions.every((item) => typeof item === 'string') ||
+    (value.selectedAppointmentId !== null &&
+      !value.candidateAppointmentIds.includes(value.selectedAppointmentId)) ||
+    (value.confirmationPending &&
+      (!value.ownershipVerified || !value.selectedAppointmentId ||
+        !value.selectedDate || !value.selectedTime))) return null;
+  return structuredClone(value);
+}
+
+function clearRescheduleState(state) {
+  clearAppointmentManagementArtifacts(state, 'reschedule');
+}
+
+const EXPLICIT_APPOINTMENT_INTERRUPTS = new Set([
+  'booking',
+  'booking_cancellation_request',
+  'booking_modification_request',
+  'change_service_request',
+  'change_branch_request',
+  'change_provider_request',
+  'appointment_query_request',
+  'availability_request',
+  'cancellation_information_request',
+  'appointment_management_clarification',
+  'bulk_cancel_request',
+  'compound_appointment_request',
+]);
+
+function interruptAppointmentManagementFlow(state, inquiry, interactiveReplyId) {
+  if (
+    interactiveReplyId ||
+    !state ||
+    !inquiry ||
+    !EXPLICIT_APPOINTMENT_INTERRUPTS.has(inquiry.type)
+  ) return false;
+
+  const currentFlow = state.cancellation
+    ? 'cancellation'
+    : state.reschedule
+      ? 'reschedule'
+      : state.changeService
+        ? 'changeService'
+        : state.changeBranch
+          ? 'changeBranch'
+      : null;
+  if (!currentFlow) return false;
+
+  const sameWorkflow = currentFlow === 'cancellation'
+    ? inquiry.type === 'booking_cancellation_request'
+    : currentFlow === 'reschedule'
+      ? inquiry.type === 'booking_modification_request'
+      : currentFlow === 'changeService'
+        ? inquiry.type === 'change_service_request'
+        : inquiry.type === 'change_branch_request';
+  if (sameWorkflow) return false;
+
+  if (currentFlow === 'changeService') clearChangeServiceState(state);
+  else if (currentFlow === 'changeBranch') clearChangeBranchState(state);
+  else clearAppointmentManagementArtifacts(state, currentFlow);
+  return true;
+}
+
+function clearAppointmentManagementArtifacts(state, flow) {
+  if (!state || typeof state !== 'object') return state;
+  if (flow === 'cancellation') delete state.cancellation;
+  if (flow === 'reschedule') delete state.reschedule;
+  state.options = [];
+  if (state.step !== 'customer_name') state.step = null;
+  const inquiry = state.context?.inquiry;
+  if (
+    inquiry === 'appointment_management_clarification' ||
+    String(inquiry || '').includes('cancellation') ||
+    String(inquiry || '').includes('reschedule')
+  ) state.context = null;
+  return state;
+}
+
+function isIsoDate(value) {
+  return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value);
+}
+
+function isClockTime(value) {
+  return typeof value === 'string' && /^\d{2}:\d{2}$/.test(value);
+}
+
+const MAX_CANCELLATION_VERIFICATION_ATTEMPTS = 3;
+const CANCELLATION_STEPS = new Set([
+  'awaiting_reference',
+  'awaiting_selection',
+  'awaiting_verification',
+  'awaiting_confirmation',
+  'awaiting_reason',
+]);
+const CANCELLATION_FIELDS = Object.freeze([
+  'intent',
+  'step',
+  'candidateAppointmentIds',
+  'selectedAppointmentId',
+  'bookingReference',
+  'verificationRequired',
+  'ownershipVerified',
+  'verificationAttempts',
+  'confirmationPending',
+  'cancellationReason',
+  'reviewedUpdatedAt',
+]);
+
+function normalizeCancellationState(state) {
+  const property = Object.getOwnPropertyDescriptor(state, 'cancellation');
+  if (!property || property.get || property.set) return null;
+  const cancellation = property.value;
+  if (!isPlainObject(cancellation)) return null;
+  const keys = Reflect.ownKeys(cancellation);
+  if (
+    keys.length !== CANCELLATION_FIELDS.length ||
+    keys.some((key) =>
+      typeof key !== 'string' || !CANCELLATION_FIELDS.includes(key)
+    )
+  ) {
+    return null;
+  }
+
+  const values = Object.create(null);
+  for (const field of CANCELLATION_FIELDS) {
+    const fieldProperty = Object.getOwnPropertyDescriptor(cancellation, field);
+    if (!fieldProperty || fieldProperty.get || fieldProperty.set) return null;
+    values[field] = fieldProperty.value;
+  }
+
+  if (
+    values.intent !== 'appointment_cancellation' ||
+    !CANCELLATION_STEPS.has(values.step) ||
+    !Array.isArray(values.candidateAppointmentIds) ||
+    !values.candidateAppointmentIds.every(isUuid) ||
+    new Set(values.candidateAppointmentIds).size !==
+      values.candidateAppointmentIds.length ||
+    !isNullableUuid(values.selectedAppointmentId) ||
+    (
+      values.selectedAppointmentId !== null &&
+      !values.candidateAppointmentIds.includes(values.selectedAppointmentId)
+    ) ||
+    !isNullableBookingReference(values.bookingReference) ||
+    typeof values.verificationRequired !== 'boolean' ||
+    typeof values.ownershipVerified !== 'boolean' ||
+    !Number.isInteger(values.verificationAttempts) ||
+    values.verificationAttempts < 0 ||
+    values.verificationAttempts >= MAX_CANCELLATION_VERIFICATION_ATTEMPTS ||
+    typeof values.confirmationPending !== 'boolean' ||
+    !isNullableNonBlankString(values.cancellationReason) ||
+    !isNullableTimestamp(values.reviewedUpdatedAt) ||
+    (
+      values.confirmationPending &&
+      (!values.selectedAppointmentId || !values.ownershipVerified)
+    )
+  ) {
+    return null;
+  }
+
+  return {
+    intent: 'appointment_cancellation',
+    step: values.step,
+    candidateAppointmentIds: [...values.candidateAppointmentIds],
+    selectedAppointmentId: values.selectedAppointmentId,
+    bookingReference: values.bookingReference === null
+      ? null
+      : values.bookingReference.toUpperCase(),
+    verificationRequired: values.verificationRequired,
+    ownershipVerified: values.ownershipVerified,
+    verificationAttempts: values.verificationAttempts,
+    confirmationPending: values.confirmationPending,
+    cancellationReason: values.cancellationReason,
+    reviewedUpdatedAt: values.reviewedUpdatedAt,
+  };
+}
+
+function createCancellationState({
+  step = 'awaiting_reference',
+  bookingReference = null,
+  verificationRequired = false,
+} = {}) {
+  const normalizedReference = typeof bookingReference === 'string' &&
+    /^[0-9a-f]{8}$/iu.test(bookingReference)
+    ? bookingReference.toUpperCase()
+    : null;
+  return {
+    intent: 'appointment_cancellation',
+    step,
+    candidateAppointmentIds: [],
+    selectedAppointmentId: null,
+    bookingReference: normalizedReference,
+    verificationRequired: Boolean(verificationRequired),
+    ownershipVerified: false,
+    verificationAttempts: 0,
+    confirmationPending: false,
+    cancellationReason: null,
+    reviewedUpdatedAt: null,
+  };
+}
+
+function clearCancellationState(state) {
+  return clearAppointmentManagementArtifacts(state, 'cancellation');
+}
+
+function replaceCancellationState(state, input = {}) {
+  if (state && typeof state === 'object') {
+    clearRescheduleState(state);
+    state.cancellation = createCancellationState(input);
+  }
+  return state;
+}
+
+function recordCancellationVerificationFailure(state) {
+  const cancellation = state?.cancellation;
+  if (!cancellation || typeof cancellation !== 'object') return state;
+  cancellation.verificationAttempts += 1;
+  if (
+    cancellation.verificationAttempts >=
+    MAX_CANCELLATION_VERIFICATION_ATTEMPTS
+  ) {
+    clearCancellationState(state);
+  }
+  return state;
+}
+
+function isUuid(value) {
+  return typeof value === 'string' &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(value);
+}
+
+function isNullableUuid(value) {
+  return value === null || isUuid(value);
+}
+
+function isNullableBookingReference(value) {
+  return value === null ||
+    (typeof value === 'string' && /^[0-9a-f]{8}$/iu.test(value));
+}
+
+function isNullableTimestamp(value) {
+  return value === null ||
+    (typeof value === 'string' && Number.isFinite(Date.parse(value)));
 }
 
 const PRICE_STATES = new Set([
@@ -3357,5 +5501,13 @@ function workingBranchReply(inquiry, data, policy) {
 
 function displayDay(day) { return ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'][day]; }
 function time(value) { return value ? String(value).slice(0, 5) : 'غير محدد'; }
+
+ShadenEngine.MAX_CANCELLATION_VERIFICATION_ATTEMPTS =
+  MAX_CANCELLATION_VERIFICATION_ATTEMPTS;
+ShadenEngine.createCancellationState = createCancellationState;
+ShadenEngine.clearCancellationState = clearCancellationState;
+ShadenEngine.replaceCancellationState = replaceCancellationState;
+ShadenEngine.recordCancellationVerificationFailure =
+  recordCancellationVerificationFailure;
 
 module.exports = ShadenEngine;

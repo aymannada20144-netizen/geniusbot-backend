@@ -8,18 +8,60 @@ export type AppointmentStatus =
   | 'cancelled'
   | 'completed'
   | 'no_show'
+  | 'rescheduled'
 
 export interface Appointment {
   id: string
   patientName: string
   phoneNumber: string
   serviceName: string
+  branchName: string
   doctorName: string | null
   roomName: string | null
   appointmentStart: string
   appointmentEnd: string | null
   paymentMethod: string | null
   status: AppointmentStatus
+}
+
+const rescheduleBase = (clinicId: string, appointmentId: string) =>
+  `/api/clinics/${encodeURIComponent(clinicId)}/appointments/${encodeURIComponent(appointmentId)}/reschedule`
+
+export async function getRescheduleAvailableDates(
+  clinicId: string,
+  appointmentId: string,
+  fromDate: string,
+): Promise<string[]> {
+  const response = await apiClient.get<ApiSuccessResponse<string[]>>(
+    `${rescheduleBase(clinicId, appointmentId)}/available-dates`,
+    { params: { fromDate } },
+  )
+  return response.data.data
+}
+
+export async function getRescheduleAvailableTimes(
+  clinicId: string,
+  appointmentId: string,
+  date: string,
+): Promise<string[]> {
+  const response = await apiClient.get<ApiSuccessResponse<string[]>>(
+    `${rescheduleBase(clinicId, appointmentId)}/available-times`,
+    { params: { date } },
+  )
+  return response.data.data
+}
+
+export async function rescheduleAppointment(
+  clinicId: string,
+  appointmentId: string,
+  appointmentStart: string,
+  appointmentEnd: string,
+): Promise<Appointment> {
+  const response = await apiClient.put<ApiSuccessResponse<Appointment>>(
+    rescheduleBase(clinicId, appointmentId),
+    { appointmentStart, appointmentEnd },
+  )
+  return response.data.data
 }
 
 export async function getAppointments(

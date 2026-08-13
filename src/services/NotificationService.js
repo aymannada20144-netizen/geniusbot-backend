@@ -17,6 +17,7 @@ const REMINDER_TYPES = Object.freeze([
   'followup',
   'google_review',
   'custom',
+  'cancellation',
 ]);
 
 /**
@@ -89,6 +90,23 @@ class NotificationService {
     );
   }
 
+  async sendCancellationConfirmation(appointmentId) {
+    validateUuid(appointmentId, 'appointmentId');
+    const reminder = await this.notificationRepository.scheduleCancellation(
+      appointmentId
+    );
+    if (!reminder) {
+      return { attempted: false, success: false, status: 'already_scheduled' };
+    }
+    const claimed = await this.notificationRepository.claimCancellation(
+      reminder.id
+    );
+    if (!claimed) {
+      return { attempted: false, success: false, status: 'not_claimed' };
+    }
+    return this.#deliver(claimed, { recoverCancellation: true });
+  }
+
   async rescheduleAppointmentNotifications(appointment) {
     await this.cancelAppointmentNotifications(appointment.id);
     return this.scheduleAppointmentLifecycle(appointment);
@@ -127,26 +145,23 @@ class NotificationService {
         reminderId: reminder.id,
         reminderType: reminder.reminder_type,
       });
+      const delivery = await this.#deliver(reminder);
+      results.push(delivery);
+    }
+    return results;
+  }
+
+  async #deliver(reminder, { recoverCancellation = false } = {}) {
       const context = await this.notificationRepository.loadDeliveryContext(
         reminder.id
       );
       if (context && !this.#isDeliveryAllowed(context)) {
         await this.notificationRepository.markCancelled(reminder.id);
-        results.push({
-          id: reminder.id,
-          sent: false,
-          errorCode: 'APPOINTMENT_NOT_REMINDABLE',
-        });
-        continue;
+        return { id: reminder.id, sent: false, errorCode: 'APPOINTMENT_NOT_REMINDABLE' };
       }
       if (!context?.recipient) {
         await this.notificationRepository.markFailed(reminder.id);
-        results.push({
-          id: reminder.id,
-          sent: false,
-          errorCode: 'REMINDER_RECIPIENT_MISSING',
-        });
-        continue;
+        return { id: reminder.id, sent: false, errorCode: 'REMINDER_RECIPIENT_MISSING' };
       }
       try {
         const messageContext = this.messageContextBuilder.build(
@@ -188,6 +203,7 @@ class NotificationService {
 
         const isGoogleReview = reminder.reminder_type === 'google_review';
         const isFollowup = reminder.reminder_type === 'followup';
+        const isCancellation = reminder.reminder_type === 'cancellation';
         const deliveryPayload = isGoogleReview
           ? {
               phone: payload.phone,
@@ -206,11 +222,26 @@ class NotificationService {
                 patientId: payload.patientId,
                 clinicId: payload.clinicId,
               }
-          : payload;
+          : isCancellation
+            ? {
+                phone: payload.phone,
+                patientName: payload.patientName,
+                appointmentNumber: payload.appointmentNumber,
+                serviceName: payload.serviceName,
+                branchName: payload.branchName,
+                appointmentDate: payload.appointmentDate,
+                appointmentTime: payload.appointmentTime,
+                appointmentId: payload.appointmentId,
+                patientId: payload.patientId,
+                clinicId: payload.clinicId,
+              }
+            : payload;
 
         if (isGoogleReview) {
           this.#validateGoogleReviewPayload(deliveryPayload);
-        } else if (!isFollowup) {
+        } else if (isCancellation) {
+          this.#validateCancellationPayload(deliveryPayload);
+        } else if (!isFollowup && !isCancellation) {
           this.#validateReminderPayload(payload);
         }
 
@@ -219,7 +250,9 @@ class NotificationService {
             ? MessageTypes.GOOGLE_REVIEW
             : isFollowup
               ? MessageTypes.THANK_YOU
-              : MessageTypes.APPOINTMENT_REMINDER,
+              : isCancellation
+                ? MessageTypes.APPOINTMENT_CANCELLED
+                : MessageTypes.APPOINTMENT_REMINDER,
           deliveryPayload
         );
 
@@ -235,9 +268,19 @@ class NotificationService {
             details: result?.error?.details || null,
             fbtraceId: result?.error?.fbtraceId || null,
           });
-          await this.notificationRepository.markFailed(reminder.id);
-          results.push({ id: reminder.id, sent: false, errorCode });
-          continue;
+          if (isCancellation || recoverCancellation) {
+            await this.notificationRepository.releaseForRetry(reminder.id);
+          } else {
+            await this.notificationRepository.markFailed(reminder.id);
+          }
+          return {
+            id: reminder.id, sent: false, attempted: true,
+            success: false,
+            status: isCancellation || recoverCancellation
+              ? 'pending_retry' : 'failed',
+            errorCode,
+            retryable: result?.error?.retryable !== false,
+          };
         }
 
         await this.notificationRepository.markSent(reminder.id);
@@ -270,7 +313,10 @@ class NotificationService {
             });
           }
         }
-        results.push({ id: reminder.id, sent: true });
+        return {
+          id: reminder.id, sent: true, attempted: true,
+          success: true, status: 'sent',
+        };
       } catch (error) {
         console.error('Notification processing failed.', {
           reminderId: reminder.id,
@@ -278,16 +324,23 @@ class NotificationService {
           message: error?.message || 'Notification processing failed.',
           code: error?.code || 'REMINDER_SEND_FAILED',
         });
-        await this.notificationRepository.markFailed(reminder.id);
-        results.push({
+        if (reminder.reminder_type === 'cancellation' || recoverCancellation) {
+          await this.notificationRepository.releaseForRetry(reminder.id);
+        } else {
+          await this.notificationRepository.markFailed(reminder.id);
+        }
+        return {
           id: reminder.id,
           sent: false,
+          attempted: true,
+          success: false,
+          status: reminder.reminder_type === 'cancellation' || recoverCancellation
+            ? 'pending_retry' : 'failed',
           error,
           errorCode: error?.code || 'REMINDER_SEND_FAILED',
-        });
+          retryable: error?.retryable !== false,
+        };
       }
-    }
-    return results;
   }
 
   #validateReminderPayload(payload) {
@@ -328,6 +381,9 @@ class NotificationService {
     if (['followup', 'google_review'].includes(context.reminder_type)) {
       return context.appointment_status === 'completed';
     }
+    if (context.reminder_type === 'cancellation') {
+      return context.appointment_status === 'cancelled';
+    }
     return true;
   }
 
@@ -345,6 +401,33 @@ class NotificationService {
         error.code = 'GOOGLE_REVIEW_CONTEXT_INCOMPLETE';
         throw error;
       }
+    }
+  }
+
+  #validateCancellationPayload(payload) {
+    const requiredFields = [
+      'phone',
+      'patientName',
+      'appointmentNumber',
+      'serviceName',
+      'branchName',
+      'appointmentDate',
+      'appointmentTime',
+      'appointmentId',
+      'patientId',
+      'clinicId',
+    ];
+    const missingField = requiredFields.find((field) => {
+      const value = payload[field];
+      return value === null || value === undefined ||
+        (typeof value === 'string' && value.trim() === '');
+    });
+    if (missingField) {
+      const error = new Error(
+        `Cancellation delivery context is missing ${missingField}.`
+      );
+      error.code = 'CANCELLATION_CONTEXT_INCOMPLETE';
+      throw error;
     }
   }
 }

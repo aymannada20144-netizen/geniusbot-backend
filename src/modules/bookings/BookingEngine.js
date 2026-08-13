@@ -196,7 +196,7 @@ class BookingEngine {
   async checkAvailability(command) {
     const fields = readFields(
       command,
-      ['clinicId', 'service', 'branch', 'doctor', 'room', 'availability'],
+      ['clinicId', 'service', 'branch', 'doctor', 'room', 'availability', 'patientId', 'excludeAppointmentId'],
       'BookingEngine availability command must be a plain object',
       'BookingEngine received unsupported availability command field',
       'BookingEngine does not accept accessor property: availabilityCommand'
@@ -228,6 +228,9 @@ class BookingEngine {
       doctor_id: doctor?.id || null,
       room_id: room?.id || null,
       preferred_start: availability.preferredStart,
+      ...(valueOrNull(fields.patientId) ? { patient_id: valueOrNull(fields.patientId) } : {}),
+      ...(valueOrNull(fields.excludeAppointmentId)
+        ? { excludeAppointmentId: valueOrNull(fields.excludeAppointmentId) } : {}),
     });
     if (result.success === true) {
       return new BookingResult({
@@ -251,7 +254,7 @@ class BookingEngine {
   async getAvailableDates(command) {
     const fields = readFields(
       command,
-      ['clinicId', 'service', 'branch', 'doctor', 'fromDate', 'searchDays', 'limit'],
+      ['clinicId', 'service', 'branch', 'doctor', 'room', 'fromDate', 'searchDays', 'limit', 'excludeAppointmentId'],
       'BookingEngine available dates command must be a plain object',
       'BookingEngine received unsupported available dates command field',
       'BookingEngine does not accept accessor property: availableDatesCommand'
@@ -260,6 +263,7 @@ class BookingEngine {
     const service = readNested(valueOrNull(fields.service), 'service', ['id']);
     const branch = readNested(valueOrNull(fields.branch), 'branch', ['id']);
     const doctor = readNested(valueOrNull(fields.doctor), 'doctor', ['id']);
+    const room = readNested(valueOrNull(fields.room), 'room', ['id']);
     const fromDate = valueOrNull(fields.fromDate);
     if (!clinicId || !service?.id || !branch?.id || !fromDate) {
       return { success: false, reason: 'missing_available_dates_input', dates: [] };
@@ -273,6 +277,9 @@ class BookingEngine {
       service_id: service.id,
       branch_id: branch.id,
       doctor_id: doctor?.id || null,
+      ...(room?.id ? { room_id: room.id } : {}),
+      ...(valueOrNull(fields.excludeAppointmentId)
+        ? { excludeAppointmentId: valueOrNull(fields.excludeAppointmentId) } : {}),
       from_date: fromDate,
       search_days: valueOrNull(fields.searchDays),
       limit: valueOrNull(fields.limit),
@@ -282,7 +289,7 @@ class BookingEngine {
   async getAvailableTimes(command) {
     const fields = readFields(
       command,
-      ['clinicId', 'service', 'branch', 'doctor', 'date'],
+      ['clinicId', 'service', 'branch', 'doctor', 'room', 'date', 'excludeAppointmentId'],
       'BookingEngine available times command must be a plain object',
       'BookingEngine received unsupported available times command field',
       'BookingEngine does not accept accessor property: availableTimesCommand'
@@ -291,6 +298,7 @@ class BookingEngine {
     const service = readNested(valueOrNull(fields.service), 'service', ['id']);
     const branch = readNested(valueOrNull(fields.branch), 'branch', ['id']);
     const doctor = readNested(valueOrNull(fields.doctor), 'doctor', ['id']);
+    const room = readNested(valueOrNull(fields.room), 'room', ['id']);
     const date = valueOrNull(fields.date);
     if (!clinicId || !service?.id || !branch?.id || !date) {
       return { success: false, reason: 'missing_available_times_input', times: [] };
@@ -304,6 +312,9 @@ class BookingEngine {
       service_id: service.id,
       branch_id: branch.id,
       doctor_id: doctor?.id || null,
+      ...(room?.id ? { room_id: room.id } : {}),
+      ...(valueOrNull(fields.excludeAppointmentId)
+        ? { excludeAppointmentId: valueOrNull(fields.excludeAppointmentId) } : {}),
       date,
     });
   }

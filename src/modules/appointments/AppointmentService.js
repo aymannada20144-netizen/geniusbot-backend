@@ -1,6 +1,7 @@
 const {
   NotFoundError,
   ConflictError,
+  ValidationError,
 } = require('../../core/errors');
 
 const {
@@ -31,7 +32,12 @@ class AppointmentService {
     appointmentRepository,
     communicationService = null,
     notificationService = null,
-    { googleReviewDelayMinutes = 60 } = {}
+    {
+      googleReviewDelayMinutes = 60,
+      availabilityService = null,
+      bookingService = null,
+      priceService = null,
+    } = {}
   ) {
     if (!appointmentRepository) {
       throw new Error('AppointmentService requires appointmentRepository');
@@ -50,6 +56,9 @@ class AppointmentService {
     this.communicationService = communicationService;
     this.notificationService = notificationService;
     this.googleReviewDelayMinutes = googleReviewDelayMinutes;
+    this.availabilityService = availabilityService;
+    this.bookingService = bookingService;
+    this.priceService = priceService || bookingService?.priceService || null;
     this.messageContextBuilder = new MessageContextBuilder();
   }
 
@@ -64,6 +73,7 @@ class AppointmentService {
       patientName: appointment.patient_name,
       phoneNumber: appointment.phone_number,
       serviceName: appointment.service_name,
+      branchName: appointment.branch_name,
       doctorName: appointment.doctor_name ?? null,
       roomName: appointment.room_name ?? null,
       appointmentStart: new Date(
@@ -441,6 +451,100 @@ class AppointmentService {
     return appointment;
   }
 
+  async resolveAppointmentForManagementByBookingReference(
+    clinicId,
+    bookingReference
+  ) {
+    validateUuid(clinicId, 'clinicId');
+    const normalizedReference = normalizeBookingReference(bookingReference);
+    if (!normalizedReference) return null;
+
+    const appointment =
+      await this.appointmentRepository.findByBookingReference(
+        clinicId,
+        normalizedReference
+      );
+    if (
+      !appointment?.id ||
+      appointment.clinic_id !== clinicId ||
+      !appointment.patient_id
+    ) {
+      return null;
+    }
+
+    return Object.freeze({
+      appointmentId: appointment.id,
+      clinicId,
+      patientId: appointment.patient_id,
+      bookingReference: appointment.booking_reference,
+    });
+  }
+
+  async getFutureManagementCandidates(clinicId, patientId) {
+    validateUuid(clinicId, 'clinicId');
+    validateUuid(patientId, 'patientId');
+    return this.appointmentRepository.findFutureForManagementByPatient(
+      clinicId,
+      patientId
+    );
+  }
+
+  async verifyAppointmentOwnership(
+    clinicId,
+    bookingReference,
+    registeredMobile
+  ) {
+    let normalizedSubmittedMobile;
+    try {
+      normalizedSubmittedMobile = normalizeSaudiMobileDigits(
+        registeredMobile,
+        'registeredMobile'
+      );
+    } catch (error) {
+      return Object.freeze({ verified: false });
+    }
+
+    const resolved =
+      await this.resolveAppointmentForManagementByBookingReference(
+        clinicId,
+        bookingReference
+      );
+    if (!resolved) return Object.freeze({ verified: false });
+
+    const presentation =
+      await this.appointmentRepository.findPresentationById(
+        clinicId,
+        resolved.appointmentId
+      );
+    if (
+      !presentation ||
+      presentation.clinic_id !== clinicId ||
+      presentation.patient_id !== resolved.patientId ||
+      !presentation.patient_phone
+    ) {
+      return Object.freeze({ verified: false });
+    }
+
+    let normalizedRegisteredMobile;
+    try {
+      normalizedRegisteredMobile = normalizeSaudiMobileDigits(
+        presentation.patient_phone,
+        'appointment.patient_phone'
+      );
+    } catch (error) {
+      return Object.freeze({ verified: false });
+    }
+    if (normalizedSubmittedMobile !== normalizedRegisteredMobile) {
+      return Object.freeze({ verified: false });
+    }
+
+    return Object.freeze({
+      verified: true,
+      appointmentId: resolved.appointmentId,
+      patientId: resolved.patientId,
+    });
+  }
+
   async getAppointmentHistory(clinicId, patientId) {
     validateUuid(clinicId, 'clinicId');
     validateUuid(patientId, 'patientId');
@@ -455,8 +559,13 @@ class AppointmentService {
     clinicId,
     appointmentId,
     reason = null,
-    actorId = null
+    actorId = null,
+    attribution = null
   ) {
+    const cancellationAttribution = normalizeCancellationAttribution(
+      actorId,
+      attribution
+    );
     const appointment = await this.getValidatedAppointment(
       clinicId,
       appointmentId
@@ -484,12 +593,8 @@ class AppointmentService {
           },
           operation: 'cancel',
           changes: { reason: normalizedReason },
-          actor: {
-            staffId: actorId,
-            patientId: null,
-            source: 'api',
-          },
-          metadata: {},
+          actor: cancellationAttribution.actor,
+          metadata: cancellationAttribution.metadata,
         },
         {
           status: 'cancelled',
@@ -520,14 +625,42 @@ class AppointmentService {
       }
     }
 
-    return this.#cancelledResponse(result.appointment.id);
+    let communication = {
+      attempted: false,
+      success: false,
+      status: 'not_required',
+    };
+    if (
+      this.notificationService &&
+      typeof this.notificationService.sendCancellationConfirmation === 'function'
+    ) {
+      try {
+        communication = await this.notificationService
+          .sendCancellationConfirmation(result.appointment.id);
+      } catch (error) {
+        communication = {
+          attempted: true,
+          success: false,
+          status: 'pending_retry',
+          errorCode: error?.code || 'CANCELLATION_NOTIFICATION_FAILED',
+          retryable: error?.retryable !== false,
+        };
+        console.error('Cancellation notification delivery failed.', {
+          appointmentId,
+          clinicId,
+          errorCode: communication.errorCode,
+        });
+      }
+    }
+
+    return this.#cancelledResponse(result.appointment.id, communication);
   }
 
-  #cancelledResponse(appointmentId) {
+  #cancelledResponse(appointmentId, communication = null) {
     return {
       id: appointmentId,
       status: 'cancelled',
-      communication: {
+      communication: communication || {
         attempted: false,
         success: false,
         status: 'not_required',
@@ -571,7 +704,9 @@ class AppointmentService {
     clinicId,
     appointmentId,
     appointmentStart,
-    appointmentEnd
+    appointmentEnd,
+    actorId = null,
+    attribution = null
   ) {
     validateUuid(clinicId, 'clinicId');
     validateUuid(appointmentId, 'appointmentId');
@@ -580,13 +715,50 @@ class AppointmentService {
     validateRequired(appointmentEnd, 'appointmentEnd');
 
     const appointment = await this.getValidatedAppointment(clinicId, appointmentId);
-    validateAppointmentTransition(appointment.status, 'rescheduled');
+    if (!['pending', 'confirmed'].includes(appointment.status)) {
+      throw new ValidationError(
+        'Appointment status is not eligible for rescheduling.'
+      );
+    }
 
-    const doctorConflict =
+    const start = new Date(appointmentStart);
+    const end = new Date(appointmentEnd);
+    if (
+      Number.isNaN(start.getTime()) ||
+      Number.isNaN(end.getTime()) ||
+      start >= end
+    ) {
+      throw new ValidationError(
+        'appointmentStart and appointmentEnd must define a valid time range.'
+      );
+    }
+
+    if (this.availabilityService) {
+      const availability = await this.availabilityService.checkAppointmentAvailability({
+        clinic_id: clinicId,
+        branch_id: appointment.branch_id,
+        service_id: appointment.service_id,
+        doctor_id: appointment.doctor_id,
+        room_id: appointment.room_id,
+        patient_id: appointment.patient_id,
+        requires_doctor: Boolean(appointment.doctor_id),
+        requires_room: Boolean(appointment.room_id),
+        appointment_start: start.toISOString(),
+        appointment_end: end.toISOString(),
+        excludeAppointmentId: appointment.id,
+      });
+      if (!availability.available) {
+        const error = new ConflictError('Appointment slot is no longer available.');
+        error.code = 'APPOINTMENT_SLOT_NO_LONGER_AVAILABLE';
+        throw error;
+      }
+    }
+
+    const doctorConflict = !this.availabilityService &&
       await this.appointmentRepository.hasDoctorConflict(
         appointment.doctor_id,
-        appointmentStart,
-        appointmentEnd,
+        start.toISOString(),
+        end.toISOString(),
         appointment.id
       );
 
@@ -594,11 +766,11 @@ class AppointmentService {
       throw new ConflictError('Doctor is not available at this time.');
     }
 
-    const roomConflict =
+    const roomConflict = !this.availabilityService &&
       await this.appointmentRepository.hasRoomConflict(
         appointment.room_id,
-        appointmentStart,
-        appointmentEnd,
+        start.toISOString(),
+        end.toISOString(),
         appointment.id
       );
 
@@ -606,14 +778,409 @@ class AppointmentService {
       throw new ConflictError('Room is not available at this time.');
     }
 
-    return this.appointmentRepository.updateAppointmentSchedule(
-      clinicId,
-      appointment.id,
+    const rescheduleAttribution = normalizeRescheduleAttribution(
+      actorId,
+      attribution
+    );
+    const result = await this.applyValidatedChange(
       {
-        appointment_start: appointmentStart,
-        appointment_end: appointmentEnd,
+        clinicId,
+        appointmentId: appointment.id,
+        expected: {
+          status: appointment.status,
+          updatedAt: appointment.updated_at,
+        },
+        operation: 'reschedule',
+        changes: { appointmentStart: start.toISOString() },
+        actor: rescheduleAttribution.actor,
+        metadata: rescheduleAttribution.metadata,
+      },
+      {
+        appointment_start: start.toISOString(),
+        appointment_end: end.toISOString(),
       }
     );
+
+    let communication = {
+      attempted: false,
+      success: false,
+      status: 'not_configured',
+    };
+    if (
+      this.notificationService &&
+      typeof this.notificationService.rescheduleAppointmentNotifications ===
+        'function'
+    ) {
+      try {
+        const reminders = await this.notificationService
+          .rescheduleAppointmentNotifications(result.appointment);
+        communication = {
+          attempted: true,
+          success: true,
+          status: 'rescheduled',
+          reminders,
+        };
+      } catch (error) {
+        communication = {
+          attempted: true,
+          success: false,
+          status: 'failed',
+          errorCode: error?.code || 'REMINDER_RESCHEDULE_FAILED',
+        };
+        console.error('Appointment reminder rescheduling failed.', {
+          appointmentId,
+          clinicId,
+          errorCode: communication.errorCode,
+        });
+      }
+    }
+
+    return {
+      ...result.appointment,
+      communication,
+    };
+  }
+
+  async getRescheduleAvailableDates(clinicId, appointmentId, fromDate) {
+    validateUuid(clinicId, 'clinicId');
+    validateUuid(appointmentId, 'appointmentId');
+    validateRequired(fromDate, 'fromDate');
+    if (!this.bookingService) {
+      throw new Error('AppointmentService requires bookingService for availability.');
+    }
+    const appointment = await this.getValidatedAppointment(clinicId, appointmentId);
+    if (!['pending', 'confirmed'].includes(appointment.status)) {
+      throw new ValidationError('Appointment status is not eligible for rescheduling.');
+    }
+    return this.bookingService.getAvailableDates({
+      clinic_id: clinicId,
+      branch_id: appointment.branch_id,
+      service_id: appointment.service_id,
+      doctor_id: appointment.doctor_id,
+      room_id: appointment.room_id,
+      from_date: fromDate,
+      search_days: 31,
+      limit: 31,
+      excludeAppointmentId: appointment.id,
+    });
+  }
+
+  async getRescheduleAvailableTimes(clinicId, appointmentId, date) {
+    validateUuid(clinicId, 'clinicId');
+    validateUuid(appointmentId, 'appointmentId');
+    validateRequired(date, 'date');
+    if (!this.bookingService) {
+      throw new Error('AppointmentService requires bookingService for availability.');
+    }
+    const appointment = await this.getValidatedAppointment(clinicId, appointmentId);
+    if (!['pending', 'confirmed'].includes(appointment.status)) {
+      throw new ValidationError('Appointment status is not eligible for rescheduling.');
+    }
+    return this.bookingService.getAvailableTimes({
+      clinic_id: clinicId,
+      branch_id: appointment.branch_id,
+      service_id: appointment.service_id,
+      doctor_id: appointment.doctor_id,
+      room_id: appointment.room_id,
+      date,
+      excludeAppointmentId: appointment.id,
+    });
+  }
+
+  async previewServiceChange(
+    clinicId,
+    appointmentId,
+    targetServiceId,
+    preferredStart = null,
+    patientId = null
+  ) {
+    validateUuid(clinicId, 'clinicId');
+    validateUuid(appointmentId, 'appointmentId');
+    validateUuid(targetServiceId, 'targetServiceId');
+    const storedAppointment = await this.getValidatedAppointment(clinicId, appointmentId);
+    const presentation = typeof this.appointmentRepository.findPresentationById === 'function'
+      ? await this.appointmentRepository.findPresentationById(clinicId, appointmentId)
+      : null;
+    const appointment = presentation
+      ? { ...storedAppointment, ...presentation }
+      : storedAppointment;
+    if (!['pending', 'confirmed'].includes(appointment.status)) {
+      throw new ValidationError('Appointment status is not eligible for service change.');
+    }
+    if (patientId && appointment.patient_id !== patientId) {
+      throw new NotFoundError('Appointment was not found for the patient.');
+    }
+    if (appointment.service_id === targetServiceId) {
+      const error = new ConflictError('The selected service is already booked.');
+      error.code = 'APPOINTMENT_SERVICE_UNCHANGED';
+      throw error;
+    }
+    const repositories = this.bookingService?.repositories;
+    const assignmentResolver = this.bookingService?.assignmentResolver;
+    if (!repositories?.services || !assignmentResolver || !this.priceService) {
+      throw new Error('AppointmentService change-service dependencies are unavailable.');
+    }
+    const service = await repositories.services.findActiveById(clinicId, targetServiceId);
+    if (!service || service.is_booking_enabled !== true) {
+      throw new NotFoundError('Target service is unavailable.');
+    }
+    const start = new Date(preferredStart || appointment.appointment_start);
+    if (Number.isNaN(start.getTime())) throw new ValidationError('preferredStart is invalid.');
+    const duration = Number(service.duration_minutes);
+    if (!Number.isInteger(duration) || duration <= 0) {
+      throw new ValidationError('Target service duration is invalid.');
+    }
+    const end = new Date(start.getTime() + duration * 60000);
+    const resolution = await assignmentResolver.resolve({
+      clinic_id: clinicId,
+      branch_id: appointment.branch_id,
+      service_id: targetServiceId,
+      appointment_start: start.toISOString(),
+      appointment_end: end.toISOString(),
+      patient_id: appointment.patient_id,
+      excludeAppointmentId: appointment.id,
+    });
+    if (!resolution.resolved) {
+      return Object.freeze({
+        appointment, service, requiresNewSlot: true,
+        reason: resolution.availability?.reason || resolution.reason,
+      });
+    }
+    const price = await this.priceService.resolvePrice({
+      clinicId,
+      serviceId: targetServiceId,
+      paymentMethodId: appointment.payment_method_id,
+      insuranceCompanyId: appointment.insurance_company_id || null,
+      insuranceClassId: appointment.insurance_class_id || null,
+      bookingDate: start.toISOString(),
+    });
+    return Object.freeze({
+      appointment, service, assignment: resolution.assignment,
+      availability: resolution.availability, price,
+      appointmentStart: start.toISOString(), appointmentEnd: end.toISOString(),
+      requiresNewSlot: false,
+    });
+  }
+
+  async listEligibleServiceChanges(clinicId, appointmentId, patientId = null) {
+    const appointment = await this.getValidatedAppointment(clinicId, appointmentId);
+    if (!['pending', 'confirmed'].includes(appointment.status) ||
+        (patientId && appointment.patient_id !== patientId)) return [];
+    const repositories = this.bookingService?.repositories;
+    if (!repositories?.services || !repositories?.serviceAssignments) return [];
+    const services = await repositories.services.findBookableByClinicId(clinicId);
+    const eligible = [];
+    for (const service of services || []) {
+      if (service.id === appointment.service_id || service.is_booking_enabled !== true) continue;
+      const assignments = await repositories.serviceAssignments.findAssignments({
+        clinicId, branchId: appointment.branch_id, serviceId: service.id,
+        activeOnly: true, defaultFirst: true, limit: 1,
+      });
+      if (assignments.length) eligible.push(service);
+    }
+    return eligible;
+  }
+
+  async changeAppointmentService(
+    clinicId,
+    appointmentId,
+    targetServiceId,
+    preferredStart,
+    attribution = null,
+    expectedUpdatedAt = null
+  ) {
+    const patientId = attribution?.patientId || null;
+    const proposal = await this.previewServiceChange(
+      clinicId, appointmentId, targetServiceId, preferredStart, patientId
+    );
+    if (proposal.requiresNewSlot || !proposal.assignment) {
+      const error = new ConflictError('A new appointment slot is required.');
+      error.code = 'APPOINTMENT_SERVICE_SLOT_REQUIRED';
+      throw error;
+    }
+    if (expectedUpdatedAt &&
+        new Date(proposal.appointment.updated_at).toISOString() !==
+          new Date(expectedUpdatedAt).toISOString()) {
+      const error = new ConflictError('The appointment changed after review.');
+      error.code = 'APPOINTMENT_STALE';
+      throw error;
+    }
+    const actor = {
+      staffId: attribution?.staffId || null,
+      patientId,
+      source: attribution?.source || 'api',
+    };
+    const result = await this.applyValidatedChange({
+      clinicId, appointmentId,
+      expected: {
+        status: proposal.appointment.status,
+        updatedAt: proposal.appointment.updated_at,
+      },
+      operation: 'change_service',
+      changes: {
+        serviceId: targetServiceId,
+      },
+      actor,
+      metadata: { conversationId: attribution?.conversationId || null },
+    }, {
+      service_id: targetServiceId,
+      doctor_id: proposal.assignment.doctor_id || null,
+      room_id: proposal.assignment.room_id || null,
+      appointment_start: proposal.appointmentStart,
+      appointment_end: proposal.appointmentEnd,
+      quoted_price: proposal.price.price,
+      currency: proposal.price.currency,
+    });
+    return { ...result.appointment, proposal };
+  }
+
+  async previewBranchChange(
+    clinicId,
+    appointmentId,
+    targetBranchId,
+    preferredStart = null,
+    patientId = null
+  ) {
+    validateUuid(clinicId, 'clinicId');
+    validateUuid(appointmentId, 'appointmentId');
+    validateUuid(targetBranchId, 'targetBranchId');
+    const storedAppointment = await this.getValidatedAppointment(clinicId, appointmentId);
+    const presentation = typeof this.appointmentRepository.findPresentationById === 'function'
+      ? await this.appointmentRepository.findPresentationById(clinicId, appointmentId)
+      : null;
+    const appointment = presentation
+      ? { ...storedAppointment, ...presentation }
+      : storedAppointment;
+    if (!['pending', 'confirmed'].includes(appointment.status)) {
+      throw new ValidationError('Appointment status is not eligible for branch change.');
+    }
+    if (patientId && appointment.patient_id !== patientId) {
+      throw new NotFoundError('Appointment was not found for the patient.');
+    }
+    if (appointment.branch_id === targetBranchId) {
+      const error = new ConflictError('The selected branch is already booked.');
+      error.code = 'APPOINTMENT_BRANCH_UNCHANGED';
+      throw error;
+    }
+    const repositories = this.bookingService?.repositories;
+    const assignmentResolver = this.bookingService?.assignmentResolver;
+    if (!repositories?.branches || !repositories?.services || !assignmentResolver || !this.priceService) {
+      throw new Error('AppointmentService change-branch dependencies are unavailable.');
+    }
+    const [branch, service] = await Promise.all([
+      repositories.branches.findActiveById(clinicId, targetBranchId),
+      repositories.services.findActiveById(clinicId, appointment.service_id),
+    ]);
+    if (!branch) throw new NotFoundError('Target branch is unavailable.');
+    if (!service || service.is_booking_enabled !== true) {
+      throw new NotFoundError('Appointment service is unavailable.');
+    }
+    const start = new Date(preferredStart || appointment.appointment_start);
+    if (Number.isNaN(start.getTime())) throw new ValidationError('preferredStart is invalid.');
+    const duration = Number(service.duration_minutes);
+    if (!Number.isInteger(duration) || duration <= 0) {
+      throw new ValidationError('Appointment service duration is invalid.');
+    }
+    const end = new Date(start.getTime() + duration * 60000);
+    const resolution = await assignmentResolver.resolve({
+      clinic_id: clinicId,
+      branch_id: targetBranchId,
+      service_id: appointment.service_id,
+      appointment_start: start.toISOString(),
+      appointment_end: end.toISOString(),
+      patient_id: appointment.patient_id,
+      excludeAppointmentId: appointment.id,
+    });
+    if (!resolution.resolved) {
+      return Object.freeze({
+        appointment, branch, service, requiresNewSlot: true,
+        reason: resolution.availability?.reason || resolution.reason,
+      });
+    }
+    const price = await this.priceService.resolvePrice({
+      clinicId,
+      serviceId: appointment.service_id,
+      paymentMethodId: appointment.payment_method_id,
+      insuranceCompanyId: appointment.insurance_company_id || null,
+      insuranceClassId: appointment.insurance_class_id || null,
+      bookingDate: start.toISOString(),
+    });
+    return Object.freeze({
+      appointment, branch, service, assignment: resolution.assignment,
+      availability: resolution.availability, price,
+      appointmentStart: start.toISOString(), appointmentEnd: end.toISOString(),
+      requiresNewSlot: false,
+    });
+  }
+
+  async listEligibleBranchChanges(clinicId, appointmentId, patientId = null) {
+    const appointment = await this.getValidatedAppointment(clinicId, appointmentId);
+    if (!['pending', 'confirmed'].includes(appointment.status) ||
+        (patientId && appointment.patient_id !== patientId)) return [];
+    const repositories = this.bookingService?.repositories;
+    if (!repositories?.branches?.findActiveByClinicId || !repositories?.serviceAssignments) return [];
+    const branches = await repositories.branches.findActiveByClinicId(clinicId);
+    const eligible = [];
+    for (const branch of branches || []) {
+      if (branch.id === appointment.branch_id) continue;
+      const assignments = await repositories.serviceAssignments.findAssignments({
+        clinicId, branchId: branch.id, serviceId: appointment.service_id,
+        activeOnly: true, defaultFirst: true, limit: 1,
+      });
+      if (assignments.length) eligible.push(branch);
+    }
+    return eligible;
+  }
+
+  async changeAppointmentBranch(
+    clinicId,
+    appointmentId,
+    targetBranchId,
+    preferredStart,
+    attribution = null,
+    expectedUpdatedAt = null
+  ) {
+    const patientId = attribution?.patientId || null;
+    const proposal = await this.previewBranchChange(
+      clinicId, appointmentId, targetBranchId, preferredStart, patientId
+    );
+    if (proposal.requiresNewSlot || !proposal.assignment) {
+      const error = new ConflictError('A new appointment slot is required.');
+      error.code = 'APPOINTMENT_BRANCH_SLOT_REQUIRED';
+      throw error;
+    }
+    if (expectedUpdatedAt &&
+        new Date(proposal.appointment.updated_at).toISOString() !==
+          new Date(expectedUpdatedAt).toISOString()) {
+      const error = new ConflictError('The appointment changed after review.');
+      error.code = 'APPOINTMENT_STALE';
+      throw error;
+    }
+    const actor = {
+      staffId: attribution?.staffId || null,
+      patientId,
+      source: attribution?.source || 'api',
+    };
+    const result = await this.applyValidatedChange({
+      clinicId, appointmentId,
+      expected: {
+        status: proposal.appointment.status,
+        updatedAt: proposal.appointment.updated_at,
+      },
+      operation: 'change_branch',
+      changes: { branchId: targetBranchId },
+      actor,
+      metadata: { conversationId: attribution?.conversationId || null },
+    }, {
+      branch_id: targetBranchId,
+      doctor_id: proposal.assignment.doctor_id || null,
+      room_id: proposal.assignment.room_id || null,
+      appointment_start: proposal.appointmentStart,
+      appointment_end: proposal.appointmentEnd,
+      quoted_price: proposal.price.price,
+      currency: proposal.price.currency,
+    });
+    return { ...result.appointment, proposal };
   }
 
   normalizeChangeCommand(command) {
@@ -640,8 +1207,116 @@ class AppointmentService {
       patch,
       actor: normalized.actor,
       reason: normalized.changes.reason,
+      metadata: normalized.metadata,
     });
   }
+}
+
+function normalizeBookingReference(value) {
+  if (value == null) return null;
+  const normalized = String(value).trim().toUpperCase();
+  return normalized || null;
+}
+
+function normalizeCancellationAttribution(actorId, attribution) {
+  if (attribution == null) {
+    return {
+      actor: {
+        staffId: actorId,
+        patientId: null,
+        source: 'api',
+      },
+      metadata: {},
+    };
+  }
+  if (
+    typeof attribution !== 'object' ||
+    Array.isArray(attribution)
+  ) {
+    throw new ValidationError('attribution must be an object.');
+  }
+  if (actorId != null) {
+    throw new ValidationError(
+      'actorId cannot be combined with patient attribution.'
+    );
+  }
+  const allowedFields = new Set([
+    'patientId',
+    'source',
+    'conversationId',
+    'requestId',
+  ]);
+  if (Object.keys(attribution).some((key) => !allowedFields.has(key))) {
+    throw new ValidationError('attribution contains unsupported fields.');
+  }
+  validateUuid(attribution.patientId, 'attribution.patientId');
+  if (attribution.source !== 'shaden') {
+    throw new ValidationError('attribution.source must be shaden.');
+  }
+  if (attribution.conversationId != null) {
+    validateUuid(attribution.conversationId, 'attribution.conversationId');
+  }
+
+  return {
+    actor: {
+      staffId: null,
+      patientId: attribution.patientId,
+      source: 'shaden',
+    },
+    metadata: {
+      ...(attribution.requestId != null
+        ? { requestId: attribution.requestId }
+        : {}),
+      ...(attribution.conversationId != null
+        ? { conversationId: attribution.conversationId }
+        : {}),
+    },
+  };
+}
+
+function normalizeRescheduleAttribution(actorId, attribution) {
+  if (attribution == null) {
+    return {
+      actor: { staffId: actorId, patientId: null, source: 'api' },
+      metadata: {},
+    };
+  }
+  if (typeof attribution !== 'object' || Array.isArray(attribution)) {
+    throw new ValidationError('attribution must be an object.');
+  }
+  if (actorId != null) {
+    throw new ValidationError(
+      'actorId cannot be combined with patient attribution.'
+    );
+  }
+  const allowedFields = new Set([
+    'patientId', 'source', 'conversationId', 'requestId',
+  ]);
+  if (Object.keys(attribution).some((key) => !allowedFields.has(key))) {
+    throw new ValidationError('attribution contains unsupported fields.');
+  }
+  validateUuid(attribution.patientId, 'attribution.patientId');
+  if (attribution.source !== 'shaden') {
+    throw new ValidationError('attribution.source must be shaden.');
+  }
+  if (attribution.conversationId != null) {
+    validateUuid(attribution.conversationId, 'attribution.conversationId');
+  }
+  return {
+    actor: {
+      staffId: null,
+      patientId: attribution.patientId,
+      source: 'shaden',
+    },
+    metadata: {
+      ...(attribution.requestId != null
+        ? { requestId: attribution.requestId }
+        : {}),
+      ...(attribution.conversationId != null
+        ? { conversationId: attribution.conversationId }
+        : {}),
+    },
+  };
 }
 
 module.exports = AppointmentService;

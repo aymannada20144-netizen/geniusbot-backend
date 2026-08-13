@@ -24,6 +24,7 @@ function createShadenEngine({
   catalogService,
   clinicConfigurationSource,
   bookingEngine,
+  appointmentService = null,
   priceService = null,
   sendMessage,
 } = {}) {
@@ -36,7 +37,12 @@ function createShadenEngine({
     catalogService,
     clinicConfigurationSource,
   });
-  const engine = new ShadenEngine({ policy, bookingEngine, priceService });
+  const engine = new ShadenEngine({
+    policy,
+    bookingEngine,
+    appointmentService,
+    priceService,
+  });
   const contextProvider = new ShadenConversationContextProvider({
     patientService: patients,
   });
@@ -95,7 +101,12 @@ function createShadenEngine({
       });
       console.info('Shaden patient identity trace.', identityTrace);
       const clinicData = await dataProvider.load(clinic);
-      const { reply, nextState, interaction } = await engine.handle({
+      const {
+        reply,
+        nextState,
+        interaction,
+        notificationAttempted,
+      } = await engine.handle({
         message,
         currentState: preservedData.shaden,
         clinicData,
@@ -113,10 +124,18 @@ function createShadenEngine({
       if (!reply || typeof reply !== 'string' || reply.trim() === '') {
         console.warn('⚠️ Shaden Engine returned an empty reply. Message:', message.text);
         // لا تقم بإرسال رسالة إذا كان الرد فارغاً
+        await conversations.updateState(conversation.id, {
+          current: 'shaden',
+          data: {
+            ...preservedData,
+            shaden: nextState,
+          },
+        });
         return { 
           replyText: null, 
           state: { data: { ...preservedData, shaden: nextState } },
-          skipped: true 
+          skipped: true,
+          notificationAttempted: notificationAttempted === true,
         };
       }
 

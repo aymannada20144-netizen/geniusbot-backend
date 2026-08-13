@@ -44,6 +44,41 @@ class NotificationRepository extends BaseRepository {
     return result.rows[0];
   }
 
+  async scheduleCancellation(appointmentId) {
+    const result = await this.query(
+      `INSERT INTO geniusbot.appointment_reminders (
+          appointment_id, reminder_type, scheduled_at, status
+       ) VALUES ($1, 'cancellation', CURRENT_TIMESTAMP, 'pending')
+       ON CONFLICT (appointment_id, reminder_type) DO NOTHING
+       RETURNING *`,
+      [appointmentId]
+    );
+    return result.rows[0] || null;
+  }
+
+  async claimCancellation(reminderId) {
+    const result = await this.query(
+      `UPDATE geniusbot.appointment_reminders
+          SET status = 'processing', updated_at = CURRENT_TIMESTAMP
+        WHERE id = $1 AND status = 'pending'
+       RETURNING *`,
+      [reminderId]
+    );
+    return result.rows[0] || null;
+  }
+
+  async releaseForRetry(reminderId) {
+    const result = await this.query(
+      `UPDATE geniusbot.appointment_reminders
+          SET status = 'pending', scheduled_at = CURRENT_TIMESTAMP,
+              updated_at = CURRENT_TIMESTAMP
+        WHERE id = $1 AND status = 'processing'
+       RETURNING *`,
+      [reminderId]
+    );
+    return result.rows[0] || null;
+  }
+
   async cancelPendingByAppointment(appointmentId) {
     const result = await this.query(
       `UPDATE geniusbot.appointment_reminders
@@ -75,6 +110,10 @@ class NotificationRepository extends BaseRepository {
               OR (
                 ar.reminder_type IN ('followup', 'google_review')
                 AND a.status = 'completed'
+              )
+              OR (
+                ar.reminder_type = 'cancellation'
+                AND a.status = 'cancelled'
               )
             )
           ORDER BY ar.scheduled_at, ar.id

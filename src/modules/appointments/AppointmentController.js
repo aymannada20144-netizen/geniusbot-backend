@@ -120,13 +120,32 @@ class AppointmentController {
             clinicId,
             appointmentId,
             appointmentStart,
-            appointmentEnd
+            appointmentEnd,
+            request.user?.id ?? null
         );
 
         return reply.send({
             success: true,
             data: appointment
         });
+    }
+
+    async getRescheduleAvailableDates(request, reply) {
+      const result = await this.appointmentService.getRescheduleAvailableDates(
+        request.params.clinicId,
+        request.params.appointmentId,
+        request.query?.fromDate
+      );
+      return reply.send({ success: true, data: result.dates || [] });
+    }
+
+    async getRescheduleAvailableTimes(request, reply) {
+      const result = await this.appointmentService.getRescheduleAvailableTimes(
+        request.params.clinicId,
+        request.params.appointmentId,
+        request.query?.date
+      );
+      return reply.send({ success: true, data: result.times || [] });
     }
 }
 

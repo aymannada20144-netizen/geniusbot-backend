@@ -185,9 +185,11 @@ class ServiceAssignmentRepository extends BaseRepository {
     branchId,
     serviceId,
     doctorId = null,
+    roomId = null,
     windowStart,
     windowEnd,
     timeZone,
+    excludeAppointmentId = null,
   }) {
     const result = await this.query(
       `WITH eligible_assignments AS (
@@ -205,6 +207,7 @@ class ServiceAssignmentRepository extends BaseRepository {
             AND sa.service_id = $3
             AND sa.is_active IS TRUE
             AND ($4::uuid IS NULL OR sa.doctor_id = $4)
+            AND ($9::uuid IS NULL OR sa.room_id = $9)
             AND (sa.doctor_id IS NULL OR d.is_active IS TRUE)
             AND (sa.room_id IS NULL OR (
               r.is_active IS TRUE AND r.branch_id = sa.branch_id
@@ -273,6 +276,7 @@ class ServiceAssignmentRepository extends BaseRepository {
                       AND a.status IN ('pending', 'confirmed', 'checked_in')
                       AND a.appointment_start < $6
                       AND a.appointment_end > $5
+                      AND ($8::uuid IS NULL OR a.id <> $8)
                       AND (
                         a.doctor_id IN (SELECT doctor_id FROM eligible_assignments WHERE doctor_id IS NOT NULL)
                         OR a.room_id IN (SELECT room_id FROM eligible_assignments WHERE room_id IS NOT NULL)
@@ -285,6 +289,8 @@ class ServiceAssignmentRepository extends BaseRepository {
         windowStart,
         windowEnd,
         timeZone,
+        excludeAppointmentId,
+        roomId,
       ]
     );
     return { ...result.rows[0], time_zone: timeZone };

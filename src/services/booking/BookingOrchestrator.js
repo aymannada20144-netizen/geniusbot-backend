@@ -153,6 +153,8 @@ class BookingOrchestrator {
 
         appointment_start: appointmentStart,
         appointment_end: appointmentEnd,
+        patient_id: data.patient_id || null,
+        excludeAppointmentId: data.excludeAppointmentId || null,
       });
 
     if (!resolution.resolved) {
@@ -183,6 +185,8 @@ class BookingOrchestrator {
       room_id: assignment.room_id || null,
       appointment_start: appointmentStart,
       appointment_end: appointmentEnd,
+      patient_id: data.patient_id || null,
+      excludeAppointmentId: data.excludeAppointmentId || null,
     });
 
     if (!revalidation.resolved || revalidation.assignment.id !== assignment.id) {
@@ -283,9 +287,11 @@ class BookingOrchestrator {
       branch_id: data.branch_id,
       service_id: service.id,
       doctor_id: data.doctor_id || null,
-      room_id: null,
+      room_id: data.room_id || null,
       appointment_start: appointmentStart,
       appointment_end: appointmentEnd,
+      patient_id: data.patient_id || null,
+      excludeAppointmentId: data.excludeAppointmentId || null,
     });
     if (!resolution.resolved) {
       return {
@@ -341,9 +347,11 @@ class BookingOrchestrator {
         branchId: data.branch_id,
         serviceId: service.id,
         doctorId: data.doctor_id || null,
+        roomId: data.room_id || null,
         windowStart,
         windowEnd,
         timeZone: clinic.timezone,
+        excludeAppointmentId: data.excludeAppointmentId || null,
       });
     const assignments = window.assignments || [];
     if (!assignments.length) {
@@ -393,9 +401,11 @@ class BookingOrchestrator {
         branchId: data.branch_id,
         serviceId: service.id,
         doctorId: data.doctor_id || null,
+        roomId: data.room_id || null,
         windowStart,
         windowEnd,
         timeZone: clinic.timezone,
+        excludeAppointmentId: data.excludeAppointmentId || null,
       });
     const assignments = window.assignments || [];
     if (!assignments.length) return { success: true, times: [] };
@@ -495,9 +505,11 @@ class BookingOrchestrator {
         branchId: data.branch_id,
         serviceId: service.id,
         doctorId: data.doctor_id || null,
+        roomId: data.room_id || null,
         windowStart,
         windowEnd,
         timeZone: clinic.timezone,
+        excludeAppointmentId: data.excludeAppointmentId || null,
       });
     const assignments = window.assignments || [];
     const intervalMinutes = positiveInteger(

@@ -1081,7 +1081,8 @@ SELECT geniusbot.add_constraint_if_missing(
         ''same_day'',
         ''followup'',
         ''google_review'',
-        ''custom''
+        ''custom'',
+        ''cancellation''
     ))'
 );
 

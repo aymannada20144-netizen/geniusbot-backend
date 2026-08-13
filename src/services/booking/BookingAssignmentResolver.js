@@ -50,6 +50,8 @@ class BookingAssignmentResolver {
       room_id = null,
       appointment_start,
       appointment_end,
+      patient_id = null,
+      excludeAppointmentId = null,
     } = data;
 
     const filters = {
@@ -93,6 +95,8 @@ class BookingAssignmentResolver {
           requires_room: assignment.requires_room,
           appointment_start,
           appointment_end,
+          patient_id,
+          excludeAppointmentId,
         });
 
       if (availability.available) {

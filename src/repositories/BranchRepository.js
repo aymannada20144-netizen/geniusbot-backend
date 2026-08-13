@@ -31,6 +31,18 @@ class BranchRepository extends BaseRepository {
     return result.rows[0] || null;
   }
 
+  async findActiveByClinicId(clinicId) {
+    const result = await this.query(
+      `SELECT *
+         FROM geniusbot.branches
+        WHERE clinic_id = $1
+          AND is_active IS TRUE
+        ORDER BY name, id`,
+      [clinicId]
+    );
+    return result.rows;
+  }
+
   async findWorkingHours(branchId, dayOfWeek) {
     const result = await this.query(
       `SELECT

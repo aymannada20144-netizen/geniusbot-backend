@@ -34,6 +34,10 @@ const buildAppointmentReminder = require(
     '../templates/appointmentReminder'
 );
 
+const buildAppointmentCancelled = require(
+    '../templates/appointmentCancelled'
+);
+
 const buildThankYou = require(
     '../templates/thankYou'
 );
@@ -74,6 +78,19 @@ const APPOINTMENT_REMINDER_REQUIRED_FIELDS = Object.freeze([
     'clinicId'
 ]);
 
+const APPOINTMENT_CANCELLED_REQUIRED_FIELDS = Object.freeze([
+    'phone',
+    'patientName',
+    'appointmentNumber',
+    'serviceName',
+    'branchName',
+    'appointmentDate',
+    'appointmentTime',
+    'appointmentId',
+    'patientId',
+    'clinicId'
+]);
+
 const THANK_YOU_REQUIRED_FIELDS = Object.freeze([
     'phone',
     'patientName',
@@ -102,6 +119,11 @@ const MESSAGE_REGISTRY = Object.freeze({
     [MessageTypes.APPOINTMENT_REMINDER]: Object.freeze({
         requiredFields: APPOINTMENT_REMINDER_REQUIRED_FIELDS,
         build: buildAppointmentReminder
+    }),
+
+    [MessageTypes.APPOINTMENT_CANCELLED]: Object.freeze({
+        requiredFields: APPOINTMENT_CANCELLED_REQUIRED_FIELDS,
+        build: buildAppointmentCancelled
     }),
 
     [MessageTypes.THANK_YOU]: Object.freeze({

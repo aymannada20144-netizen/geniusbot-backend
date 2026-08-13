@@ -324,3 +324,40 @@ test('concurrent cancellation resolves stale state as idempotent success', async
   assert.equal(result.status, 'cancelled');
   assert.equal(reads, 2);
 });
+
+test('new dashboard cancellation attempts one shared notification after commit', async () => {
+  let notifications = 0;
+  const service = new AppointmentService({
+    findByIdAndClinic: async () => appointment('confirmed'),
+    applyAtomicChange: async () => ({ appointment: appointment('cancelled') }),
+  }, null, {
+    cancelAppointmentNotifications: async () => [],
+    sendCancellationConfirmation: async () => {
+      notifications += 1;
+      return { attempted: true, success: true, status: 'sent' };
+    },
+  });
+  const result = await service.cancelAppointment(clinicId, appointmentId);
+  assert.equal(notifications, 1);
+  assert.equal(result.status, 'cancelled');
+  assert.equal(result.communication.status, 'sent');
+});
+
+test('notification failure does not change successful cancellation outcome', async (t) => {
+  t.mock.method(console, 'error', () => {});
+  const service = new AppointmentService({
+    findByIdAndClinic: async () => appointment('confirmed'),
+    applyAtomicChange: async () => ({ appointment: appointment('cancelled') }),
+  }, null, {
+    cancelAppointmentNotifications: async () => [],
+    sendCancellationConfirmation: async () => {
+      const error = new Error('Meta unavailable');
+      error.code = 'META_503';
+      error.retryable = true;
+      throw error;
+    },
+  });
+  const result = await service.cancelAppointment(clinicId, appointmentId);
+  assert.equal(result.status, 'cancelled');
+  assert.equal(result.communication.status, 'pending_retry');
+});

@@ -2,6 +2,9 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 
 import {
   getAppointments,
+  getRescheduleAvailableDates,
+  getRescheduleAvailableTimes,
+  rescheduleAppointment,
   updateAppointmentStatus,
 } from '../../api/appointmentsApi'
 import type {
@@ -19,6 +22,7 @@ const STATUS_LABELS: Record<AppointmentStatus, string> = {
   cancelled: 'Cancelled',
   completed: 'Completed',
   no_show: 'No show',
+  rescheduled: 'Rescheduled',
 }
 
 type StatusFilter = 'all' | AppointmentStatus
@@ -43,6 +47,27 @@ function formatTime(start: string, end: string | null): string {
   return end
     ? `${startTime} – ${formatter.format(new Date(end))}`
     : startTime
+}
+
+const ARABIC_MONTHS = [
+  'يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو',
+  'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر',
+]
+
+function formatArabicDate(value: string): string {
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(value)
+    ? new Date(`${value}T00:00:00`)
+    : new Date(value)
+  return `${date.getDate()} ${ARABIC_MONTHS[date.getMonth()]} ${date.getFullYear()}`
+}
+
+function formatArabicTime(value: string): string {
+  const date = /^\d{2}:\d{2}$/.test(value)
+    ? new Date(`2000-01-01T${value}:00`)
+    : new Date(value)
+  const hours = date.getHours()
+  const minutes = String(date.getMinutes()).padStart(2, '0')
+  return `${hours % 12 || 12}:${minutes} ${hours < 12 ? 'ص' : 'م'}`
 }
 
 function localDateKey(value: Date): string {
@@ -70,6 +95,14 @@ export function AppointmentsPage() {
   const [cancellationReason, setCancellationReason] = useState('')
   const [cancellationError, setCancellationError] = useState<string | null>(null)
   const [feedback, setFeedback] = useState<string | null>(null)
+  const [rescheduleTarget, setRescheduleTarget] = useState<Appointment | null>(null)
+  const [availableDates, setAvailableDates] = useState<string[]>([])
+  const [availableTimes, setAvailableTimes] = useState<string[]>([])
+  const [newDate, setNewDate] = useState('')
+  const [newTime, setNewTime] = useState('')
+  const [availabilityLoading, setAvailabilityLoading] = useState(false)
+  const [rescheduleSubmitting, setRescheduleSubmitting] = useState(false)
+  const [rescheduleError, setRescheduleError] = useState<string | null>(null)
 
   useEffect(() => {
     let active = true
@@ -141,16 +174,12 @@ export function AppointmentsPage() {
     setRowErrors((current) => ({ ...current, [appointmentId]: '' }))
 
     try {
-      const updated = await updateAppointmentStatus(
+      await updateAppointmentStatus(
         user!.clinicId,
         appointmentId,
         status,
       )
-      setAppointments((current) => current.map((item) =>
-        item.id === appointmentId
-          ? { ...item, status: updated.status }
-          : item,
-      ))
+      setAppointments(await getAppointments(user!.clinicId))
     } catch {
       setRowErrors((current) => ({
         ...current,
@@ -209,6 +238,80 @@ export function AppointmentsPage() {
     } finally {
       updatingIdsRef.current.delete(appointmentId)
       setUpdatingIds(new Set(updatingIdsRef.current))
+    }
+  }
+
+  async function openRescheduleDialog(appointment: Appointment) {
+    setRescheduleTarget(appointment)
+    setAvailableDates([])
+    setAvailableTimes([])
+    setNewDate('')
+    setNewTime('')
+    setRescheduleError(null)
+    setFeedback(null)
+    setAvailabilityLoading(true)
+    try {
+      setAvailableDates(await getRescheduleAvailableDates(
+        user!.clinicId,
+        appointment.id,
+        localDateKey(new Date()),
+      ))
+    } catch {
+      setRescheduleError('تعذر تحميل المواعيد المتاحة. يرجى المحاولة مرة أخرى.')
+    } finally {
+      setAvailabilityLoading(false)
+    }
+  }
+
+  function closeRescheduleDialog() {
+    if (availabilityLoading || rescheduleSubmitting) return
+    setRescheduleTarget(null)
+    setRescheduleError(null)
+  }
+
+  async function selectRescheduleDate(date: string) {
+    if (!rescheduleTarget) return
+    setNewDate(date)
+    setNewTime('')
+    setAvailableTimes([])
+    setRescheduleError(null)
+    if (!date) return
+    setAvailabilityLoading(true)
+    try {
+      setAvailableTimes(await getRescheduleAvailableTimes(
+        user!.clinicId,
+        rescheduleTarget.id,
+        date,
+      ))
+    } catch {
+      setRescheduleError('تعذر تحميل الأوقات المتاحة. يرجى المحاولة مرة أخرى.')
+    } finally {
+      setAvailabilityLoading(false)
+    }
+  }
+
+  async function confirmReschedule() {
+    if (!rescheduleTarget || !newDate || !newTime || rescheduleSubmitting) return
+    const duration = new Date(rescheduleTarget.appointmentEnd ?? rescheduleTarget.appointmentStart)
+      .getTime() - new Date(rescheduleTarget.appointmentStart).getTime()
+    const start = new Date(`${newDate}T${newTime}:00`)
+    const end = new Date(start.getTime() + duration)
+    setRescheduleSubmitting(true)
+    setRescheduleError(null)
+    try {
+      await rescheduleAppointment(
+        user!.clinicId,
+        rescheduleTarget.id,
+        start.toISOString(),
+        end.toISOString(),
+      )
+      setAppointments(await getAppointments(user!.clinicId))
+      setRescheduleTarget(null)
+      setFeedback('تمت إعادة جدولة الموعد بنجاح.')
+    } catch {
+      setRescheduleError('الوقت المختار لم يعد متاحًا. يرجى اختيار وقت آخر.')
+    } finally {
+      setRescheduleSubmitting(false)
     }
   }
 
@@ -309,6 +412,8 @@ export function AppointmentsPage() {
                 const canCancel = appointment.status === 'pending' ||
                   appointment.status === 'confirmed' ||
                   appointment.status === 'checked_in'
+                const canReschedule = appointment.status === 'pending' ||
+                  appointment.status === 'confirmed'
 
                 return (
                   <tr key={appointment.id}>
@@ -326,6 +431,7 @@ export function AppointmentsPage() {
                         {canConfirm && <Button size="sm" isLoading={updating} disabled={updating} onClick={() => changeStatus(appointment.id, 'confirmed')}>Confirm</Button>}
                         {canCheckIn && <Button size="sm" isLoading={updating} disabled={updating} onClick={() => changeStatus(appointment.id, 'checked_in')}>Check In</Button>}
                         {canComplete && <Button size="sm" isLoading={updating} disabled={updating} onClick={() => changeStatus(appointment.id, 'completed')}>Complete</Button>}
+                        {canReschedule && <Button size="sm" variant="secondary" disabled={updating} onClick={() => openRescheduleDialog(appointment)}>تغيير الموعد</Button>}
                         {canCancel && <Button size="sm" variant="danger" disabled={updating} onClick={() => openCancellationDialog(appointment)}>Cancel</Button>}
                       </div>
                       {rowErrors[appointment.id] && <p className="appointment-row-error" role="alert">{rowErrors[appointment.id]}</p>}
@@ -390,6 +496,42 @@ export function AppointmentsPage() {
               >
                 Confirm Cancellation
               </Button>
+            </footer>
+          </section>
+        </div>
+      )}
+
+      {rescheduleTarget && (
+        <div className="appointment-cancel-dialog__backdrop">
+          <section className="appointment-cancel-dialog appointment-reschedule-dialog" role="dialog" aria-modal="true" aria-labelledby="appointment-reschedule-dialog-title">
+            <header>
+              <h3 id="appointment-reschedule-dialog-title">تغيير الموعد</h3>
+              <p>{rescheduleTarget.patientName} · {rescheduleTarget.serviceName} · {rescheduleTarget.branchName}</p>
+            </header>
+            <dl className="appointment-reschedule-dialog__summary">
+              <div><dt>التاريخ الحالي</dt><dd>{formatArabicDate(rescheduleTarget.appointmentStart)}</dd></div>
+              <div><dt>الوقت الحالي</dt><dd>{formatArabicTime(rescheduleTarget.appointmentStart)}</dd></div>
+            </dl>
+            <label htmlFor="appointment-reschedule-date">التاريخ الجديد</label>
+            <select id="appointment-reschedule-date" value={newDate} disabled={availabilityLoading || rescheduleSubmitting} onChange={(event) => selectRescheduleDate(event.target.value)}>
+              <option value="">اختر تاريخًا متاحًا</option>
+              {availableDates.map((date) => <option key={date} value={date}>{formatArabicDate(date)}</option>)}
+            </select>
+            <label htmlFor="appointment-reschedule-time">الوقت الجديد</label>
+            <select id="appointment-reschedule-time" value={newTime} disabled={!newDate || availabilityLoading || rescheduleSubmitting} onChange={(event) => setNewTime(event.target.value)}>
+              <option value="">اختر وقتًا متاحًا</option>
+              {availableTimes.map((time) => <option key={time} value={time}>{formatArabicTime(time)}</option>)}
+            </select>
+            {newDate && newTime && (
+              <div className="appointment-reschedule-dialog__review">
+                <p><strong>الموعد الحالي:</strong><span>{formatArabicDate(rescheduleTarget.appointmentStart)} — {formatArabicTime(rescheduleTarget.appointmentStart)}</span></p>
+                <p><strong>الموعد الجديد:</strong><span>{formatArabicDate(newDate)} — {formatArabicTime(newTime)}</span></p>
+              </div>
+            )}
+            {rescheduleError && <p className="appointment-cancel-dialog__error" role="alert">{rescheduleError}</p>}
+            <footer>
+              <Button variant="secondary" disabled={availabilityLoading || rescheduleSubmitting} onClick={closeRescheduleDialog}>رجوع</Button>
+              <Button isLoading={rescheduleSubmitting} disabled={!newDate || !newTime || availabilityLoading} onClick={confirmReschedule}>تأكيد تغيير الموعد</Button>
             </footer>
           </section>
         </div>

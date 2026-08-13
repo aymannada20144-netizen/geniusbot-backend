@@ -19,6 +19,8 @@ class BookingAvailabilityService {
     requires_room,
     appointment_start,
     appointment_end,
+    patient_id,
+    excludeAppointmentId,
   }) {
     return this.availabilityService
       .checkAppointmentAvailability({
@@ -31,6 +33,8 @@ class BookingAvailabilityService {
         requires_room,
         appointment_start,
         appointment_end,
+        patient_id,
+        excludeAppointmentId,
       });
   }
 }

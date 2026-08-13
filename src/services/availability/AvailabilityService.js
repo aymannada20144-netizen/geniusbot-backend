@@ -141,12 +141,18 @@ class AvailabilityService {
       requires_room = Boolean(room_id),
       appointment_start,
       appointment_end,
+      patient_id = null,
+      excludeAppointmentId = null,
     } = data;
 
     validateUuid(clinic_id, 'clinic_id');
     validateUuid(branch_id, 'branch_id');
     if (requires_doctor || doctor_id) validateUuid(doctor_id, 'doctor_id');
     if (requires_room || room_id) validateUuid(room_id, 'room_id');
+    if (patient_id) validateUuid(patient_id, 'patient_id');
+    if (excludeAppointmentId) {
+      validateUuid(excludeAppointmentId, 'excludeAppointmentId');
+    }
 
     validateRequired(
       appointment_start,
@@ -506,7 +512,9 @@ const clinicHoliday =
         .hasDoctorConflict(
           doctor_id,
           start,
-          end
+          end,
+          excludeAppointmentId,
+          clinic_id
         ) : false;
 
     if (doctorConflict) {
@@ -523,7 +531,9 @@ const clinicHoliday =
         .hasRoomConflict(
           room_id,
           start,
-          end
+          end,
+          excludeAppointmentId,
+          clinic_id
         ) : false;
 
     if (roomConflict) {
@@ -532,6 +542,19 @@ const clinicHoliday =
         reason: 'room_conflict',
         message:
           'Room already has another appointment at this time',
+      };
+    }
+    const patientConflict = patient_id &&
+      typeof this.repositories.appointments.hasPatientConflict === 'function'
+      ? await this.repositories.appointments.hasPatientConflict(
+        clinic_id, patient_id, start, end, excludeAppointmentId
+      )
+      : false;
+    if (patientConflict) {
+      return {
+        available: false,
+        reason: 'patient_conflict',
+        message: 'Patient already has another appointment at this time',
       };
     }
 

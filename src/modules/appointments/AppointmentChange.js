@@ -6,7 +6,9 @@ const {
   validateUuid,
 } = require('../../core/validators/commonValidators');
 
-const OPERATIONS = Object.freeze(['cancel', 'reschedule', 'modify']);
+const OPERATIONS = Object.freeze([
+  'cancel', 'reschedule', 'modify', 'change_service', 'change_branch',
+]);
 const SOURCES = Object.freeze(['dashboard', 'shaden', 'api', 'system']);
 const CHANGE_FIELDS = Object.freeze({
   status: 'status',

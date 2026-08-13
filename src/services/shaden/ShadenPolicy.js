@@ -71,6 +71,48 @@ class ShadenPolicy {
 
   normalize(value) { return normalizeArabic(value); }
 
+  appointmentManagementClarification() {
+    return 'لا تشيل هم 🌺 هل ترغب في إلغاء الموعد نهائيًا، أو تغييره لوقت آخر يناسبك؟';
+  }
+
+  appointmentRescheduleRequested() {
+    return 'حسنًا، سنبدأ طلب تغيير الموعد. 🌸';
+  }
+
+  rescheduleUnavailable() { return 'لا يوجد موعد متاح لتغييره حاليًا. 🌸'; }
+  rescheduleAskBookingReference() { return 'للمتابعة، أرسل رقم الحجز المكوّن من 8 أحرف وأرقام. 🌸'; }
+  rescheduleAskRegisteredMobile() { return 'للمتابعة، أرسل رقم الجوال الكامل المسجل لدى العيادة. 🌸'; }
+  rescheduleVerificationFailed() { return 'تعذر التحقق من بيانات الحجز. تحقق من البيانات وحاول مرة أخرى. 🌸'; }
+  rescheduleVerificationExhausted() { return 'تعذر التحقق من بيانات الحجز وتم إنهاء الطلب. 🌸'; }
+  rescheduleDeclined() { return 'تم التراجع عن طلب تغيير الموعد. 🌸'; }
+  rescheduleInvalidSelection(count) { return `الاختيار غير صحيح. اختر رقمًا من 1 إلى ${count}. 🌸`; }
+  rescheduleChooseAppointment() { return 'اختر الموعد المراد تغييره من القائمة. 🌸'; }
+  rescheduleCandidates(items) {
+    return ['اختر الموعد المراد تغييره:', ...items.map((item, index) =>
+      `${index + 1}. ${this.display(item.service_name || 'موعد')}`)].join('\n');
+  }
+  rescheduleChooseDate() { return 'اختر تاريخ الموعد الجديد من التواريخ المتاحة. 🌸'; }
+  rescheduleChooseTime() { return 'اختر وقت الموعد الجديد من الأوقات المتاحة. 🌸'; }
+  rescheduleInvalidDate() { return 'التاريخ غير متاح. اختر من القائمة الحالية. 🌸'; }
+  rescheduleInvalidTime() { return 'الوقت غير متاح. اختر من القائمة الحالية. 🌸'; }
+  rescheduleReview({ bookingReference, previousStart, newDate, newTime }) {
+    return [
+      `رقم الحجز: ${bookingReference || 'غير متوفر'}`,
+      '',
+      'الموعد السابق:',
+      `${formatRescheduleDate(previousStart)} — ${formatRescheduleTime(previousStart)}`,
+      '',
+      'الموعد الجديد:',
+      `${formatRescheduleDate(newDate)} — ${formatRescheduleTime(newTime)}`,
+      '',
+      'تأكيد تغيير الموعد؟ 🌸',
+    ].join('\n');
+  }
+  rescheduleAskConfirmation() { return 'يرجى تأكيد تغيير الموعد أو الاحتفاظ بالموعد الحالي. 🌸'; }
+  rescheduleSuccessful() { return 'تم تغيير الموعد بنجاح. 🌸'; }
+  rescheduleSlotUnavailable() { return 'الوقت المختار لم يعد متاحًا. ابدأ الطلب مجددًا لاختيار وقت آخر. 🌸'; }
+  rescheduleExecutionFailed() { return 'تعذر تغيير الموعد حاليًا. يرجى المحاولة لاحقًا. 🌸'; }
+
   recognize(message) {
     const text = this.normalize(message);
     const greeting = recognizeGreeting(text);
@@ -335,6 +377,160 @@ class ShadenPolicy {
   bookingAskConfirmation() { return 'هل تؤكدين بيانات الحجز؟ يرجى الرد بنعم أو إلغاء. 🌸'; }
   bookingConfirmed() { return 'تم تأكيد بيانات الحجز 🌸\nجاري تسجيل الموعد.'; }
   bookingCancelled() { return 'تم إلغاء طلب الحجز 🌸'; }
+  cancellationUnavailable() { return 'تعذر التحقق من المواعيد حاليًا. يرجى المحاولة مرة أخرى لاحقًا. 🌸'; }
+  cancellationAskBookingReference() { return 'للمتابعة، يرجى إرسال رقم الحجز المكوّن من 8 أحرف وأرقام. 🌸'; }
+  cancellationAskRegisteredMobile() { return 'للمتابعة، يرجى إرسال رقم الجوال الكامل المسجل لدى العيادة. 🌸'; }
+  cancellationVerificationFailed() { return 'تعذر التحقق من بيانات الحجز. يرجى التحقق من البيانات والمحاولة مرة أخرى. 🌸'; }
+  cancellationVerificationExhausted() { return 'تعذر التحقق من بيانات الحجز. تم إنهاء الطلب، ويمكن البدء من جديد لاحقًا. 🌸'; }
+  cancellationAbandoned() { return 'تم إنهاء طلب إدارة الموعد. 🌸'; }
+  cancellationNoCandidates() { return 'لا يوجد موعد نشط أو قادم متاح للإلغاء حاليًا. 🌸'; }
+  cancellationInvalidSelection(count) { return `الاختيار غير صحيح. يرجى اختيار رقم من 1 إلى ${count}. 🌸`; }
+  cancellationDeclined() { return 'تم التراجع عن طلب إلغاء الموعد. 🌸'; }
+  cancellationAskConfirmation() { return 'تأكيد إلغاء هذا الموعد؟ يرجى الرد بنعم أو لا. 🌸'; }
+  cancellationSuccessful() { return 'تم إلغاء الموعد بنجاح. 🌸'; }
+  cancellationNotificationPending() { return 'تعذر إرسال إشعار التأكيد الآن، وسيُعاد الإرسال تلقائيًا. 🌸'; }
+  cancellationAlreadyCancelled() { return 'الموعد ملغى بالفعل، ولا يلزم إجراء إضافي. 🌸'; }
+  cancellationNoLongerCancellable() { return 'تعذر إلغاء الموعد لأن حالته لم تعد تسمح بالإلغاء. 🌸'; }
+  cancellationStale() { return 'تغيرت بيانات الموعد منذ مراجعتها، لذلك لم يتم الإلغاء. يرجى بدء الطلب من جديد. 🌸'; }
+  cancellationAppointmentUnavailable() { return 'تعذر إلغاء الموعد المطلوب. يرجى التحقق والمحاولة من جديد. 🌸'; }
+  cancellationExecutionFailed() { return 'تعذر إلغاء الموعد حاليًا. يرجى المحاولة مرة أخرى لاحقًا. 🌸'; }
+  cancellationInformationUnavailable() {
+    return 'معلومات سياسة الإلغاء، مثل الرسوم والاسترداد والمهلة، غير متاحة عبر شادن حاليًا. يرجى التواصل مع العيادة للتأكد. 🌸';
+  }
+  changeServiceUnsupported() {
+    return 'فهمت أنك ترغب في تغيير الخدمة في موعد قائم. التغيير المباشر غير متاح عبر شادن حاليًا، ويمكنك اختيار حجز موعد جديد أو بدء طلب إلغاء الموعد الحالي. 🌸';
+  }
+  changeServiceAskBookingReference() { return 'للمتابعة، أرسل رقم الحجز المكوّن من 8 أحرف وأرقام. 🌸'; }
+  changeServiceAskRegisteredMobile() { return 'للمتابعة، أرسل رقم الجوال الكامل المسجل لدى العيادة. 🌸'; }
+  changeServiceVerificationFailed() { return 'تعذر التحقق من بيانات الحجز. تحقق من البيانات وحاول مرة أخرى. 🌸'; }
+  changeServiceVerificationExhausted() { return 'تعذر التحقق من بيانات الحجز وتم إنهاء الطلب. 🌸'; }
+  changeServiceNoCandidates() { return 'لا توجد لديك مواعيد قادمة متاحة لتغيير الخدمة. 🌸'; }
+  changeServiceChooseAppointment() { return 'اختر الموعد المراد تغيير خدمته. 🌸'; }
+  changeServiceChooseService() { return 'اختر الخدمة الجديدة. 🌸'; }
+  changeServiceCurrentSummary(item) {
+    return [
+      `رقم الحجز: ${this.display(item.booking_reference || 'غير متوفر')}`,
+      `الخدمة الحالية: ${this.display(item.service_name || 'غير محددة')}`,
+      `الفرع: ${this.display(item.branch_name || 'غير محدد')}`,
+      `الموعد: ${formatRescheduleDate(item.appointment_start)} — ${formatRescheduleTime(item.appointment_start)}`,
+      '', 'اختر الخدمة الجديدة. 🌸',
+    ].join('\n');
+  }
+  changeServiceInvalidSelection() { return 'الاختيار غير صالح. اختر من الخيارات الحالية. 🌸'; }
+  changeServiceSameService() { return 'الخدمة المختارة هي نفس خدمة الموعد الحالية. اختر خدمة أخرى. 🌸'; }
+  changeServiceChooseDate() { return 'الخدمة الجديدة تحتاج إلى موعد آخر. اختر تاريخًا متاحًا. 🌸'; }
+  changeServiceChooseTime() { return 'اختر الوقت المتاح للخدمة الجديدة. 🌸'; }
+  changeServiceInvalidDate() { return 'التاريخ غير متاح. اختر من القائمة الحالية. 🌸'; }
+  changeServiceInvalidTime() { return 'الوقت غير متاح. اختر من القائمة الحالية. 🌸'; }
+  changeServiceSlotUnavailable() { return 'الوقت المختار لم يعد متاحًا. اختر وقتًا آخر. 🌸'; }
+  changeServiceReview({ appointment, service, assignment, price, appointmentStart }) {
+    const lines = [
+      `رقم الحجز: ${this.display(appointment.booking_reference || 'غير متوفر')}`,
+      '', `الخدمة السابقة: ${this.display(appointment.service_name || 'الخدمة الحالية')}`,
+      `الخدمة الجديدة: ${this.display(service.name)}`,
+      `الفرع: ${this.display(appointment.branch_name || 'الفرع الحالي')}`,
+      `الموعد السابق: ${formatRescheduleDate(appointment.appointment_start)} — ${formatRescheduleTime(appointment.appointment_start)}`,
+      `الموعد النهائي: ${formatRescheduleDate(appointmentStart)} — ${formatRescheduleTime(appointmentStart)}`,
+    ];
+    if ((appointment.doctor_id || null) !== (assignment.doctor_id || null)) {
+      lines.push(`مقدم الخدمة: ${this.display(appointment.doctor_name || 'غير محدد')} ← ${this.display(assignment.doctor_name || 'غير محدد')}`);
+    }
+    if ((appointment.room_id || null) !== (assignment.room_id || null)) {
+      lines.push(`الغرفة: ${this.display(appointment.room_number || appointment.room_name || 'غير محددة')} ← ${this.display(assignment.room_number || assignment.room_name || 'غير محددة')}`);
+    }
+    if (appointment.quoted_price != null && String(appointment.quoted_price) !== String(price.price)) {
+      lines.push(`السعر: ${appointment.quoted_price} ${appointment.currency || 'SAR'} ← ${price.price} ${price.currency}`);
+    }
+    lines.push('', 'تأكيد تغيير الخدمة؟ 🌸');
+    return lines.join('\n');
+  }
+  changeServiceAskConfirmation() { return 'يرجى تأكيد تغيير الخدمة أو الاحتفاظ بالخدمة الحالية. 🌸'; }
+  changeServiceDeclined() { return 'تم الاحتفاظ بالخدمة الحالية دون تغيير. 🌸'; }
+  changeServiceUnavailable() { return 'تعذر تغيير الخدمة لهذا الموعد حاليًا. لم يتم إجراء أي تغيير. 🌸'; }
+  changeServiceSuccessful(reference) { return `تم تغيير خدمة الموعد بنجاح. رقم الحجز: ${this.display(reference || 'غير متوفر')} 🌸`; }
+  changeBranchAskBookingReference() { return 'للمتابعة، أرسل رقم الحجز المكوّن من 8 أحرف وأرقام. 🌸'; }
+  changeBranchAskRegisteredMobile() { return 'للمتابعة، أرسل رقم الجوال الكامل المسجل لدى العيادة. 🌸'; }
+  changeBranchVerificationFailed() { return 'تعذر التحقق من بيانات الحجز. تحقق من البيانات وحاول مرة أخرى. 🌸'; }
+  changeBranchVerificationExhausted() { return 'تعذر التحقق من بيانات الحجز وتم إنهاء الطلب. 🌸'; }
+  changeBranchNoCandidates() { return 'لا توجد لديك مواعيد قادمة متاحة لتغيير الفرع. 🌸'; }
+  changeBranchChooseAppointment() { return 'اختر الموعد المراد تغيير فرعه. 🌸'; }
+  changeBranchChooseBranch() { return 'اختر الفرع الجديد. 🌸'; }
+  changeBranchCurrentSummary(item) {
+    return [
+      `رقم الحجز: ${this.display(item.booking_reference || 'غير متوفر')}`,
+      `الخدمة: ${this.display(item.service_name || 'غير محددة')}`,
+      `الفرع الحالي: ${this.display(item.branch_name || 'غير محدد')}`,
+      `الموعد: ${formatRescheduleDate(item.appointment_start)} — ${formatRescheduleTime(item.appointment_start)}`,
+      '', 'اختر الفرع الجديد. 🌸',
+    ].join('\n');
+  }
+  changeBranchInvalidSelection() { return 'الاختيار غير صالح. اختر من الخيارات الحالية. 🌸'; }
+  changeBranchSameBranch() { return 'الفرع المختار هو نفس فرع الموعد الحالي. اختر فرعًا آخر. 🌸'; }
+  changeBranchChooseDate() { return 'الموعد الحالي غير متاح في الفرع الجديد. اختر تاريخًا متاحًا. 🌸'; }
+  changeBranchChooseTime() { return 'اختر الوقت المتاح في الفرع الجديد. 🌸'; }
+  changeBranchInvalidDate() { return 'التاريخ غير متاح. اختر من القائمة الحالية. 🌸'; }
+  changeBranchInvalidTime() { return 'الوقت غير متاح. اختر من القائمة الحالية. 🌸'; }
+  changeBranchSlotUnavailable() { return 'الوقت المختار لم يعد متاحًا. اختر وقتًا آخر. 🌸'; }
+  changeBranchReview({ appointment, branch, assignment, price, appointmentStart }) {
+    const lines = [
+      `رقم الحجز: ${this.display(appointment.booking_reference || 'غير متوفر')}`,
+      '', `الفرع السابق: ${this.display(appointment.branch_name || 'الفرع الحالي')}`,
+      `الفرع الجديد: ${this.display(branch.name)}`,
+      `الخدمة: ${this.display(appointment.service_name || 'الخدمة الحالية')}`,
+      `الموعد السابق: ${formatRescheduleDate(appointment.appointment_start)} — ${formatRescheduleTime(appointment.appointment_start)}`,
+      `الموعد النهائي: ${formatRescheduleDate(appointmentStart)} — ${formatRescheduleTime(appointmentStart)}`,
+    ];
+    if ((appointment.doctor_id || null) !== (assignment.doctor_id || null)) {
+      lines.push(`مقدم الخدمة: ${this.display(appointment.doctor_name || 'غير محدد')} ← ${this.display(assignment.doctor_name || 'غير محدد')}`);
+    }
+    if ((appointment.room_id || null) !== (assignment.room_id || null)) {
+      lines.push(`الغرفة: ${this.display(appointment.room_number || appointment.room_name || 'غير محددة')} ← ${this.display(assignment.room_number || assignment.room_name || 'غير محددة')}`);
+    }
+    if (appointment.quoted_price != null && String(appointment.quoted_price) !== String(price.price)) {
+      lines.push(`السعر: ${appointment.quoted_price} ${appointment.currency || 'SAR'} ← ${price.price} ${price.currency}`);
+    }
+    lines.push('', 'تأكيد تغيير الفرع؟ 🌸');
+    return lines.join('\n');
+  }
+  changeBranchAskConfirmation() { return 'يرجى تأكيد تغيير الفرع أو الاحتفاظ بالفرع الحالي. 🌸'; }
+  changeBranchDeclined() { return 'تم الاحتفاظ بالفرع الحالي دون تغيير. 🌸'; }
+  changeBranchUnavailable() { return 'تعذر تغيير الفرع لهذا الموعد حاليًا. لم يتم إجراء أي تغيير. 🌸'; }
+  changeBranchSuccessful(reference) { return `تم تغيير فرع الموعد بنجاح. رقم الحجز: ${this.display(reference || 'غير متوفر')} 🌸`; }
+  changeBranchUnsupported() {
+    return 'فهمت أنك ترغب في تغيير الفرع لموعد قائم. هذه العملية غير متاحة عبر شادن حاليًا. 🌸';
+  }
+  changeProviderUnsupported() {
+    return 'فهمت أنك ترغب في تغيير مقدم الخدمة لموعد قائم. هذه العملية غير متاحة عبر شادن حاليًا. 🌸';
+  }
+  cancellationCandidates(items) {
+    const lines = items.map((item, index) => {
+      const schedule = formatAppointmentSchedule(item.appointment_start);
+      const service = this.display(item.service_name || 'الخدمة غير محددة');
+      const branch = this.display(item.branch_name || 'الفرع غير محدد');
+      return `${index + 1}. ${service} — ${branch} — ${schedule.dateText} ${schedule.timeText}`;
+    });
+    return `يوجد أكثر من موعد متاح للإلغاء:\n${lines.join('\n')}\n\nيرجى اختيار الموعد المراد إلغاؤه. 🌸`;
+  }
+  cancellationReview(item) {
+    const schedule = formatAppointmentSchedule(item.appointment_start);
+    const lines = [
+      '📋 *تفاصيل الموعد المراد إلغاؤه*',
+      `رقم الحجز: ${this.display(item.booking_reference || 'غير محدد')}`,
+      `الخدمة: ${this.display(item.service_name || 'غير محددة')}`,
+      `الفرع: ${this.display(item.branch_name || 'غير محدد')}`,
+    ];
+    if (item.doctor_name) {
+      lines.push(`مقدم الخدمة: ${this.display(item.doctor_name)}`);
+    }
+    lines.push(
+      `التاريخ: ${schedule.dateText}`,
+      `الوقت: ${schedule.timeText}`,
+      `الحالة: ${cancellationStatusLabel(item.status, this)}`,
+      '',
+      this.cancellationAskConfirmation()
+    );
+    return lines.join('\n');
+  }
   bookingCreated({ service, branch, doctor, room, paymentMethod, insuranceCompany, insuranceClass, preferredStart, appointment, customerName, bookingReference: authoritativeReference, quotedPrice, currency }) {
     const schedule = formatAppointmentSchedule(preferredStart);
     return messageFormatter.formatBookingSuccess({
@@ -417,6 +613,33 @@ function formatAppointmentSchedule(value) {
 function bookingReference(value) {
   const normalized = String(value || '').trim();
   return normalized && !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(normalized) ? normalized : null;
+}
+
+function cancellationStatusLabel(status, policy) {
+  return {
+    pending: 'قيد الانتظار',
+    confirmed: 'مؤكد',
+    checked_in: 'تم تسجيل الحضور',
+  }[status] || policy.display(status || 'غير محددة');
+}
+
+function formatRescheduleDate(value) {
+  const months = [
+    'يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو',
+    'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر',
+  ];
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(value)
+    ? new Date(`${value}T00:00:00`)
+    : new Date(value);
+  return `${date.getDate()} ${months[date.getMonth()]} ${date.getFullYear()}`;
+}
+
+function formatRescheduleTime(value) {
+  const date = /^\d{2}:\d{2}$/.test(value)
+    ? new Date(`2000-01-01T${value}:00`)
+    : new Date(value);
+  const hour = date.getHours();
+  return `${hour % 12 || 12}:${String(date.getMinutes()).padStart(2, '0')} ${hour < 12 ? 'ص' : 'م'}`;
 }
 
 function formatRoom(room) {

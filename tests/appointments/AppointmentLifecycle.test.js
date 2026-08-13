@@ -191,6 +191,10 @@ describe('Appointment lifecycle v1', () => {
         calls.push(['no-show', args]);
         return { id: appointmentId };
       },
+      rescheduleAppointment: async (...args) => {
+        calls.push(['reschedule', args]);
+        return { id: appointmentId };
+      },
     };
     const controller = new AppointmentController(service);
     const request = {
@@ -208,6 +212,11 @@ describe('Appointment lifecycle v1', () => {
     await controller.cancelAppointment(request, reply);
     await controller.completeAppointment(request, reply);
     await controller.markAppointmentAsNoShow(request, reply);
+    request.body = {
+      appointmentStart: '2026-08-16T09:00:00.000Z',
+      appointmentEnd: '2026-08-16T09:30:00.000Z',
+    };
+    await controller.rescheduleAppointment(request, reply);
 
     assert.deepEqual(calls, [
       ['update', [
@@ -221,6 +230,13 @@ describe('Appointment lifecycle v1', () => {
       ['cancel', [clinicId, appointmentId, 'patient request', staffId]],
       ['complete', [clinicId, appointmentId, staffId]],
       ['no-show', [clinicId, appointmentId, staffId]],
+      ['reschedule', [
+        clinicId,
+        appointmentId,
+        '2026-08-16T09:00:00.000Z',
+        '2026-08-16T09:30:00.000Z',
+        staffId,
+      ]],
     ]);
   });
 

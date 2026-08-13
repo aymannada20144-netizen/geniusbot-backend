@@ -116,6 +116,13 @@ async function buildApp() {
     new OutboxPublisher(new OutboxRepository(db), eventBus),
     { logger: app.log }
   );
+  const availabilityService = new AvailabilityService(bookingRepositories);
+  const bookingService = new BookingService(
+    bookingRepositories,
+    availabilityService,
+    communicationService,
+    notificationService
+  );
   const appointmentService = new AppointmentService(
     new AppointmentRepository(db),
     communicationService,
@@ -123,6 +130,9 @@ async function buildApp() {
     {
       googleReviewDelayMinutes:
         env.notifications.googleReviewDelayMinutes,
+      availabilityService,
+      bookingService,
+      priceService: bookingService.priceService,
     }
   );
 
@@ -153,13 +163,6 @@ async function buildApp() {
   const assistantIdentity = assistantIdentityModule.register({ app, db });
   pricesModule.register({ app, db });
 
-  const availabilityService = new AvailabilityService(bookingRepositories);
-  const bookingService = new BookingService(
-    bookingRepositories,
-    availabilityService,
-    communicationService,
-    notificationService
-  );
   const bookingEngine = new BookingEngine({ bookingService });
   const clinicRepository = bookingRepositories.clinics;
   const conversationRepository = new ConversationRepository(db);
@@ -187,6 +190,7 @@ async function buildApp() {
     catalogService,
     clinicConfigurationSource: assistantIdentity.service,
     bookingEngine,
+    appointmentService,
     priceService,
     sendMessage: sendWhatsAppMessage,
   });

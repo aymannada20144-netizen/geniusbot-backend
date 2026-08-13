@@ -181,6 +181,31 @@ test('atomically updates appointment, audit, and appointment.changed outbox', as
   assert.deepEqual(Object.keys(result.event.after), ['doctor_id']);
 });
 
+test('atomic same-row reschedule audits time without status event', async () => {
+  const db = createTransactionalDb();
+  const service = new AppointmentService(new AppointmentRepository(db));
+  const result = await service.applyValidatedChange(
+    command({ operation: 'reschedule' }),
+    {
+      appointment_start: '2026-08-16T16:00:00.000Z',
+      appointment_end: '2026-08-16T16:30:00.000Z',
+    }
+  );
+  assert.equal(result.appointment.status, 'confirmed');
+  assert.equal(db.committed.audits[0].operation, 'reschedule');
+  assert.deepEqual(db.committed.audits[0].changeTypes, ['time']);
+  assert.deepEqual(Object.keys(result.event.before), [
+    'appointment_start', 'appointment_end',
+  ]);
+  assert.deepEqual(Object.keys(result.event.after), [
+    'appointment_start', 'appointment_end',
+  ]);
+  assert.deepEqual(
+    db.committed.events.map((event) => event.name),
+    [AppointmentEvents.CHANGED]
+  );
+});
+
 test('atomic cancellation preserves both status and semantic outbox events', async () => {
   const db = createTransactionalDb();
   const repository = new AppointmentRepository(db);

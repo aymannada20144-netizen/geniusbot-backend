@@ -116,6 +116,18 @@ function registerAppointmentRoutes(
       appointmentController
     )
   );
+
+  app.get(
+    '/api/clinics/:clinicId/appointments/:appointmentId/reschedule/available-dates',
+    { preHandler: protect(PERMISSIONS.APPOINTMENT_RESCHEDULE) },
+    appointmentController.getRescheduleAvailableDates.bind(appointmentController)
+  );
+
+  app.get(
+    '/api/clinics/:clinicId/appointments/:appointmentId/reschedule/available-times',
+    { preHandler: protect(PERMISSIONS.APPOINTMENT_RESCHEDULE) },
+    appointmentController.getRescheduleAvailableTimes.bind(appointmentController)
+  );
 }
 
 module.exports = registerAppointmentRoutes;

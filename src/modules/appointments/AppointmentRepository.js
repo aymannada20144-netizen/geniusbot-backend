@@ -91,6 +91,62 @@ class AppointmentRepository extends BaseRepository {
     return result.rows[0] || null;
   }
 
+  async findByBookingReference(clinicId, bookingReference) {
+    const sql = `
+      SELECT a.*
+      FROM ${this.fullTableName} a
+      WHERE a."clinic_id" = $1
+        AND a."booking_reference" = $2
+      LIMIT 1
+    `;
+
+    const result = await this.query(sql, [clinicId, bookingReference]);
+    return result.rows[0] || null;
+  }
+
+  async findFutureForManagementByPatient(clinicId, patientId) {
+    const sql = `
+      SELECT
+        a."id",
+        a."clinic_id",
+        a."branch_id",
+        a."patient_id",
+        a."service_id",
+        a."doctor_id",
+        a."room_id",
+        a."booking_reference",
+        a."appointment_start",
+        a."appointment_end",
+        a."status",
+        a."updated_at",
+        s."name" AS "service_name",
+        d."full_name" AS "doctor_name",
+        b."name" AS "branch_name",
+        r."room_name",
+        r."room_number"
+      FROM ${this.fullTableName} a
+      LEFT JOIN "geniusbot"."services" s
+        ON s."id" = a."service_id"
+       AND s."clinic_id" = a."clinic_id"
+      LEFT JOIN "geniusbot"."doctors" d
+        ON d."id" = a."doctor_id"
+       AND d."clinic_id" = a."clinic_id"
+      LEFT JOIN "geniusbot"."branches" b
+        ON b."id" = a."branch_id"
+       AND b."clinic_id" = a."clinic_id"
+      LEFT JOIN "geniusbot"."rooms" r
+        ON r."id" = a."room_id"
+       AND r."branch_id" = a."branch_id"
+      WHERE a."clinic_id" = $1
+        AND a."patient_id" = $2
+        AND a."status" IN ('pending', 'confirmed', 'checked_in')
+      ORDER BY a."appointment_start" ASC
+    `;
+
+    const result = await this.query(sql, [clinicId, patientId]);
+    return result.rows;
+  }
+
   async findByClinicId(clinicId) {
     const sql = `
       SELECT
@@ -208,7 +264,8 @@ class AppointmentRepository extends BaseRepository {
     doctorId,
     startTime,
     endTime,
-    excludeAppointmentId = null
+    excludeAppointmentId = null,
+    clinicId = null
   ) {
     if (!doctorId) return false;
 
@@ -230,6 +287,13 @@ class AppointmentRepository extends BaseRepository {
       values.push(excludeAppointmentId);
     }
 
+    if (clinicId) {
+      sql += `
+        AND "clinic_id" = $${values.length + 1}
+      `;
+      values.push(clinicId);
+    }
+
     sql += `
       LIMIT 1
     `;
@@ -242,7 +306,8 @@ class AppointmentRepository extends BaseRepository {
     roomId,
     startTime,
     endTime,
-    excludeAppointmentId = null
+    excludeAppointmentId = null,
+    clinicId = null
   ) {
     if (!roomId) return false;
 
@@ -264,10 +329,45 @@ class AppointmentRepository extends BaseRepository {
       values.push(excludeAppointmentId);
     }
 
+
+    if (clinicId) {
+      sql += `
+        AND "clinic_id" = $${values.length + 1}
+      `;
+      values.push(clinicId);
+    }
+
     sql += `
       LIMIT 1
     `;
 
+    const result = await this.query(sql, values);
+    return result.rows.length > 0;
+  }
+
+  async hasPatientConflict(
+    clinicId,
+    patientId,
+    startTime,
+    endTime,
+    excludeAppointmentId = null
+  ) {
+    if (!patientId) return false;
+    const values = [clinicId, patientId, startTime, endTime];
+    let sql = `
+      SELECT "id"
+      FROM ${this.fullTableName}
+      WHERE "clinic_id" = $1
+        AND "patient_id" = $2
+        AND "status" IN ('pending', 'confirmed', 'checked_in')
+        AND "appointment_start" < $4
+        AND "appointment_end" > $3
+    `;
+    if (excludeAppointmentId) {
+      sql += ` AND "id" <> $5`;
+      values.push(excludeAppointmentId);
+    }
+    sql += ` LIMIT 1`;
     const result = await this.query(sql, values);
     return result.rows.length > 0;
   }
