@@ -1,12 +1,17 @@
 'use strict';
 
 const ShadenPolicy = require('./ShadenPolicy');
+const ShadenConversationalSignalDetector = require(
+  './ShadenConversationalSignalDetector'
+);
 
 class DeterministicUnderstandingProvider {
   constructor({
     policy = new ShadenPolicy(),
+    signalDetector = new ShadenConversationalSignalDetector(),
   } = {}) {
     this.policy = policy;
+    this.signalDetector = signalDetector;
   }
 
   async understand(input = {}) {
@@ -19,32 +24,125 @@ class DeterministicUnderstandingProvider {
     }
 
     let inquiry;
+let detectedSignals;
 
-    try {
-      inquiry = this.policy.recognize(text);
-    } catch {
-      return safeUnknown();
-    }
+try {
+  inquiry = this.policy.recognize(text);
+  detectedSignals = this.signalDetector.detect({
+    text,
+  });
+} catch {
+  return safeUnknown();
+}
+
+return mergeDetectedSignals(
+  mapInquiryToUnderstanding(inquiry),
+  detectedSignals
+);
 
     return mapInquiryToUnderstanding(inquiry);
   }
 }
+function mergeDetectedSignals(understanding, detected = {}) {
+  const legacySignals = understanding?.signals || {};
 
+  const mergedSignals = {
+    confirmation:
+      legacySignals.confirmation === true,
+
+    rejection:
+      legacySignals.rejection === true,
+
+    correction:
+      legacySignals.correction === true ||
+      detected.correction === true,
+
+    interruption:
+      legacySignals.interruption === true ||
+      detected.interruption === true,
+
+    conditional:
+      legacySignals.conditional === true,
+
+    hesitation:
+      legacySignals.hesitation === true ||
+      detected.hesitation === true,
+
+    objection:
+      legacySignals.objection === true ||
+      detected.objection === true,
+
+    complaint:
+      legacySignals.complaint === true ||
+      detected.complaint === true,
+
+    medicalQuestion:
+      legacySignals.medicalQuestion === true ||
+      detected.medicalQuestion === true,
+
+    medicalRisk:
+      legacySignals.medicalRisk === true ||
+      detected.medicalRisk === true,
+
+    humanHandover:
+      legacySignals.humanHandover === true ||
+      detected.humanHandover === true,
+  };
+
+  return {
+    ...understanding,
+    sentiment: chooseSentiment(
+      understanding.sentiment,
+      detected.sentiment
+    ),
+    signals: mergedSignals,
+  };
+}
+function chooseSentiment(legacySentiment, detectedSentiment) {
+  const priority = {
+    angry: 6,
+    frustrated: 5,
+    worried: 4,
+    negative: 3,
+    positive: 2,
+    neutral: 1,
+  };
+
+  const legacy = priority[legacySentiment]
+    ? legacySentiment
+    : 'neutral';
+
+  const detected = priority[detectedSentiment]
+    ? detectedSentiment
+    : 'neutral';
+
+  return priority[detected] > priority[legacy]
+    ? detected
+    : legacy;
+}
 function mapInquiryToUnderstanding(inquiry) {
   if (!inquiry || typeof inquiry !== 'object') {
     return safeUnknown();
   }
 
   const legacyType = normalizeLegacyType(inquiry.type);
+  const compoundIntents = legacyType === 'compound_appointment_request'
+    ? mappedCompoundIntents(inquiry.intents)
+    : [];
+  const primaryIntent = compoundIntents[0] || primaryIntentFor(legacyType);
 
-  const base = {
-    primaryIntent: primaryIntentFor(legacyType),
+  return {
+    primaryIntent,
 
-    secondaryIntents: secondaryIntentsFor(inquiry),
+    secondaryIntents: compoundIntents.length
+      ? compoundIntents.slice(1)
+      : secondaryIntentsFor(inquiry),
 
     entities: extractEntities(inquiry),
 
-    conversationAct: conversationActFor(legacyType),
+    conversationAct: legacyType === 'compound_appointment_request'
+      ? 'request'
+      : conversationActFor(legacyType),
 
     sentiment: sentimentFor(legacyType),
 
@@ -52,8 +150,6 @@ function mapInquiryToUnderstanding(inquiry) {
 
     confidence: confidenceFor(legacyType),
   };
-
-  return base;
 }
 
 function primaryIntentFor(type) {
@@ -126,16 +222,21 @@ function primaryIntentFor(type) {
     case 'availability_request':
       return 'availability_request';
 
-    // Appointment lookup
+    // Appointment information
     case 'appointment_query':
     case 'existing_appointment_query':
     case 'appointment_status_query':
+    case 'appointment_query_request':
+    case 'booking_status_request':
+    case 'booking_reference_request':
+    case 'cancellation_information_request':
       return 'appointment_query';
 
     // Appointment management
     case 'booking_cancellation_request':
     case 'appointment_cancellation':
     case 'cancellation_request':
+    case 'bulk_cancel_request':
       return 'appointment_cancellation';
 
     case 'booking_modification_request':
@@ -172,6 +273,13 @@ function primaryIntentFor(type) {
     case 'human_handover':
       return 'human_handover_request';
 
+    // Conversational state / clarification, not standalone semantic intents
+    case 'conditional_confirmation':
+    case 'booking_rejection':
+    case 'appointment_management_clarification':
+    case 'compound_appointment_request':
+      return 'unknown';
+
     default:
       return 'unknown';
   }
@@ -204,6 +312,28 @@ function secondaryIntentsFor(inquiry) {
   return [...new Set(result)];
 }
 
+function mappedCompoundIntents(value) {
+  if (!Array.isArray(value)) return [];
+
+  const mapped = [];
+
+  for (const item of value) {
+    const type = typeof item === 'string'
+      ? item
+      : item?.type;
+
+    const intent = primaryIntentFor(
+      normalizeLegacyType(type)
+    );
+
+    if (intent !== 'unknown') {
+      mapped.push(intent);
+    }
+  }
+
+  return [...new Set(mapped)];
+}
+
 function conversationActFor(type) {
   switch (type) {
     case 'greeting':
@@ -217,7 +347,11 @@ function conversationActFor(type) {
       return 'thanks';
 
     case 'acknowledgement':
+    case 'conditional_confirmation':
       return 'confirmation';
+
+    case 'booking_rejection':
+      return 'rejection';
 
     case 'booking':
     case 'booking_request':
@@ -225,6 +359,7 @@ function conversationActFor(type) {
     case 'booking_cancellation_request':
     case 'appointment_cancellation':
     case 'cancellation_request':
+    case 'bulk_cancel_request':
     case 'booking_modification_request':
     case 'appointment_reschedule':
     case 'reschedule_request':
@@ -260,6 +395,10 @@ function conversationActFor(type) {
     case 'appointment_query':
     case 'existing_appointment_query':
     case 'appointment_status_query':
+    case 'appointment_query_request':
+    case 'booking_status_request':
+    case 'booking_reference_request':
+    case 'cancellation_information_request':
     case 'medical_question':
       return 'question';
 

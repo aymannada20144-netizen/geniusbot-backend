@@ -173,6 +173,135 @@ test('DeterministicUnderstandingProvider', async (t) => {
     );
   });
 
+  await t.test('maps appointment information intents explicitly', async () => {
+    const cases = [
+      ['appointment_query_request', 'appointment_query', 'question'],
+      ['booking_status_request', 'appointment_query', 'question'],
+      ['booking_reference_request', 'appointment_query', 'question'],
+      ['cancellation_information_request', 'appointment_query', 'question'],
+    ];
+
+    for (const [type, intent, act] of cases) {
+      const provider = new DeterministicUnderstandingProvider({
+        policy: {
+          recognize() {
+            return { type };
+          },
+        },
+      });
+
+      const result = await provider.understand({
+        text: 'test',
+      });
+
+      assert.equal(result.primaryIntent, intent, type);
+      assert.equal(result.conversationAct, act, type);
+    }
+  });
+
+  await t.test('preserves confirmation and rejection as conversational signals', async () => {
+    const confirmationProvider =
+      new DeterministicUnderstandingProvider({
+        policy: {
+          recognize() {
+            return {
+              type: 'conditional_confirmation',
+              destructive: false,
+            };
+          },
+        },
+      });
+
+    const confirmation =
+      await confirmationProvider.understand({
+        text: 'تمام بس...',
+      });
+
+    assert.equal(confirmation.primaryIntent, 'unknown');
+    assert.equal(confirmation.conversationAct, 'confirmation');
+    assert.equal(confirmation.signals.confirmation, true);
+    assert.equal(confirmation.signals.conditional, true);
+
+    const rejectionProvider =
+      new DeterministicUnderstandingProvider({
+        policy: {
+          recognize() {
+            return {
+              type: 'booking_rejection',
+            };
+          },
+        },
+      });
+
+    const rejection =
+      await rejectionProvider.understand({
+        text: 'لا ما أبي أحجز',
+      });
+
+    assert.equal(rejection.primaryIntent, 'unknown');
+    assert.equal(rejection.conversationAct, 'rejection');
+    assert.equal(rejection.signals.rejection, true);
+  });
+
+  await t.test('promotes the first compound intent and preserves the rest', async () => {
+    const provider = new DeterministicUnderstandingProvider({
+      policy: {
+        recognize() {
+          return {
+            type: 'compound_appointment_request',
+            intents: [
+              'change_branch_request',
+              'booking',
+            ],
+            conditional: true,
+            destructive: false,
+          };
+        },
+      },
+    });
+
+    const result = await provider.understand({
+      text: 'test',
+    });
+
+    assert.equal(
+      result.primaryIntent,
+      'appointment_change_branch'
+    );
+
+    assert.deepEqual(
+      result.secondaryIntents,
+      ['booking']
+    );
+
+    assert.equal(result.conversationAct, 'request');
+    assert.equal(result.signals.conditional, true);
+  });
+
+  await t.test('recognizes bulk cancellation semantically without execution authority', async () => {
+    const provider = new DeterministicUnderstandingProvider({
+      policy: {
+        recognize() {
+          return {
+            type: 'bulk_cancel_request',
+            destructive: false,
+          };
+        },
+      },
+    });
+
+    const result = await provider.understand({
+      text: 'test',
+    });
+
+    assert.equal(
+      result.primaryIntent,
+      'appointment_cancellation'
+    );
+
+    assert.equal(result.conversationAct, 'request');
+  });
+
   await t.test('returns safe unknown for unsupported legacy intent', async () => {
     const provider = new DeterministicUnderstandingProvider({
       policy: {
@@ -225,4 +354,137 @@ test('DeterministicUnderstandingProvider', async (t) => {
     assert.equal(result.primaryIntent, 'unknown');
     assert.equal(result.confidence, 0);
   });
+
+  await t.test('merges hesitation without changing the legacy primary intent', async () => {
+    const provider = new DeterministicUnderstandingProvider({
+      policy: {
+        recognize() {
+          return {
+            type: 'booking',
+            serviceText: 'ليزر',
+          };
+        },
+      },
+    });
+
+    const result = await provider.understand({
+      text: 'أبغى أحجز ليزر بس والله مترددة شوي',
+    });
+
+    assert.equal(result.primaryIntent, 'booking');
+    assert.equal(result.signals.hesitation, true);
+    assert.equal(result.sentiment, 'worried');
+  });
+
+  await t.test('merges complaint signals without replacing the legacy intent', async () => {
+    const provider = new DeterministicUnderstandingProvider({
+      policy: {
+        recognize() {
+          return {
+            type: 'appointment_query_request',
+          };
+        },
+      },
+    });
+
+    const result = await provider.understand({
+      text: 'وين موعدي؟ وبصراحة انتظرت كثير وما أحد رد',
+    });
+
+    assert.equal(
+      result.primaryIntent,
+      'appointment_query'
+    );
+
+    assert.equal(
+      result.signals.complaint,
+      true
+    );
+
+    assert.equal(
+      result.sentiment,
+      'frustrated'
+    );
+  });
+
+  await t.test('merges medical red flags while keeping operational intent untouched', async () => {
+    const provider = new DeterministicUnderstandingProvider({
+      policy: {
+        recognize() {
+          return {
+            type: 'booking',
+            serviceText: 'ليزر',
+          };
+        },
+      },
+    });
+
+    const result = await provider.understand({
+      text: 'أبغى أحجز بس عندي ضيق تنفس',
+    });
+
+    assert.equal(
+      result.primaryIntent,
+      'booking'
+    );
+
+    assert.equal(
+      result.signals.medicalRisk,
+      true
+    );
+  });
+
+  await t.test('merges explicit human handover request', async () => {
+    const provider = new DeterministicUnderstandingProvider({
+      policy: {
+        recognize() {
+          return {
+            type: 'unknown',
+          };
+        },
+      },
+    });
+
+    const result = await provider.understand({
+      text: 'أبغى أكلم موظفة',
+    });
+
+    assert.equal(
+      result.primaryIntent,
+      'unknown'
+    );
+
+    assert.equal(
+      result.signals.humanHandover,
+      true
+    );
+  });
+
+  await t.test('does not let detector override state-dependent confirmation signals', async () => {
+    const provider = new DeterministicUnderstandingProvider({
+      policy: {
+        recognize() {
+          return {
+            type: 'conditional_confirmation',
+            conditional: true,
+          };
+        },
+      },
+    });
+
+    const result = await provider.understand({
+      text: 'تمام بس خليها مساء',
+    });
+
+    assert.equal(
+      result.signals.confirmation,
+      true
+    );
+
+    assert.equal(
+      result.signals.conditional,
+      true
+    );
+  });
 });
+  
