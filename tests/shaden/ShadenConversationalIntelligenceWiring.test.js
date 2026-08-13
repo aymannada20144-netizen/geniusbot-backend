@@ -181,6 +181,64 @@ describe('Shaden conversational intelligence shadow wiring', () => {
 
     assert.equal(mutationCalls, 0);
   });
+  test('default runtime uses deterministic understanding in shadow mode', async () => {
+  const observed = [];
+
+  class CapturingOrchestrator {
+    constructor({ understandingProvider } = {}) {
+      this.understandingProvider = understandingProvider;
+    }
+
+    async analyze(input) {
+      const understanding = await this.understandingProvider.understand({
+        text: input.message?.text ?? input.message,
+      });
+
+      observed.push(understanding);
+
+      return {
+        mode: 'shadow',
+        understanding,
+        affectsRuntime: false,
+        affectsReply: false,
+        affectsState: false,
+        executable: false,
+      };
+    }
+  }
+
+  const originalModule =
+    require('../../src/services/shaden/ShadenConversationalIntelligenceOrchestrator');
+
+  assert.equal(typeof originalModule, 'function');
+
+  const provider =
+    new (require('../../src/services/shaden/DeterministicUnderstandingProvider'))({
+      policy: {
+        recognize() {
+          return {
+            type: 'greeting',
+            kind: 'casual',
+          };
+        },
+      },
+    });
+
+  const orchestrator = new CapturingOrchestrator({
+    understandingProvider: provider,
+  });
+
+  const harness = createHarness({
+    conversationalIntelligenceOrchestrator: orchestrator,
+  });
+
+  await harness.send('مرحبا');
+
+  assert.equal(observed.length, 1);
+  assert.equal(observed[0].primaryIntent, 'greeting');
+  assert.equal(observed[0].conversationAct, 'greeting');
+  assert.equal(observed[0].confidence, 1);
+});
 });
 
 function createHarness({

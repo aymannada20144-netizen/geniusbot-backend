@@ -1,5 +1,7 @@
 'use strict';
-
+const DeterministicUnderstandingProvider = require(
+  './DeterministicUnderstandingProvider'
+);
 const ShadenDataProvider = require('./ShadenDataProvider');
 const ShadenPolicy = require('./ShadenPolicy');
 const ShadenEngine = require('./ShadenEngine');
@@ -51,7 +53,12 @@ function createShadenEngine({
   });
   const ciOrchestrator =
   conversationalIntelligenceOrchestrator ||
-  new ShadenConversationalIntelligenceOrchestrator();
+  new ShadenConversationalIntelligenceOrchestrator({
+    understandingProvider:
+      new DeterministicUnderstandingProvider({
+        policy,
+      }),
+  });
   return {
     async processMessage(rawMessage) {
       if (!rawMessage?.text) return null;
