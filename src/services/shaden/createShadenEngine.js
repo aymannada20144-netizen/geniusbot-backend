@@ -12,7 +12,9 @@ const PatientService = require('../../modules/patients/PatientService');
 const {
   normalizeSaudiMobile,
 } = require('../../core/validators/saudiMobile');
-
+const ShadenConversationalIntelligenceOrchestrator = require(
+  './ShadenConversationalIntelligenceOrchestrator'
+);
 function createShadenEngine({
   clinicRepository,
   conversationRepository,
@@ -26,6 +28,7 @@ function createShadenEngine({
   bookingEngine,
   appointmentService = null,
   priceService = null,
+  conversationalIntelligenceOrchestrator = null,
   sendMessage,
 } = {}) {
   const clinics = clinicService || new ClinicService(clinicRepository);
@@ -46,7 +49,9 @@ function createShadenEngine({
   const contextProvider = new ShadenConversationContextProvider({
     patientService: patients,
   });
-
+  const ciOrchestrator =
+  conversationalIntelligenceOrchestrator ||
+  new ShadenConversationalIntelligenceOrchestrator();
   return {
     async processMessage(rawMessage) {
       if (!rawMessage?.text) return null;
@@ -101,6 +106,24 @@ function createShadenEngine({
       });
       console.info('Shaden patient identity trace.', identityTrace);
       const clinicData = await dataProvider.load(clinic);
+      try {
+  await ciOrchestrator.analyze({
+    message,
+    currentState: preservedData.shaden,
+    clinicContext: {
+      clinicId: clinic.id,
+      clinicName: clinic.display_name_ar || clinic.name || null,
+    },
+    patientContext: {
+      patientId: conversation.patientId || null,
+      knownPatient: identityContext?.patient ? true : false,
+    },
+  });
+} catch (error) {
+  console.warn('Shaden CI shadow analysis failed safely.', {
+    message: error?.message || 'unknown error',
+  });
+}
       const {
         reply,
         nextState,
