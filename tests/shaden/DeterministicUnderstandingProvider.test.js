@@ -486,5 +486,43 @@ test('DeterministicUnderstandingProvider', async (t) => {
       true
     );
   });
+  await t.test('preserves extended safety signals from the detector', async () => {
+  const provider = new DeterministicUnderstandingProvider({
+    policy: {
+      recognize() {
+        return {
+          type: 'unknown',
+        };
+      },
+    },
+  });
+
+  const legal = await provider.understand({
+    text: 'بشتكي عليكم',
+  });
+
+  assert.equal(
+    legal.signals.legalEscalation,
+    true
+  );
+
+  const botFrustration = await provider.understand({
+    text: 'ما تفهمين',
+  });
+
+  assert.equal(
+    botFrustration.signals.botFrustration,
+    true
+  );
+
+  const threat = await provider.understand({
+    text: 'هذا تهديد',
+  });
+
+  assert.equal(
+    threat.signals.abuseOrThreat,
+    true
+  );
+});
 });
   

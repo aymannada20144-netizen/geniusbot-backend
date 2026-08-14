@@ -2,6 +2,9 @@
 const DeterministicUnderstandingProvider = require(
   './DeterministicUnderstandingProvider'
 );
+const DeterministicDialogueDecisionProvider = require(
+  './DeterministicDialogueDecisionProvider'
+);
 const ShadenDataProvider = require('./ShadenDataProvider');
 const ShadenPolicy = require('./ShadenPolicy');
 const ShadenEngine = require('./ShadenEngine');
@@ -58,6 +61,9 @@ function createShadenEngine({
       new DeterministicUnderstandingProvider({
         policy,
       }),
+
+    decisionProvider:
+      new DeterministicDialogueDecisionProvider(),
   });
   return {
     async processMessage(rawMessage) {

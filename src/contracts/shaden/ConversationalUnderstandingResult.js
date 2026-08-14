@@ -89,6 +89,17 @@ function createConversationalUnderstandingResult(input = {}) {
       medicalQuestion: input.signals?.medicalQuestion === true,
       medicalRisk: input.signals?.medicalRisk === true,
       humanHandover: input.signals?.humanHandover === true,
+      legalEscalation: input.signals?.legalEscalation === true,
+      botFrustration: input.signals?.botFrustration === true,
+      abuseOrThreat: input.signals?.abuseOrThreat === true,
+      legalEscalation:
+  input.signals?.legalEscalation === true,
+
+botFrustration:
+  input.signals?.botFrustration === true,
+
+abuseOrThreat:
+  input.signals?.abuseOrThreat === true,
     },
 
     confidence: normalizeConfidence(input.confidence),

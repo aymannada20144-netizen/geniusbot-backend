@@ -31,6 +31,9 @@ test('ConversationalUnderstandingResult', async (t) => {
       medicalQuestion: false,
       medicalRisk: false,
       humanHandover: false,
+      legalEscalation: false,
+      botFrustration: false,
+      abuseOrThreat: false,
     });
   });
 
@@ -126,4 +129,18 @@ test('ConversationalUnderstandingResult', async (t) => {
     assert.equal(Object.isFrozen(result.entities), true);
     assert.equal(Object.isFrozen(result.secondaryIntents), true);
   });
+  test('preserves extended conversational safety signals', () => {
+  const result = createConversationalUnderstandingResult({
+    signals: {
+      legalEscalation: true,
+      botFrustration: true,
+      abuseOrThreat: true,
+    },
+  });
+
+  assert.equal(result.signals.legalEscalation, true);
+  assert.equal(result.signals.botFrustration, true);
+  assert.equal(result.signals.abuseOrThreat, true);
+});
+
 });

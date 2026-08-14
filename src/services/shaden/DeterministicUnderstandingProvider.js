@@ -87,6 +87,17 @@ function mergeDetectedSignals(understanding, detected = {}) {
     humanHandover:
       legacySignals.humanHandover === true ||
       detected.humanHandover === true,
+      legalEscalation:
+  legacySignals.legalEscalation === true ||
+  detected.legalEscalation === true,
+
+botFrustration:
+  legacySignals.botFrustration === true ||
+  detected.botFrustration === true,
+
+abuseOrThreat:
+  legacySignals.abuseOrThreat === true ||
+  detected.abuseOrThreat === true,
   };
 
   return {
@@ -96,6 +107,7 @@ function mergeDetectedSignals(understanding, detected = {}) {
       detected.sentiment
     ),
     signals: mergedSignals,
+  
   };
 }
 function chooseSentiment(legacySentiment, detectedSentiment) {
@@ -470,6 +482,14 @@ function signalsFor(inquiry) {
     humanHandover:
       type === 'human_handover_request' ||
       type === 'human_handover',
+      legalEscalation:
+  inquiry.legalEscalation === true,
+
+botFrustration:
+  inquiry.botFrustration === true,
+
+abuseOrThreat:
+  inquiry.abuseOrThreat === true,
   };
 }
 
