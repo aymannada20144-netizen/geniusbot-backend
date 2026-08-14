@@ -192,6 +192,12 @@ function normalizeText(value) {
     .replace(/[\u0610-\u061a\u064b-\u065f\u0670\u06d6-\u06ed]/gu, '')
     .replace(/[\u0622\u0623\u0625]/gu, '\u0627')
     .replace(/\u0649/gu, '\u064a')
+    .replace(/(?:^|\s)(?:اتحضر|استعد)(?=\s|$)/gu, ' تحضير')
+    .replace(/(?:^|\s)(?:وش\s+)?اسوي\s+قبل(?=\s|$)/gu, ' تحضير')
+    .replace(
+      /(?:^|\s)ل(?:ال)?(ليزر|فيلر|بوتوكس|بوتكس|تقشير|تنظيف)(?=\s|$)/gu,
+      ' ال$1'
+    )
     .replace(/[\p{P}\p{S}]+/gu, ' ')
     .replace(/\s+/gu, ' ')
     .trim();

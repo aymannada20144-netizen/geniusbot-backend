@@ -56,4 +56,23 @@ describe('Shaden natural booking entry', () => {
     assert.deepEqual(policy.recognize('شكراً لك'), { type: 'courtesy', kind: 'thanks' });
     assert.equal(handle('طلب غير مفهوم تماماً').reply, policy.unknown());
   });
+
+  test('routes deterministic natural name compliments through courtesy praise', () => {
+    const policy = new ShadenPolicy();
+    for (const text of [
+      'اسمك جميل يا شادن',
+      'اسمك حلو',
+      'شادن اسمك جميل',
+      'ما شاء الله اسم جميل',
+    ]) {
+      assert.deepEqual(
+        policy.recognize(text),
+        { type: 'courtesy', kind: 'praise' },
+        text
+      );
+      assert.equal(handle(text).reply, policy.courtesy('praise', 'مها'), text);
+    }
+
+    assert.deepEqual(policy.recognize('اليوم جميل'), { type: 'unknown' });
+  });
 });

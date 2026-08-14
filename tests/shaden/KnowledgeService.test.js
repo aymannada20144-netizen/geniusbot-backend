@@ -242,6 +242,24 @@ describe('KnowledgeService normalization and qualification', () => {
     assert.equal(result.status, 'not_found');
   });
 
+  test('normalizes natural preparation morphology without weakening qualification', async () => {
+    const row = candidate({
+      title: 'تحضير الليزر',
+      keywords: ['تحضير', 'حلاقة', 'شمع', 'نتف'],
+    });
+
+    for (const query of [
+      'كيف أتحضر لجلسة الليزر',
+      'كيف اتحضر لليزر',
+      'وش أسوي قبل جلسة الليزر',
+    ]) {
+      const result = await retrieve([row], { query });
+      assert.equal(result.status, 'found', query);
+    }
+
+    assert.equal((await retrieve([row], { query: 'تحضير' })).status, 'not_found');
+  });
+
   test('a weak generic query cannot choose between competing medical rows', async () => {
     const result = await retrieve([
       candidate({

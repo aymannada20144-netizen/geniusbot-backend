@@ -8,6 +8,7 @@ const createShadenEngine = require(
 );
 const ShadenEngine = require('../../src/services/shaden/ShadenEngine');
 const ShadenPolicy = require('../../src/services/shaden/ShadenPolicy');
+const KnowledgeService = require('../../src/services/KnowledgeService');
 
 const IDS = {
   clinic: '11111111-1111-4111-8111-111111111111',
@@ -380,6 +381,52 @@ describe('Shaden conversational intelligence shadow wiring', () => {
 });
 
 describe('Shaden authoritative medical knowledge wiring', () => {
+  test('routes the exact live preparation question through deterministic retrieval', async () => {
+    const fact = 'احلقي قبل 24 ساعة، تجنبي النتف والشمع والشمس أسبوعين 🌸';
+    const knowledgeService = new KnowledgeService({
+      async findEligibleCandidates() {
+        return [{
+          id: '00000000-0000-0000-0000-000000003011',
+          service_id: '44444444-4444-4444-8444-444444444444',
+          title: 'تحضير الليزر',
+          content: fact,
+          category: 'medical_faq',
+          keywords: ['تحضير', 'حلاقة', 'شمع', 'نتف'],
+          priority: 6,
+        }];
+      },
+    });
+    const harness = createHarness({
+      services: KNOWLEDGE_SERVICES,
+      knowledgeService,
+    });
+
+    const result = await harness.send('كيف أتحضر لجلسة الليزر');
+    assert.equal(result.replyText, fact);
+  });
+
+  test('routes the exact live compliment through courtesy without side effects', async () => {
+    let retrievals = 0;
+    let mutations = 0;
+    const harness = createHarness({
+      services: KNOWLEDGE_SERVICES,
+      knowledgeService: {
+        async retrieve() { retrievals += 1; return knowledgeResult('found'); },
+      },
+      appointmentService: {
+        async cancelAppointment() { mutations += 1; },
+        async rescheduleAppointment() { mutations += 1; },
+        async changeAppointmentService() { mutations += 1; },
+        async changeAppointmentBranch() { mutations += 1; },
+      },
+    });
+
+    const result = await harness.send('اسمك جميل يا شادن');
+    assert.equal(result.replyText, new ShadenPolicy().courtesy('praise', null));
+    assert.equal(retrievals, 0);
+    assert.equal(mutations, 0);
+  });
+
   test('uses an exact explicit service and preserves the stored fact verbatim', async () => {
     const calls = [];
     const fact = 'النص الطبي المعتمد كما هو. 🌸';

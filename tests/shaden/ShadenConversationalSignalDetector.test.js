@@ -243,6 +243,21 @@ test('ShadenConversationalSignalDetector', async (t) => {
     );
   });
 
+  await t.test('detects natural preparation questions tied to known service language', () => {
+    for (const text of [
+      'كيف أتحضر لجلسة الليزر',
+      'كيف اتحضر لليزر',
+      'وش أسوي قبل جلسة الليزر',
+    ]) {
+      const result = detector.detect(text);
+      assert.equal(result.medicalQuestion, true, text);
+      assert.equal(result.medicalRisk, false, text);
+    }
+
+    assert.equal(detector.detect('تحضير').medicalQuestion, false);
+    assert.equal(detector.detect('كيف أتحضر').medicalQuestion, false);
+  });
+
   await t.test('detects medical red flags separately from ordinary medical questions', () => {
     const cases = [
       'عندي حروق ليزر',
