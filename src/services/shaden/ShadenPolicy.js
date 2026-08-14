@@ -559,6 +559,9 @@ class ShadenPolicy {
   branchAddress(branch) { return !branch ? 'الفرع المذكور غير مسجل لدينا. 🌸' : `📍 عنوان ${this.branchLabel(branch)}:\n${branch.address ? this.display(branch.address) : 'غير مسجل حاليًا.'}`; }
   holidayDay(data) { if (!data.workingHours.length) return 'مواعيد العمل غير مسجلة لدينا. 🌸'; const c = new Set(), o = new Set(); for (const h of data.workingHours) { if (h.isClosed) c.add(h.dayOfWeek); else o.add(h.dayOfWeek); } const f = [...c].filter(d => !o.has(d)); return f.length > 0 ? `يوم الإجازة لدينا هو: ${f.map(d => displayDay(d)).join('، ')} 🌸` : `لا يوجد لدينا يوم إجازة أسبوعي لجميع الفروع، تختلف الإجازات حسب الفرع. يمكنك سؤالي عن مواعيد يوم محدد. 🌸`; }
   empathy() { const r = ["أقدر شعورك 🌸 ونسعى دائمًا للتوسع لنكون أقرب إليك. هل أقدر أساعدك بأي استفسار آخر؟", "شكرًا لتعاطفك 🌸 رأيك يهمنا ونسعى لتقديم الأفضل دائمًا. كيف أقدر أساعدك الآن؟", "حياك الله 🌸 نتمنى أن نراك في أحد فروعنا قريبًا. هل من شيء آخر أقدر أساعدك فيه؟"]; return r[Math.floor(Math.random() * r.length)]; }
+  hesitation() {
+  return 'أكيد، خذي راحتك 🌸 إذا تحبين أوضح لك الخيارات أو نكمل الحجز خطوة بخطوة.';
+  }
   unknown() { return messageFormatter.formatUnknown(); }
   display(value) { let r = String(value || '').replace(/مكه/g, 'مكة'); for (const [e, a] of Object.entries(DISPLAY)) r = r.replace(new RegExp(`\\b${e}\\b`, 'gi'), a); return r; }
   serviceAliases() { return SERVICE_ALIASES; }

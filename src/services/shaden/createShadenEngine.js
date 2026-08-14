@@ -119,8 +119,9 @@ function createShadenEngine({
       });
       console.info('Shaden patient identity trace.', identityTrace);
       const clinicData = await dataProvider.load(clinic);
+      let ciResult = null;
       try {
-  await ciOrchestrator.analyze({
+  ciResult = await ciOrchestrator.analyze({
     message,
     currentState: preservedData.shaden,
     clinicContext: {
@@ -137,7 +138,7 @@ function createShadenEngine({
     message: error?.message || 'unknown error',
   });
 }
-      const {
+      let {
         reply,
         nextState,
         interaction,
@@ -155,6 +156,21 @@ function createShadenEngine({
           patientId: conversation.patientId || null,
         },
       });
+
+      const hasActiveBooking =
+        preservedData.shaden?.booking &&
+        typeof preservedData.shaden.booking === 'object';
+      const isBookingIntent =
+        ciResult?.understanding?.primaryIntent === 'booking';
+
+      if (
+        ciResult?.decision?.action === 'REASSURE' &&
+        (hasActiveBooking || isBookingIntent) &&
+        typeof reply === 'string' &&
+        reply.trim() !== ''
+      ) {
+        reply = `${policy.hesitation()}\n\n${reply}`;
+      }
 
       // 1. شبكة الأمان: التأكد من أن الرد ليس فارغاً
       if (!reply || typeof reply !== 'string' || reply.trim() === '') {

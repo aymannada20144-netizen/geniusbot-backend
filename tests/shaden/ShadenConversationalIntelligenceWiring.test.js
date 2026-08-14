@@ -6,6 +6,8 @@ const { describe, test } = require('node:test');
 const createShadenEngine = require(
   '../../src/services/shaden/createShadenEngine'
 );
+const ShadenEngine = require('../../src/services/shaden/ShadenEngine');
+const ShadenPolicy = require('../../src/services/shaden/ShadenPolicy');
 
 const IDS = {
   clinic: '11111111-1111-4111-8111-111111111111',
@@ -135,6 +137,129 @@ describe('Shaden conversational intelligence shadow wiring', () => {
     );
   });
 
+  test('REASSURE prepends hesitation only for a booking intent', async () => {
+    let mutationCalls = 0;
+    const baselineHarness = createHarness({
+      conversationalIntelligenceOrchestrator: {
+        async analyze() {
+          return { decision: { action: 'CONTINUE' } };
+        },
+      },
+    });
+    const influencedHarness = createHarness({
+      appointmentService: {
+        async cancelAppointment() { mutationCalls += 1; },
+        async rescheduleAppointment() { mutationCalls += 1; },
+      },
+      conversationalIntelligenceOrchestrator: {
+        async analyze() {
+          return {
+            understanding: { primaryIntent: 'booking' },
+            decision: { action: 'REASSURE' },
+          };
+        },
+      },
+    });
+
+    const baseline = await baselineHarness.send('ابغى حجز بس مترددة شوي');
+    const influenced = await influencedHarness.send('ابغى حجز بس مترددة شوي');
+    const reassurance = new ShadenPolicy().hesitation();
+
+    assert.equal(influenced.replyText, `${reassurance}\n\n${baseline.replyText}`);
+    assert.deepEqual(influenced.state, baseline.state);
+    assert.equal(mutationCalls, 0);
+    assert.deepEqual(
+      influencedHarness.lastDelivery()?.interaction,
+      baselineHarness.lastDelivery()?.interaction
+    );
+  });
+
+  test('actions other than REASSURE cannot affect the reply', async () => {
+    const baseline = await createHarness().send('مرحبا');
+    for (const action of ['APOLOGIZE', 'ESCALATE', 'HANDLE_OBJECTION', 'START_BOOKING']) {
+      const harness = createHarness({
+        conversationalIntelligenceOrchestrator: {
+          async analyze() {
+            return {
+              understanding: { primaryIntent: 'booking' },
+              decision: { action },
+            };
+          },
+        },
+      });
+      assert.equal((await harness.send('مرحبا')).replyText, baseline.replyText);
+    }
+  });
+
+  test('REASSURE without booking context cannot affect the reply', async () => {
+    const baseline = await createHarness().send('مرحبا');
+    const harness = createHarness({
+      conversationalIntelligenceOrchestrator: {
+        async analyze() {
+          return {
+            understanding: { primaryIntent: 'greeting' },
+            decision: { action: 'REASSURE' },
+          };
+        },
+      },
+    });
+    assert.equal((await harness.send('مرحبا')).replyText, baseline.replyText);
+  });
+
+  test('an active preserved booking permits only the reassurance overlay', async () => {
+    let call = 0;
+    const orchestrator = {
+      async analyze() {
+        call += 1;
+        return call === 1
+          ? { understanding: { primaryIntent: 'booking' }, decision: { action: 'START_BOOKING' } }
+          : { understanding: { primaryIntent: 'unknown' }, decision: { action: 'REASSURE' } };
+      },
+    };
+    const baselineHarness = createHarness();
+    const influencedHarness = createHarness({ conversationalIntelligenceOrchestrator: orchestrator });
+    await baselineHarness.send('حجز');
+    await influencedHarness.send('حجز');
+    const baseline = await baselineHarness.send('نورة');
+    const influenced = await influencedHarness.send('نورة');
+
+    assert.equal(
+      influenced.replyText,
+      `${new ShadenPolicy().hesitation()}\n\n${baseline.replyText}`
+    );
+    assert.deepEqual(influenced.state, baseline.state);
+    assert.deepEqual(
+      influencedHarness.lastDelivery()?.interaction,
+      baselineHarness.lastDelivery()?.interaction
+    );
+  });
+
+  test('REASSURE cannot synthesize a reply when the engine reply is empty', async () => {
+    const originalHandle = ShadenEngine.prototype.handle;
+    ShadenEngine.prototype.handle = async function handleEmptyReply() {
+      return { reply: null, nextState: { safe: true }, interaction: { dangerous: true } };
+    };
+    try {
+      const harness = createHarness({
+        conversationalIntelligenceOrchestrator: {
+          async analyze() {
+            return {
+              understanding: { primaryIntent: 'booking' },
+              decision: { action: 'REASSURE' },
+            };
+          },
+        },
+      });
+      const result = await harness.send('حجز');
+      assert.equal(result.replyText, null);
+      assert.equal(result.skipped, true);
+      assert.equal(harness.lastDelivery(), null);
+      assert.deepEqual(result.state.data.shaden, { safe: true });
+    } finally {
+      ShadenEngine.prototype.handle = originalHandle;
+    }
+  });
+
   test('shadow analysis cannot trigger appointment mutations', async () => {
     let mutationCalls = 0;
 
@@ -247,6 +372,7 @@ function createHarness({
 } = {}) {
   let state = null;
   let messageNumber = 0;
+  const deliveries = [];
 
   const runtime = createShadenEngine({
     clinicService: {
@@ -308,7 +434,8 @@ function createHarness({
 
     conversationalIntelligenceOrchestrator,
 
-    async sendMessage() {
+    async sendMessage(payload) {
+      deliveries.push(payload);
       return {
         messageId: 'out-1',
       };
@@ -316,6 +443,9 @@ function createHarness({
   });
 
   return {
+    lastDelivery() {
+      return deliveries.at(-1) || null;
+    },
     async send(text) {
       return runtime.processMessage({
         channel: 'whatsapp',
