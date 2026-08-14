@@ -292,7 +292,7 @@ SELECT geniusbot.create_trigger_if_table_exists(
 
 SELECT geniusbot.create_trigger_if_table_exists(
     'knowledge_base',
-    'trg_knowledge_base_set_updated_at',
+    'set_knowledge_base_updated_at',
     'BEFORE',
     'UPDATE',
     'set_updated_at'
@@ -463,7 +463,7 @@ DECLARE
         'trg_transactions_set_updated_at',
         'trg_waitlist_set_updated_at',
         'trg_service_pre_questions_set_updated_at',
-        'trg_knowledge_base_set_updated_at',
+        'set_knowledge_base_updated_at',
         'trg_message_templates_set_updated_at',
         'trg_ai_prompts_set_updated_at',
         'trg_clinic_holidays_validate_integrity',

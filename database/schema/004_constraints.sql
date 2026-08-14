@@ -1402,19 +1402,19 @@ SELECT geniusbot.add_constraint_if_missing(
     'FOREIGN KEY (service_id)
      REFERENCES geniusbot.services(id)
      ON UPDATE RESTRICT
-     ON DELETE CASCADE'
+     ON DELETE SET NULL'
 );
 
 SELECT geniusbot.add_constraint_if_missing(
     'knowledge_base',
-    'chk_knowledge_base_question_not_blank',
-    'CHECK (btrim(question) <> '''')'
+    'chk_knowledge_base_title_not_blank',
+    'CHECK (btrim(title) <> '''')'
 );
 
 SELECT geniusbot.add_constraint_if_missing(
     'knowledge_base',
-    'chk_knowledge_base_answer_not_blank',
-    'CHECK (btrim(answer) <> '''')'
+    'chk_knowledge_base_content_not_blank',
+    'CHECK (btrim(content) <> '''')'
 );
 
 SELECT geniusbot.add_constraint_if_missing(

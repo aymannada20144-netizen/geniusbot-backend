@@ -256,6 +256,7 @@ CREATE INDEX IF NOT EXISTS idx_knowledge_base_clinic_active
 
 CREATE INDEX IF NOT EXISTS idx_knowledge_base_service_active
     ON geniusbot.knowledge_base (
+        clinic_id,
         service_id,
         is_active,
         priority DESC
