@@ -130,20 +130,21 @@ describe('KnowledgeService normalization and qualification', () => {
     assert.equal(result.references[0].id, 'a');
   });
 
-  test('qualifies exact request/stored keyword matches', async () => {
+  test('qualifies multiple exact request/stored medical keyword matches', async () => {
     const result = await retrieve([
-      candidate({ title: 'معلومات', keywords: ['بوتكس'] }),
+      candidate({ title: 'معلومات', keywords: ['بوتكس', 'حقن'] }),
     ], {
       query: 'سؤال',
-      keywords: ['بوتكس'],
+      keywords: ['بوتكس', 'حقن'],
     });
     assert.equal(result.status, 'found');
   });
 
-  test('qualifies a stored keyword as a complete query phrase', async () => {
+  test('qualifies a non-medical stored keyword as a complete query phrase', async () => {
     const result = await retrieve([
-      candidate({ keywords: ['إزالة الشعر'] }),
+      candidate({ category: 'service_faq', keywords: ['إزالة الشعر'] }),
     ], {
+      type: 'service_faq',
       query: 'هل إزالة الشعر مؤلمة؟',
     });
     assert.equal(result.status, 'found');
@@ -180,6 +181,114 @@ describe('KnowledgeService normalization and qualification', () => {
       query: 'مدة الليزر',
     });
     assert.equal(result.status, 'not_found');
+  });
+
+  test('medical exact-title matching remains authoritative', async () => {
+    const content = 'تعليمات التحضير المعتمدة كما هي.';
+    const result = await retrieve([
+      candidate({
+        title: 'تحضير الليزر',
+        keywords: ['تحضير', 'حلاقة'],
+        content,
+      }),
+    ], { query: 'تحضير الليزر' });
+
+    assert.equal(result.status, 'found');
+    assert.deepEqual(result.facts, [content]);
+  });
+
+  test('one multi-word generic medical keyword does not qualify', async () => {
+    const result = await retrieve([
+      candidate({
+        title: 'تعليمات معتمدة',
+        keywords: ['بعد الجلسة'],
+      }),
+    ], { query: 'ماذا أفعل بعد الجلسة' });
+
+    assert.equal(result.status, 'not_found');
+  });
+
+  test('one apparently-specific multi-word medical keyword does not qualify', async () => {
+    const result = await retrieve([
+      candidate({
+        title: 'تعليمات معتمدة',
+        keywords: ['إزالة الشعر'],
+      }),
+    ], { query: 'هل إزالة الشعر مؤلمة' });
+
+    assert.equal(result.status, 'not_found');
+  });
+
+  test('a single specific-looking medical word is not enough on its own', async () => {
+    const result = await retrieve([
+      candidate({
+        title: 'عناية ما بعد الليزر',
+        keywords: ['بعد', 'احمرار', 'حروق'],
+      }),
+    ], { query: 'حروق' });
+
+    assert.equal(result.status, 'not_found');
+  });
+
+  test('the demo generic preparation keyword cannot qualify medical content alone', async () => {
+    const result = await retrieve([
+      candidate({
+        id: 'laser-preparation',
+        title: 'تحضير الليزر',
+        keywords: ['تحضير', 'حلاقة', 'شمع', 'نتف'],
+      }),
+    ], { query: 'تحضير' });
+
+    assert.equal(result.status, 'not_found');
+  });
+
+  test('a weak generic query cannot choose between competing medical rows', async () => {
+    const result = await retrieve([
+      candidate({
+        id: 'laser-preparation',
+        title: 'تحضير الليزر',
+        keywords: ['تحضير', 'حلاقة'],
+        priority: 100,
+      }),
+      candidate({
+        id: 'filler-preparation',
+        title: 'تحضير الفيلر',
+        keywords: ['تحضير', 'اسبرين'],
+        priority: 1,
+      }),
+    ], { query: 'تحضير' });
+
+    assert.equal(result.status, 'not_found');
+  });
+
+  test('two medical keyword matches provide deterministic qualification', async () => {
+    const result = await retrieve([
+      candidate({
+        id: 'comparison',
+        title: 'الفرق بوتكس فيلر',
+        keywords: ['فرق', 'ايهم', 'انسب'],
+      }),
+    ], { query: 'ايهم انسب' });
+
+    assert.equal(result.status, 'found');
+    assert.equal(result.references[0].id, 'comparison');
+  });
+
+  test('non-medical categories retain single-keyword qualification', async () => {
+    for (const type of ['service_faq', 'clinic_policy']) {
+      const result = await retrieve([
+        candidate({
+          title: type === 'service_faq' ? 'مدة جلسة الليزر' : 'سياسة الإلغاء',
+          category: type,
+          keywords: [type === 'service_faq' ? 'كم' : 'رسوم'],
+        }),
+      ], {
+        type,
+        query: type === 'service_faq' ? 'كم' : 'هل توجد رسوم',
+      });
+
+      assert.equal(result.status, 'found');
+    }
   });
 });
 

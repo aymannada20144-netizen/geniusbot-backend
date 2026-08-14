@@ -143,20 +143,25 @@ function scoreCandidate(row, request) {
   const keywordMatches = storedKeywords.filter((keyword) =>
     request.keywords.includes(keyword) ||
     completePhrase(request.normalizedQuery, keyword)
-  ).length;
+  );
   const titleOverlap = overlapCount(request.queryTokens, titleTokens);
   const contentOverlap = overlapCount(request.queryTokens, contentTokens);
+  const qualifies = request.type === 'medical_faq'
+    ? exactTitle ||
+      keywordMatches.length >= 2 ||
+      titleOverlap >= 2
+    : exactTitle || keywordMatches.length > 0 || titleOverlap >= 2;
 
   return {
     row,
     exactTitle: exactTitle ? 1 : 0,
-    keywordMatches,
+    keywordMatches: keywordMatches.length,
     titleOverlap,
     serviceSpecific: request.serviceId !== null &&
       sameIdentifier(row.service_id, request.serviceId) ? 1 : 0,
     priority: Number.isFinite(Number(row.priority)) ? Number(row.priority) : 0,
     contentOverlap,
-    qualifies: exactTitle || keywordMatches > 0 || titleOverlap >= 2,
+    qualifies,
   };
 }
 
