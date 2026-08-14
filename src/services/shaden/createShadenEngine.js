@@ -171,6 +171,14 @@ function createShadenEngine({
       ) {
         reply = `${policy.hesitation()}\n\n${reply}`;
       }
+      if (
+        ciResult?.decision?.action === 'APOLOGIZE' &&
+        ciResult?.understanding?.signals?.complaint === true &&
+        typeof reply === 'string' &&
+        reply.trim() !== ''
+    ) {
+  reply = `${policy.complaintApology()}\n\n${reply}`;
+}
 
       // 1. شبكة الأمان: التأكد من أن الرد ليس فارغاً
       if (!reply || typeof reply !== 'string' || reply.trim() === '') {

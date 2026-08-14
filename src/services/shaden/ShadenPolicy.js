@@ -562,6 +562,9 @@ class ShadenPolicy {
   hesitation() {
   return 'أكيد، خذي راحتك 🌸 إذا تحبين أوضح لك الخيارات أو نكمل الحجز خطوة بخطوة.';
   }
+  complaintApology() {
+  return 'أعتذر لك عن التجربة 🌸 خليني أساعدك وأكمل معك من نفس النقطة.';
+}
   unknown() { return messageFormatter.formatUnknown(); }
   display(value) { let r = String(value || '').replace(/مكه/g, 'مكة'); for (const [e, a] of Object.entries(DISPLAY)) r = r.replace(new RegExp(`\\b${e}\\b`, 'gi'), a); return r; }
   serviceAliases() { return SERVICE_ALIASES; }

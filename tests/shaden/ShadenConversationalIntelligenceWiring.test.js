@@ -364,6 +364,161 @@ describe('Shaden conversational intelligence shadow wiring', () => {
   assert.equal(observed[0].conversationAct, 'greeting');
   assert.equal(observed[0].confidence, 1);
 });
+  test('complaint APOLOGIZE prepends apology without replacing the engine reply', async () => {
+    const baselineHarness = createHarness();
+    await baselineHarness.send('مرحبا');
+
+    const baselineReply = baselineHarness.lastDelivery()?.body;
+    assert.equal(typeof baselineReply, 'string');
+
+    const harness = createHarness({
+      conversationalIntelligenceOrchestrator: {
+        async analyze() {
+          return {
+            mode: 'shadow',
+            understanding: {
+              primaryIntent: 'greeting',
+              signals: {
+                complaint: true,
+              },
+            },
+            decision: {
+              action: 'APOLOGIZE',
+            },
+            executable: false,
+          };
+        },
+      },
+    });
+
+    await harness.send('مرحبا');
+
+    const finalReply = harness.lastDelivery()?.body;
+
+    assert.equal(
+      finalReply,
+      `أعتذر لك عن التجربة 🌸 خليني أساعدك وأكمل معك من نفس النقطة.\n\n${baselineReply}`
+    );
+  });
+
+  test('ESCALATE never activates complaint apology overlay', async () => {
+    const baselineHarness = createHarness();
+    await baselineHarness.send('مرحبا');
+
+    const baselineReply = baselineHarness.lastDelivery()?.body;
+
+    const harness = createHarness({
+      conversationalIntelligenceOrchestrator: {
+        async analyze() {
+          return {
+            mode: 'shadow',
+            understanding: {
+              primaryIntent: 'complaint',
+              signals: {
+                complaint: true,
+                legalEscalation: true,
+              },
+            },
+            decision: {
+              action: 'ESCALATE',
+            },
+            executable: false,
+          };
+        },
+      },
+    });
+
+    await harness.send('مرحبا');
+
+    assert.equal(
+      harness.lastDelivery()?.body,
+      baselineReply
+    );
+  });
+
+  test('APOLOGIZE without complaint signal cannot affect the reply', async () => {
+    const baselineHarness = createHarness();
+    await baselineHarness.send('مرحبا');
+
+    const baselineReply = baselineHarness.lastDelivery()?.body;
+
+    const harness = createHarness({
+      conversationalIntelligenceOrchestrator: {
+        async analyze() {
+          return {
+            mode: 'shadow',
+            understanding: {
+              primaryIntent: 'greeting',
+              signals: {
+                complaint: false,
+              },
+            },
+            decision: {
+              action: 'APOLOGIZE',
+            },
+            executable: false,
+          };
+        },
+      },
+    });
+
+    await harness.send('مرحبا');
+
+    assert.equal(
+      harness.lastDelivery()?.body,
+      baselineReply
+    );
+  });
+
+  test('complaint overlay cannot trigger appointment mutations', async () => {
+    let mutationCalls = 0;
+
+    const harness = createHarness({
+      appointmentService: {
+        async cancelAppointment() {
+          mutationCalls += 1;
+          throw new Error('must not execute');
+        },
+
+        async rescheduleAppointment() {
+          mutationCalls += 1;
+          throw new Error('must not execute');
+        },
+
+        async changeAppointmentService() {
+          mutationCalls += 1;
+          throw new Error('must not execute');
+        },
+
+        async changeAppointmentBranch() {
+          mutationCalls += 1;
+          throw new Error('must not execute');
+        },
+      },
+
+      conversationalIntelligenceOrchestrator: {
+        async analyze() {
+          return {
+            mode: 'shadow',
+            understanding: {
+              primaryIntent: 'greeting',
+              signals: {
+                complaint: true,
+              },
+            },
+            decision: {
+              action: 'APOLOGIZE',
+            },
+            executable: true,
+          };
+        },
+      },
+    });
+
+    await harness.send('مرحبا');
+
+    assert.equal(mutationCalls, 0);
+  });
 });
 
 function createHarness({
