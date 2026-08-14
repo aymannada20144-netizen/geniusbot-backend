@@ -207,4 +207,84 @@ test('ShadenConversationalIntelligenceOrchestrator', async (t) => {
     assert.equal(Object.isFrozen(result.understanding), true);
     assert.equal(Object.isFrozen(result.decision), true);
   });
+  await t.test('emits complete shadow telemetry without affecting runtime', async () => {
+  const logs = [];
+
+  const orchestrator =
+    new ShadenConversationalIntelligenceOrchestrator({
+      understandingProvider: {
+        async understand() {
+          return {
+            primaryIntent: 'booking',
+            confidence: 0.91,
+          };
+        },
+      },
+
+      decisionProvider: {
+        async decide() {
+          return {
+            action: 'START_BOOKING',
+            goal: 'book_appointment',
+            targetIntent: 'booking',
+          };
+        },
+      },
+
+      logger: {
+        debug(event, payload) {
+          logs.push({ event, payload });
+        },
+      },
+    });
+
+  const result = await orchestrator.analyze({
+    message: 'أبغى أحجز ليزر',
+  });
+
+  assert.equal(logs.length, 1);
+
+  assert.equal(
+    logs[0].event,
+    'Shaden CI shadow result'
+  );
+
+  assert.equal(
+    logs[0].payload.understanding.primaryIntent,
+    'booking'
+  );
+
+  assert.equal(
+    logs[0].payload.decision.action,
+    'START_BOOKING'
+  );
+
+  assert.equal(logs[0].payload.mode, 'shadow');
+  assert.equal(logs[0].payload.affectsRuntime, false);
+  assert.equal(logs[0].payload.affectsReply, false);
+  assert.equal(logs[0].payload.affectsState, false);
+  assert.equal(logs[0].payload.executable, false);
+
+  assert.equal(result.executable, false);
+});
+
+await t.test('logger failure never breaks shadow analysis', async () => {
+  const orchestrator =
+    new ShadenConversationalIntelligenceOrchestrator({
+      logger: {
+        debug() {
+          throw new Error('telemetry failure');
+        },
+      },
+    });
+
+  const result = await orchestrator.analyze({
+    message: 'مرحبا',
+  });
+
+  assert.equal(result.mode, 'shadow');
+  assert.equal(result.understanding.primaryIntent, 'unknown');
+  assert.equal(result.decision.action, 'NOOP');
+  assert.equal(result.executable, false);
+});
 });
