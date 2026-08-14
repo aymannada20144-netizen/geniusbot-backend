@@ -48,20 +48,24 @@
 -- ============================================================================
 
 \echo ''
-\echo '[Seed 1/4] Loading reference data...'
+\echo '[Seed 1/5] Loading reference data...'
 \ir ../seed/001_reference_data.sql
 
 \echo ''
-\echo '[Seed 2/4] Loading clinic structure...'
+\echo '[Seed 2/5] Loading clinic structure...'
 \ir ../seed/002_clinic_structure.sql
 
 \echo ''
-\echo '[Seed 3/4] Loading operational data...'
+\echo '[Seed 3/5] Loading operational data...'
 \ir ../seed/003_operational_data.sql
 
 \echo ''
-\echo '[Seed 4/4] Loading booking scenarios...'
+\echo '[Seed 4/5] Loading booking scenarios...'
 \ir ../seed/004_booking_scenarios.sql
+
+\echo ''
+\echo '[Seed 5/5] Loading demo knowledge...'
+\ir ../seed/005_demo_knowledge.sql
 
 -- ============================================================================
 -- Final Validation
