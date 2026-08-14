@@ -179,6 +179,20 @@ function createShadenEngine({
     ) {
   reply = `${policy.complaintApology()}\n\n${reply}`;
 }
+      const objectionSignals = ciResult?.understanding?.signals;
+      if (
+        ciResult?.decision?.action === 'HANDLE_OBJECTION' &&
+        objectionSignals?.objection === true &&
+        objectionSignals?.complaint !== true &&
+        objectionSignals?.medicalRisk !== true &&
+        objectionSignals?.legalEscalation !== true &&
+        objectionSignals?.abuseOrThreat !== true &&
+        objectionSignals?.humanHandover !== true &&
+        typeof reply === 'string' &&
+        reply.trim() !== ''
+      ) {
+        reply = `${policy.objectionResponse()}\n\n${reply}`;
+      }
 
       // 1. شبكة الأمان: التأكد من أن الرد ليس فارغاً
       if (!reply || typeof reply !== 'string' || reply.trim() === '') {

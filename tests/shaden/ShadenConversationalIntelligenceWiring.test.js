@@ -364,6 +364,118 @@ describe('Shaden conversational intelligence shadow wiring', () => {
   assert.equal(observed[0].conversationAct, 'greeting');
   assert.equal(observed[0].confidence, 1);
 });
+  test('guarded objection overlay prepends exactly once and preserves runtime output', async () => {
+    let mutationCalls = 0;
+    const baselineHarness = createHarness();
+    const harness = createHarness({
+      appointmentService: {
+        async cancelAppointment() { mutationCalls += 1; },
+        async rescheduleAppointment() { mutationCalls += 1; },
+        async changeAppointmentService() { mutationCalls += 1; },
+        async changeAppointmentBranch() { mutationCalls += 1; },
+      },
+      conversationalIntelligenceOrchestrator: {
+        async analyze() {
+          return {
+            understanding: { signals: { objection: true } },
+            decision: { action: 'HANDLE_OBJECTION' },
+            executable: true,
+          };
+        },
+      },
+    });
+
+    const baseline = await baselineHarness.send('مرحبا');
+    const result = await harness.send('مرحبا');
+    const overlay = new ShadenPolicy().objectionResponse();
+
+    assert.equal(result.replyText, `${overlay}\n\n${baseline.replyText}`);
+    assert.equal(result.replyText.split(overlay).length - 1, 1);
+    assert.deepEqual(result.state, baseline.state);
+    assert.deepEqual(
+      harness.lastDelivery()?.interaction,
+      baselineHarness.lastDelivery()?.interaction
+    );
+    assert.equal(mutationCalls, 0);
+  });
+
+  test('objection overlay requires matching action and signal', async () => {
+    const baselineHarness = createHarness();
+    const baseline = await baselineHarness.send('مرحبا');
+    const cases = [
+      { action: 'HANDLE_OBJECTION', signals: { objection: false } },
+      { action: 'ANSWER', signals: { objection: true } },
+    ];
+
+    for (const value of cases) {
+      const harness = createHarness({
+        conversationalIntelligenceOrchestrator: {
+          async analyze() {
+            return { understanding: { signals: value.signals }, decision: { action: value.action } };
+          },
+        },
+      });
+      assert.equal((await harness.send('مرحبا')).replyText, baseline.replyText);
+    }
+  });
+
+  test('higher-risk signals prevent objection overlay', async () => {
+    const baselineHarness = createHarness();
+    const baseline = await baselineHarness.send('مرحبا');
+    const cases = [
+      { signal: 'complaint', action: 'HANDLE_OBJECTION' },
+      { signal: 'medicalRisk', action: 'HANDLE_OBJECTION' },
+      { signal: 'legalEscalation', action: 'HANDLE_OBJECTION' },
+      { signal: null, action: 'ESCALATE' },
+      { signal: 'abuseOrThreat', action: 'HANDLE_OBJECTION' },
+      { signal: 'humanHandover', action: 'HANDLE_OBJECTION' },
+    ];
+
+    for (const { signal, action } of cases) {
+      const harness = createHarness({
+        conversationalIntelligenceOrchestrator: {
+          async analyze() {
+            return {
+              understanding: {
+                signals: {
+                  objection: true,
+                  ...(signal ? { [signal]: true } : {}),
+                },
+              },
+              decision: { action },
+            };
+          },
+        },
+      });
+      assert.equal((await harness.send('مرحبا')).replyText, baseline.replyText);
+    }
+  });
+
+  test('objection overlay cannot synthesize an empty engine reply', async () => {
+    const originalHandle = ShadenEngine.prototype.handle;
+    ShadenEngine.prototype.handle = async function handleEmptyReply() {
+      return { reply: '', nextState: { safe: true }, interaction: { unchanged: true } };
+    };
+    try {
+      const harness = createHarness({
+        conversationalIntelligenceOrchestrator: {
+          async analyze() {
+            return {
+              understanding: { signals: { objection: true } },
+              decision: { action: 'HANDLE_OBJECTION' },
+            };
+          },
+        },
+      });
+      const result = await harness.send('مرحبا');
+      assert.equal(result.replyText, null);
+      assert.equal(result.skipped, true);
+      assert.equal(harness.lastDelivery(), null);
+      assert.deepEqual(result.state.data.shaden, { safe: true });
+    } finally {
+      ShadenEngine.prototype.handle = originalHandle;
+    }
+  });
   test('complaint APOLOGIZE prepends apology without replacing the engine reply', async () => {
     const baselineHarness = createHarness();
     await baselineHarness.send('مرحبا');
