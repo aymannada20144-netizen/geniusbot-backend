@@ -69,6 +69,14 @@ class ShadenPolicy {
     };
   }
 
+  medicalKnowledgeNotFound() {
+    return 'ما عندي معلومة معتمدة عن هذا السؤال حاليًا 🌸 الأفضل تتأكدين من العيادة.';
+  }
+
+  medicalKnowledgeUnavailable() {
+    return 'تعذر علي الوصول للمعلومة المعتمدة حاليًا 🌸 ممكن تتأكدين من العيادة.';
+  }
+
   normalize(value) { return normalizeArabic(value); }
 
   appointmentManagementClarification() {

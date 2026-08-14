@@ -83,6 +83,9 @@ function named(item) {
 function serviceFact(item) {
   return {
     ...named(item),
+    aliases: Array.isArray(item.aliases)
+      ? item.aliases.filter((alias) => typeof alias === 'string' && alias.trim())
+      : [],
     specialtyId: item.specialty_id || null,
     isBookingEnabled: item.is_booking_enabled !== false,
     requiresDoctor: item.requires_doctor === true,

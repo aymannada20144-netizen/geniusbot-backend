@@ -4835,10 +4835,15 @@ function matchingServices(value, services, policy) {
 function matchingNamed(value, items, policy) {
   const needle = compactArabic(value, policy);
   if (!needle) return [];
-  return items.filter((item) => {
-    const name = compactArabic(item.name, policy);
-    return name === needle || name.includes(needle) || needle.includes(name);
-  });
+  return items.filter((item) => [
+    item.name,
+    ...(Array.isArray(item.aliases) ? item.aliases : []),
+  ].some((candidate) => {
+    const name = compactArabic(candidate, policy);
+    return name && (
+      name === needle || name.includes(needle) || needle.includes(name)
+    );
+  }));
 }
 
 function compactArabic(value, policy) {
@@ -5509,5 +5514,6 @@ ShadenEngine.clearCancellationState = clearCancellationState;
 ShadenEngine.replaceCancellationState = replaceCancellationState;
 ShadenEngine.recordCancellationVerificationFailure =
   recordCancellationVerificationFailure;
+ShadenEngine.matchingServices = matchingServices;
 
 module.exports = ShadenEngine;

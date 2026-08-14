@@ -20,6 +20,9 @@ const {
 const ShadenConversationalIntelligenceOrchestrator = require(
   './ShadenConversationalIntelligenceOrchestrator'
 );
+const {
+  createKnowledgeRequest,
+} = require('../../contracts/shaden/KnowledgeRequest');
 function createShadenEngine({
   clinicRepository,
   conversationRepository,
@@ -33,9 +36,16 @@ function createShadenEngine({
   bookingEngine,
   appointmentService = null,
   priceService = null,
+  knowledgeService = null,
   conversationalIntelligenceOrchestrator = null,
   sendMessage,
 } = {}) {
+  if (
+    knowledgeService !== null &&
+    typeof knowledgeService?.retrieve !== 'function'
+  ) {
+    throw new TypeError('createShadenEngine knowledgeService must provide retrieve().');
+  }
   const clinics = clinicService || new ClinicService(clinicRepository);
   const conversations = conversationService ||
     new ConversationService(conversationRepository);
@@ -194,6 +204,42 @@ function createShadenEngine({
         reply = `${policy.objectionResponse()}\n\n${reply}`;
       }
 
+      if (shouldRetrieveMedicalKnowledge(ciResult) && knowledgeService) {
+        const serviceId = resolveMedicalKnowledgeServiceId({
+          text: message.text,
+          state: preservedData.shaden,
+          services: clinicData.services,
+          policy,
+        });
+        let knowledgeResult;
+        try {
+          knowledgeResult = await knowledgeService.retrieve(
+            createKnowledgeRequest({
+              clinicId: clinic.id,
+              serviceId,
+              type: 'medical_faq',
+              query: message.text,
+              keywords: [],
+              required: true,
+            })
+          );
+        } catch (_error) {
+          knowledgeResult = null;
+        }
+        const activeFlow = hasOperationalFlow(nextState, interaction);
+        const fact = usableKnowledgeFact(knowledgeResult);
+        const knowledgeReply = fact || (
+          knowledgeResult?.status === 'not_found'
+            ? policy.medicalKnowledgeNotFound()
+            : policy.medicalKnowledgeUnavailable()
+        );
+        reply = composeKnowledgeReply({
+          knowledgeReply,
+          engineReply: reply,
+          activeFlow,
+        });
+      }
+
       // 1. شبكة الأمان: التأكد من أن الرد ليس فارغاً
       if (!reply || typeof reply !== 'string' || reply.trim() === '') {
         console.warn('⚠️ Shaden Engine returned an empty reply. Message:', message.text);
@@ -249,6 +295,78 @@ function createShadenEngine({
       };
     },
   };
+}
+
+function shouldRetrieveMedicalKnowledge(ciResult) {
+  const signals = ciResult?.understanding?.signals;
+  const decision = ciResult?.decision;
+  return decision?.action === 'RETRIEVE_KNOWLEDGE' &&
+    signals?.medicalQuestion === true &&
+    Array.isArray(decision.requiredKnowledge) &&
+    decision.requiredKnowledge.includes('medical_question') &&
+    decision.flags?.requiresKnowledge === true &&
+    signals.medicalRisk !== true &&
+    signals.legalEscalation !== true &&
+    signals.abuseOrThreat !== true &&
+    signals.humanHandover !== true &&
+    signals.complaint !== true;
+}
+
+function resolveMedicalKnowledgeServiceId({ text, state, services, policy }) {
+  const activeServices = Array.isArray(services) ? services : [];
+  const explicitMatches = ShadenEngine.matchingServices(
+    text,
+    activeServices,
+    policy
+  );
+  if (explicitMatches.length === 1) return String(explicitMatches[0].id);
+  if (
+    explicitMatches.length > 1 ||
+    hasUnresolvedExplicitServiceWording(text, policy)
+  ) return null;
+
+  const activeIds = new Set(activeServices.map(({ id }) => String(id)));
+  const persistedIds = [
+    state?.booking?.serviceId,
+    state?.priceInquiry?.selected_service_id,
+  ].filter((id) => typeof id === 'string' && activeIds.has(id));
+  const distinctIds = [...new Set(persistedIds)];
+  return distinctIds.length === 1 ? distinctIds[0] : null;
+}
+
+function hasUnresolvedExplicitServiceWording(text, policy) {
+  const normalized = policy.normalize(text);
+  return /(?:^|\s)(?:خدمة|علاج|جلسة)\s+[\p{L}\p{N}]+/u.test(normalized);
+}
+
+function hasOperationalFlow(state, interaction) {
+  if (interaction && typeof interaction === 'object') return true;
+  if (!state || typeof state !== 'object') return false;
+  return [
+    'booking',
+    'priceInquiry',
+    'cancellation',
+    'reschedule',
+    'changeService',
+    'changeBranch',
+  ].some((key) => state[key] && typeof state[key] === 'object');
+}
+
+function usableKnowledgeFact(result) {
+  if (result?.status !== 'found' || !Array.isArray(result.facts)) return null;
+  const fact = result.facts[0];
+  return typeof fact === 'string' && fact.trim() !== '' ? fact : null;
+}
+
+function composeKnowledgeReply({ knowledgeReply, engineReply, activeFlow }) {
+  if (
+    activeFlow &&
+    typeof engineReply === 'string' &&
+    engineReply.trim() !== ''
+  ) {
+    return `${knowledgeReply}\n\n${engineReply}`;
+  }
+  return knowledgeReply;
 }
 
 function buildIdentityTrace({

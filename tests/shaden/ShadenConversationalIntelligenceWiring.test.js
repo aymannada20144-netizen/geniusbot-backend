@@ -12,7 +12,21 @@ const ShadenPolicy = require('../../src/services/shaden/ShadenPolicy');
 const IDS = {
   clinic: '11111111-1111-4111-8111-111111111111',
   conversation: '77777777-7777-4777-8777-777777777777',
+  botox: '22222222-2222-4222-8222-222222222222',
+  filler: '33333333-3333-4333-8333-333333333333',
 };
+
+const KNOWLEDGE_SERVICES = Object.freeze([
+  { id: IDS.botox, name: 'بوتوكس', is_active: true, is_booking_enabled: true },
+  { id: IDS.filler, name: 'فيلر', is_active: true, is_booking_enabled: true },
+  {
+    id: '44444444-4444-4444-8444-444444444444',
+    name: 'إزالة الشعر بالليزر',
+    aliases: ['ليزر'],
+    is_active: true,
+    is_booking_enabled: true,
+  },
+]);
 
 describe('Shaden conversational intelligence shadow wiring', () => {
   test('invokes the injected CI orchestrator in shadow mode', async () => {
@@ -364,6 +378,227 @@ describe('Shaden conversational intelligence shadow wiring', () => {
   assert.equal(observed[0].conversationAct, 'greeting');
   assert.equal(observed[0].confidence, 1);
 });
+
+describe('Shaden authoritative medical knowledge wiring', () => {
+  test('uses an exact explicit service and preserves the stored fact verbatim', async () => {
+    const calls = [];
+    const fact = 'النص الطبي المعتمد كما هو. 🌸';
+    const harness = createHarness({
+      services: KNOWLEDGE_SERVICES,
+      knowledgeService: knowledgeFound(fact, calls),
+      conversationalIntelligenceOrchestrator: medicalKnowledgeCI(),
+    });
+
+    const result = await harness.send('ما تعليمات البوتوكس؟');
+
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].clinicId, IDS.clinic);
+    assert.equal(calls[0].serviceId, IDS.botox);
+    assert.equal(calls[0].type, 'medical_faq');
+    assert.equal(calls[0].source, 'knowledge_base');
+    assert.equal(calls[0].query, 'ما تعليمات البوتوكس؟');
+    assert.deepEqual(calls[0].keywords, []);
+    assert.equal(calls[0].required, true);
+    assert.equal(calls[0].allowGeneralModelKnowledge, false);
+    assert.equal(result.replyText, fact);
+  });
+
+  test('uses the existing clinic service alias for explicit context', async () => {
+    const calls = [];
+    const harness = medicalHarness({
+      knowledgeService: knowledgeFound('معتمد', calls),
+    });
+
+    await harness.send('تحضير الليزر');
+    assert.equal(calls[0].serviceId, '44444444-4444-4444-8444-444444444444');
+  });
+
+  test('explicit current-message service overrides different persisted service', async () => {
+    const calls = [];
+    const harness = medicalHarness({
+      state: stateWithBooking(IDS.filler),
+      services: KNOWLEDGE_SERVICES,
+      knowledgeService: knowledgeFound('معتمد', calls),
+    });
+
+    await harness.send('ما تعليمات البوتوكس؟');
+    assert.equal(calls[0].serviceId, IDS.botox);
+  });
+
+  test('unresolved explicit service wording never falls back to persisted service', async () => {
+    const calls = [];
+    const harness = medicalHarness({
+      state: stateWithBooking(IDS.filler),
+      services: KNOWLEDGE_SERVICES,
+      knowledgeService: knowledgeFound('معتمد', calls),
+    });
+
+    await harness.send('هل علاج المورفيوس مناسب؟');
+    assert.equal(calls[0].serviceId, null);
+  });
+
+  test('multiple explicit service mentions never fall back to persisted service', async () => {
+    const calls = [];
+    const harness = medicalHarness({
+      state: stateWithBooking(IDS.filler),
+      services: KNOWLEDGE_SERVICES,
+      knowledgeService: knowledgeFound('معتمد', calls),
+    });
+
+    await harness.send('ايش الفرق بين البوتوكس والفيلر؟');
+    assert.equal(calls[0].serviceId, null);
+  });
+
+  test('uses one exact persisted service only when the current message has none', async () => {
+    const calls = [];
+    const harness = medicalHarness({
+      state: stateWithBooking(IDS.filler),
+      services: KNOWLEDGE_SERVICES,
+      knowledgeService: knowledgeFound('معتمد', calls),
+    });
+
+    await harness.send('ما تعليمات التحضير؟');
+    assert.equal(calls[0].serviceId, IDS.filler);
+  });
+
+  test('ambiguous persisted services and absent context use clinic-wide scope', async () => {
+    for (const state of [stateWithAmbiguousServices(), null]) {
+      const calls = [];
+      const harness = medicalHarness({
+        state,
+        services: KNOWLEDGE_SERVICES,
+        knowledgeService: knowledgeFound('معتمد', calls),
+      });
+
+      await harness.send('ايهم انسب؟');
+      assert.equal(calls[0].serviceId, null);
+    }
+  });
+
+  test('active flow composes once and preserves engine state and interaction', async () => {
+    const initialState = stateAtServiceSelection();
+    const baseline = createHarness({
+      initialState,
+      services: KNOWLEDGE_SERVICES,
+      conversationalIntelligenceOrchestrator: continueCI(),
+    });
+    const influenced = createHarness({
+      initialState,
+      services: KNOWLEDGE_SERVICES,
+      knowledgeService: knowledgeFound('FACT-VERBATIM'),
+      conversationalIntelligenceOrchestrator: medicalKnowledgeCI(),
+    });
+
+    const baselineResult = await baseline.send('ما تعليمات التحضير؟');
+    const result = await influenced.send('ما تعليمات التحضير؟');
+
+    assert.equal(
+      result.replyText,
+      `FACT-VERBATIM\n\n${baselineResult.replyText}`
+    );
+    assert.equal(result.replyText.split('FACT-VERBATIM').length - 1, 1);
+    assert.deepEqual(result.state, baselineResult.state);
+    assert.deepEqual(
+      influenced.lastDelivery().interaction,
+      baseline.lastDelivery().interaction
+    );
+  });
+
+  test('not_found and unavailable use distinct fixed policy responses', async () => {
+    const policy = new ShadenPolicy();
+    const notFound = medicalHarness({
+      knowledgeService: knowledgeReturning('not_found'),
+    });
+    const unavailable = medicalHarness({
+      knowledgeService: knowledgeReturning('unavailable'),
+    });
+    const invalidFound = medicalHarness({
+      knowledgeService: knowledgeReturning('found', []),
+    });
+
+    assert.equal((await notFound.send('سؤال طبي')).replyText,
+      policy.medicalKnowledgeNotFound());
+    assert.equal((await unavailable.send('سؤال طبي')).replyText,
+      policy.medicalKnowledgeUnavailable());
+    assert.equal((await invalidFound.send('سؤال طبي')).replyText,
+      policy.medicalKnowledgeUnavailable());
+  });
+
+  test('knowledge exceptions fail closed without crashing Shaden', async () => {
+    const policy = new ShadenPolicy();
+    const harness = medicalHarness({
+      knowledgeService: {
+        async retrieve() { throw new Error('database secret'); },
+      },
+    });
+
+    const result = await harness.send('سؤال طبي');
+    assert.equal(result.replyText, policy.medicalKnowledgeUnavailable());
+  });
+
+  test('not_found during an active flow preserves the engine prompt', async () => {
+    const baseline = createHarness({
+      initialState: stateAtServiceSelection(),
+      services: KNOWLEDGE_SERVICES,
+      conversationalIntelligenceOrchestrator: continueCI(),
+    });
+    const influenced = medicalHarness({
+      state: stateAtServiceSelection(),
+      services: KNOWLEDGE_SERVICES,
+      knowledgeService: knowledgeReturning('not_found'),
+    });
+    const baselineResult = await baseline.send('ما تعليمات التحضير؟');
+    const result = await influenced.send('ما تعليمات التحضير؟');
+
+    assert.equal(result.replyText,
+      `${new ShadenPolicy().medicalKnowledgeNotFound()}\n\n${baselineResult.replyText}`);
+    assert.deepEqual(result.state, baselineResult.state);
+  });
+
+  test('all action, signal, knowledge and higher-risk guards fail closed', async () => {
+    const cases = [
+      { signals: { medicalQuestion: false } },
+      { action: 'CONTINUE' },
+      { requiredKnowledge: [] },
+      { flags: { requiresKnowledge: false } },
+      { signals: { medicalQuestion: true, medicalRisk: true } },
+      { signals: { medicalQuestion: true, complaint: true } },
+      { signals: { medicalQuestion: true, legalEscalation: true } },
+      { signals: { medicalQuestion: true, abuseOrThreat: true } },
+      { signals: { medicalQuestion: true, humanHandover: true } },
+      { action: 'REQUEST_CANCELLATION' },
+    ];
+
+    for (const overrides of cases) {
+      let retrievals = 0;
+      const harness = createHarness({
+        services: KNOWLEDGE_SERVICES,
+        knowledgeService: {
+          async retrieve() { retrievals += 1; return knowledgeResult('found'); },
+        },
+        conversationalIntelligenceOrchestrator: medicalKnowledgeCI(overrides),
+      });
+      await harness.send('سؤال طبي');
+      assert.equal(retrievals, 0);
+    }
+  });
+
+  test('medical knowledge wiring cannot invoke appointment mutations', async () => {
+    let mutations = 0;
+    const harness = medicalHarness({
+      knowledgeService: knowledgeFound('معتمد'),
+      appointmentService: {
+        async cancelAppointment() { mutations += 1; },
+        async rescheduleAppointment() { mutations += 1; },
+        async changeAppointmentService() { mutations += 1; },
+        async changeAppointmentBranch() { mutations += 1; },
+      },
+    });
+
+    await harness.send('سؤال طبي');
+    assert.equal(mutations, 0);
+  });
+});
   test('guarded objection overlay prepends exactly once and preserves runtime output', async () => {
     let mutationCalls = 0;
     const baselineHarness = createHarness();
@@ -636,8 +871,11 @@ describe('Shaden conversational intelligence shadow wiring', () => {
 function createHarness({
   conversationalIntelligenceOrchestrator = null,
   appointmentService = null,
+  knowledgeService = null,
+  initialState = null,
+  services = [],
 } = {}) {
-  let state = null;
+  let state = structuredClone(initialState);
   let messageNumber = 0;
   const deliveries = [];
 
@@ -686,8 +924,8 @@ function createHarness({
     },
 
     catalogService: {
-      async list() {
-        return [];
+      async list(resource) {
+        return resource === 'services' ? structuredClone(services) : [];
       },
     },
 
@@ -698,6 +936,7 @@ function createHarness({
     },
 
     appointmentService,
+    knowledgeService,
 
     conversationalIntelligenceOrchestrator,
 
@@ -726,4 +965,126 @@ function createHarness({
       });
     },
   };
+}
+
+function medicalHarness({ state = null, ...options } = {}) {
+  return createHarness({
+    initialState: state,
+    services: KNOWLEDGE_SERVICES,
+    conversationalIntelligenceOrchestrator: medicalKnowledgeCI(),
+    ...options,
+  });
+}
+
+function medicalKnowledgeCI(overrides = {}) {
+  return {
+    async analyze() {
+      return {
+        understanding: {
+          signals: {
+            medicalQuestion: true,
+            ...(overrides.signals || {}),
+          },
+        },
+        decision: {
+          action: overrides.action || 'RETRIEVE_KNOWLEDGE',
+          requiredKnowledge: overrides.requiredKnowledge || ['medical_question'],
+          flags: {
+            requiresKnowledge: true,
+            ...(overrides.flags || {}),
+          },
+        },
+      };
+    },
+  };
+}
+
+function continueCI() {
+  return { async analyze() { return { decision: { action: 'CONTINUE' } }; } };
+}
+
+function knowledgeFound(fact, calls = []) {
+  return {
+    async retrieve(request) {
+      calls.push(request);
+      return knowledgeResult('found', [fact]);
+    },
+  };
+}
+
+function knowledgeResult(status, facts = status === 'found' ? ['معتمد'] : []) {
+  return {
+    status,
+    facts,
+    options: [],
+    references: [],
+    warnings: [],
+  };
+}
+
+function knowledgeReturning(status, facts) {
+  return {
+    async retrieve() { return knowledgeResult(status, facts); },
+  };
+}
+
+function rootShadenState(overrides = {}) {
+  return {
+    version: 1,
+    mode: 'idle',
+    step: null,
+    customer: { name: 'نورة' },
+    context: null,
+    options: [],
+    ...overrides,
+  };
+}
+
+function persistedState(shaden) {
+  return { current: 'shaden', data: { shaden } };
+}
+
+function stateWithBooking(serviceId) {
+  return persistedState(rootShadenState({
+    booking: {
+      step: 'branch',
+      serviceId,
+      branchId: null,
+      doctorId: null,
+      preferredStart: null,
+      paymentMethodId: null,
+    },
+  }));
+}
+
+function stateWithAmbiguousServices() {
+  const state = stateWithBooking(IDS.filler);
+  state.data.shaden.priceInquiry = {
+    intent: 'price_inquiry',
+    state: 'awaiting_price_payment_method',
+    selected_service_id: IDS.botox,
+    selected_service_name: 'بوتوكس',
+    selected_payment_method: null,
+    selected_insurance_company_id: null,
+    selected_insurance_company_name: null,
+    selected_insurance_class_id: null,
+    selected_insurance_class_name: null,
+    resolved_cash_price: null,
+    resolved_insurance_price: null,
+    currency: null,
+  };
+  return state;
+}
+
+function stateAtServiceSelection() {
+  return persistedState(rootShadenState({
+    booking: {
+      step: 'service',
+      serviceId: null,
+      branchId: null,
+      doctorId: null,
+      preferredStart: null,
+      paymentMethodId: null,
+    },
+  }));
 }

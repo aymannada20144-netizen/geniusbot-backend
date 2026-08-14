@@ -23,6 +23,8 @@ const AvailabilityService = require('./services/availability/AvailabilityService
 const ClinicService = require('./services/ClinicService');
 const ConversationService = require('./services/ConversationService');
 const PatientService = require('./modules/patients/PatientService');
+const KnowledgeBaseRepository = require('./repositories/KnowledgeBaseRepository');
+const KnowledgeService = require('./services/KnowledgeService');
 const PriceService = require('./services/PriceService');
 const CommunicationService = require(
   './communication/services/CommunicationService'
@@ -176,6 +178,9 @@ async function buildApp() {
   );
   const patientService = new PatientService(bookingRepositories.patients);
   const priceService = new PriceService(bookingRepositories.prices);
+  const knowledgeService = new KnowledgeService(
+    new KnowledgeBaseRepository(db)
+  );
   const catalogService = new MasterDataService(
     new MasterDataRepository(db)
   );
@@ -192,6 +197,7 @@ async function buildApp() {
     bookingEngine,
     appointmentService,
     priceService,
+    knowledgeService,
     sendMessage: sendWhatsAppMessage,
   });
   const whatsappController = new WhatsAppController(conversationEngine);
