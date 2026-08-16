@@ -12,6 +12,7 @@ function validResult(overrides = {}) {
     version: 1,
     conversationAct: 'question',
     primaryIntent: 'medical_question',
+    knowledgeTopic: 'preparation',
     secondaryIntents: [],
     entities: {
       serviceMentions: [],
@@ -53,6 +54,7 @@ function validResult(overrides = {}) {
 test('SemanticUnderstandingResult validates strict data-only output', () => {
   const result = createSemanticUnderstandingResult(validResult());
   assert.equal(result.primaryIntent, 'medical_question');
+  assert.equal(result.knowledgeTopic, 'preparation');
   assert.equal(Object.isFrozen(result.entities), true);
   assert.equal(Object.isFrozen(result.signals), true);
 });
@@ -60,6 +62,7 @@ test('SemanticUnderstandingResult validates strict data-only output', () => {
 test('SemanticUnderstandingResult rejects hostile and malformed shapes', async (t) => {
   const cases = [
     ['unknown enum', () => validResult({ primaryIntent: 'do_anything' })],
+    ['unknown knowledge topic', () => validResult({ knowledgeTopic: 'instructions' })],
     ['extra key', () => ({ ...validResult(), explanation: 'because' })],
     ['action field', () => ({ ...validResult(), action: 'START_BOOKING' })],
     ['reply field', () => ({ ...validResult(), reply: 'hello' })],
@@ -75,7 +78,7 @@ test('SemanticUnderstandingResult rejects hostile and malformed shapes', async (
       ...validResult(),
       entities: {
         ...validResult().entities,
-        serviceMentions: [{ text: 'س'.repeat(LIMITS.entityText + 1), role: 'requested', confidence: 1 }],
+        serviceMentions: [{ text: 'س'.repeat(LIMITS.entityText + 1), concept: null, role: 'requested', confidence: 1 }],
       },
     })],
     ['unsupported schema version', () => validResult({ version: 2 })],

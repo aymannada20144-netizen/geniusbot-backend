@@ -15,7 +15,9 @@ class SemanticUnderstandingProvider {
 
   async understand(input = {}) {
     const text = requireMessageText(input.text);
-    const raw = await this.modelClient.inferUnderstanding({ text });
+    const raw = await this.modelClient.inferUnderstanding({
+      text,
+    });
     const parsed = parseModelOutput(raw);
     const result = createSemanticUnderstandingResult(parsed);
     assertEntitiesAnchored(result.entities, text);

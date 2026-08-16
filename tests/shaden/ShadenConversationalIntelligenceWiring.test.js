@@ -23,7 +23,7 @@ const KNOWLEDGE_SERVICES = Object.freeze([
   {
     id: '44444444-4444-4444-8444-444444444444',
     name: 'إزالة الشعر بالليزر',
-    aliases: ['ليزر'],
+    aliases: ['خدمات الليزر الطبية والتجميلية'],
     is_active: true,
     is_booking_enabled: true,
   },
@@ -399,10 +399,38 @@ describe('Shaden authoritative medical knowledge wiring', () => {
     const harness = createHarness({
       services: KNOWLEDGE_SERVICES,
       knowledgeService,
+      semanticUnderstandingProvider: semanticProvider({
+        primaryIntent: 'medical_question',
+        conversationAct: 'question',
+        knowledgeTopic: 'preparation',
+        signals: { medicalQuestion: true },
+        serviceMentions: [{
+          text: 'الليزر',
+          concept: KNOWLEDGE_SERVICES[2].name,
+          role: 'requested',
+          confidence: 0.99,
+        }],
+      }),
     });
 
     const result = await harness.send('كيف أتحضر لجلسة الليزر');
     assert.equal(result.replyText, fact);
+  });
+
+  test('one unrelated character cannot enter medical retrieval even with stale CI output', async () => {
+    let retrievals = 0;
+    const harness = createHarness({
+      initialState: stateWithBooking(IDS.filler),
+      services: KNOWLEDGE_SERVICES,
+      knowledgeService: {
+        async retrieve() { retrievals += 1; return knowledgeResult('found'); },
+      },
+      conversationalIntelligenceOrchestrator: medicalKnowledgeCI(),
+    });
+
+    const result = await harness.send('ر');
+    assert.equal(retrievals, 0);
+    assert.doesNotMatch(result.replyText, /معلومة معتمدة/u);
   });
 
   test('routes the exact live compliment through courtesy without side effects', async () => {
@@ -456,7 +484,7 @@ describe('Shaden authoritative medical knowledge wiring', () => {
       knowledgeService: knowledgeFound('معتمد', calls),
     });
 
-    await harness.send('تحضير الليزر');
+    await harness.send('خدمات الليزر الطبية والتجميلية');
     assert.equal(calls[0].serviceId, '44444444-4444-4444-8444-444444444444');
   });
 
@@ -915,8 +943,256 @@ describe('Shaden authoritative medical knowledge wiring', () => {
   });
 });
 
+describe('Shaden live hybrid understanding composition', () => {
+  test('semantic-equivalent medical questions retrieve exact approved rows', async (t) => {
+    const rows = [
+      { id: '00000000-0000-0000-0000-000000003011', service_id: KNOWLEDGE_SERVICES[2].id, title: 'تحضير الليزر', content: 'laser preparation', category: 'medical_faq', keywords: [], priority: 6 },
+      { id: '00000000-0000-0000-0000-000000003012', service_id: IDS.filler, title: 'تحضير الفيلر', content: 'filler preparation', category: 'medical_faq', keywords: [], priority: 5 },
+      { id: '00000000-0000-0000-0000-000000003015', service_id: IDS.botox, title: 'عناية ما بعد البوتوكس', content: 'botox aftercare', category: 'medical_faq', keywords: [], priority: 6 },
+      { id: '00000000-0000-0000-0000-000000003016', service_id: null, title: 'الفرق بوتكس/فيلر', content: 'comparison', category: 'medical_faq', keywords: [], priority: 5 },
+    ];
+    const cases = [
+      ['كيف أتحضر للفيلر', 'preparation', [{ text: 'الفيلر', concept: KNOWLEDGE_SERVICES[1].name, role: 'requested', confidence: 0.99 }], null, rows[1].id],
+      ['وش أسوي قبل الفيلر', 'preparation', [{ text: 'الفيلر', concept: KNOWLEDGE_SERVICES[1].name, role: 'requested', confidence: 0.99 }], null, rows[1].id],
+      ['في تجهيزات قبل جلسة الفيلر؟', 'preparation', [{ text: 'الفيلر', concept: KNOWLEDGE_SERVICES[1].name, role: 'requested', confidence: 0.99 }], null, rows[1].id],
+      ['تحضير الفيلر', 'preparation', [{ text: 'الفيلر', concept: KNOWLEDGE_SERVICES[1].name, role: 'requested', confidence: 0.99 }], null, rows[1].id],
+      ['كيف أتحضر لليزر', 'preparation', [{ text: 'لليزر', concept: KNOWLEDGE_SERVICES[2].name, role: 'requested', confidence: 0.99 }], null, rows[0].id],
+      ['وش المطلوب قبل جلسة إزالة الشعر بالليزر؟', 'preparation', [{ text: 'إزالة الشعر بالليزر', concept: KNOWLEDGE_SERVICES[2].name, role: 'requested', confidence: 0.99 }], null, rows[0].id],
+      ['وش أسوي بعد البوتوكس؟', 'aftercare', [{ text: 'البوتوكس', concept: KNOWLEDGE_SERVICES[0].name, role: 'requested', confidence: 0.99 }], null, rows[2].id],
+      ['ايش التعليمات بعد الجلسة؟', 'aftercare', [], stateWithBooking(IDS.botox), rows[2].id],
+      ['ايش الفرق بين البوتوكس والفيلر؟', 'comparison', [
+        { text: 'البوتوكس', concept: KNOWLEDGE_SERVICES[0].name, role: 'requested', confidence: 0.99 },
+        { text: 'الفيلر', concept: KNOWLEDGE_SERVICES[1].name, role: 'requested', confidence: 0.99 },
+      ], null, rows[3].id],
+      ['وش الأنسب بوتوكس ولا فيلر؟', 'comparison', [
+        { text: 'بوتوكس', concept: KNOWLEDGE_SERVICES[0].name, role: 'requested', confidence: 0.99 },
+        { text: 'فيلر', concept: KNOWLEDGE_SERVICES[1].name, role: 'requested', confidence: 0.99 },
+      ], null, rows[3].id],
+    ];
+
+    for (const [text, knowledgeTopic, serviceMentions, initialState, expectedId] of cases) {
+      await t.test(text, async () => {
+        const retrieved = [];
+        const authoritativeKnowledgeService = new KnowledgeService({
+          async findEligibleCandidates({ serviceId, category }) {
+            return rows.filter((row) =>
+              row.category === category &&
+              (serviceId === null
+                ? row.service_id === null
+                : row.service_id === null || row.service_id === serviceId)
+            );
+          },
+        });
+        const knowledgeService = {
+          async retrieve(request) {
+            const result = await authoritativeKnowledgeService.retrieve(request);
+            retrieved.push(result);
+            return result;
+          },
+        };
+        const result = await createHarness({
+          initialState,
+          services: KNOWLEDGE_SERVICES,
+          semanticUnderstandingProvider: semanticProvider({
+            primaryIntent: 'medical_question',
+            conversationAct: 'question',
+            knowledgeTopic,
+            signals: { medicalQuestion: true },
+            serviceMentions,
+          }),
+          knowledgeService,
+        }).send(text);
+        assert.equal(retrieved[0].references[0].id, expectedId);
+        assert.match(
+          result.replyText,
+          new RegExp(rows.find(({ id }) => id === expectedId).content, 'u')
+        );
+      });
+    }
+  });
+
+  test('semantic medical understanding reaches deterministic knowledge decision', async () => {
+    const semanticCalls = [];
+    const knowledgeCalls = [];
+    const harness = createHarness({
+      services: KNOWLEDGE_SERVICES,
+      semanticUnderstandingProvider: semanticProvider({
+        primaryIntent: 'medical_question',
+        knowledgeTopic: 'preparation',
+        conversationAct: 'question',
+        signals: { medicalQuestion: true },
+      }, semanticCalls),
+      knowledgeService: knowledgeFound('تعليمات التحضير المعتمدة', knowledgeCalls),
+    });
+
+    const result = await harness.send('كيف أتحضر لجلسة الليزر');
+
+    assert.equal(semanticCalls.length, 1);
+    assert.equal(semanticCalls[0].text, 'كيف أتحضر لجلسة الليزر');
+    assert.equal(knowledgeCalls.length, 1);
+    assert.equal(knowledgeCalls[0].type, 'medical_faq');
+    assert.match(result.replyText, /تعليمات التحضير المعتمدة/u);
+  });
+
+  test('semantic courtesy reaches the existing deterministic social reply', async () => {
+    const semanticCalls = [];
+    const harness = createHarness({
+      semanticUnderstandingProvider: semanticProvider({
+        primaryIntent: 'courtesy',
+        conversationAct: 'statement',
+        sentiment: 'positive',
+      }, semanticCalls),
+    });
+
+    const result = await harness.send('عجبني اسمك');
+
+    assert.equal(semanticCalls.length, 1);
+    assert.match(result.replyText, /تسلمي|نورتينا/u);
+    assert.doesNotMatch(result.replyText, /لم أفهم/u);
+  });
+
+  test('semantic cancellation enters existing management flow without mutation', async () => {
+    let mutations = 0;
+    const semanticCalls = [];
+    const harness = createHarness({
+      semanticUnderstandingProvider: semanticProvider({
+        primaryIntent: 'appointment_cancellation',
+        conversationAct: 'request',
+      }, semanticCalls),
+      appointmentService: {
+        async cancelAppointment() { mutations += 1; },
+        async applyValidatedChange() { mutations += 1; },
+      },
+    });
+
+    const result = await harness.send('ما عاد أبي الموعد');
+
+    assert.equal(semanticCalls.length, 1);
+    assert.equal(mutations, 0);
+    assert.match(result.replyText, /رقم الحجز/u);
+  });
+
+  test('semantic failure preserves the old deterministic path', async () => {
+    const harness = createHarness({
+      semanticUnderstandingProvider: {
+        async understand() { throw new Error('semantic timeout'); },
+      },
+    });
+
+    const result = await harness.send('مرحبا');
+    assert.match(result.replyText, /أهل|مرحب/u);
+  });
+
+  test('deterministic medical risk survives semantic interpretation', async () => {
+    let retrievals = 0;
+    let mutations = 0;
+    const harness = createHarness({
+      services: KNOWLEDGE_SERVICES,
+      semanticUnderstandingProvider: semanticProvider({
+        primaryIntent: 'courtesy',
+        conversationAct: 'statement',
+        sentiment: 'positive',
+      }),
+      knowledgeService: {
+        async retrieve() { retrievals += 1; return knowledgeResult('found'); },
+      },
+      appointmentService: {
+        async cancelAppointment() { mutations += 1; },
+        async applyValidatedChange() { mutations += 1; },
+      },
+    });
+
+    await harness.send('حرق شديد بعد الليزر');
+
+    assert.equal(retrievals, 0);
+    assert.equal(mutations, 0);
+  });
+
+  test('semantic service concepts are grounded deterministically through the wired path', async (t) => {
+    const cases = [
+      { name: 'laser preparation', text: '\u0643\u064a\u0641 \u0623\u062a\u062d\u0636\u0631 \u0644\u062c\u0644\u0633\u0629 \u0627\u0644\u0644\u064a\u0632\u0631', mention: '\u0627\u0644\u0644\u064a\u0632\u0631', concept: KNOWLEDGE_SERVICES[2].name, expectedId: KNOWLEDGE_SERVICES[2].id },
+      { name: 'natural laser paraphrase', text: '\u0648\u0634 \u0623\u0633\u0648\u064a \u0642\u0628\u0644 \u0625\u0632\u0627\u0644\u0629 \u0627\u0644\u0634\u0639\u0631 \u0628\u0627\u0644\u0644\u064a\u0632\u0631', mention: KNOWLEDGE_SERVICES[2].name, concept: KNOWLEDGE_SERVICES[2].name, expectedId: KNOWLEDGE_SERVICES[2].id },
+      { name: 'filler question', text: '\u0639\u0646\u062f\u064a \u0633\u0624\u0627\u0644 \u0639\u0646 \u0627\u0644\u0641\u064a\u0644\u0631', mention: '\u0627\u0644\u0641\u064a\u0644\u0631', concept: KNOWLEDGE_SERVICES[1].name, expectedId: IDS.filler },
+      { name: 'Botox aftercare', text: '\u0628\u0639\u062f \u0627\u0644\u0628\u0648\u062a\u0643\u0633 \u0648\u0634 \u0627\u0644\u0645\u0645\u0646\u0648\u0639', mention: '\u0627\u0644\u0628\u0648\u062a\u0643\u0633', concept: KNOWLEDGE_SERVICES[0].name, expectedId: IDS.botox },
+    ];
+
+    for (const item of cases) {
+      await t.test(item.name, async () => {
+        const calls = [];
+        await createHarness({
+          services: KNOWLEDGE_SERVICES,
+          semanticUnderstandingProvider: semanticProvider({
+            primaryIntent: 'medical_question',
+            conversationAct: 'question',
+            signals: { medicalQuestion: true },
+            serviceMentions: [{ text: item.mention, concept: item.concept, role: 'requested', confidence: 0.99 }],
+          }),
+          knowledgeService: knowledgeFound('authoritative fact', calls),
+        }).send(item.text);
+        assert.equal(calls[0].serviceId, item.expectedId);
+      });
+    }
+  });
+
+  test('explicit semantic filler evidence overrides persisted laser context', async () => {
+    const calls = [];
+    await createHarness({
+      initialState: stateWithBooking(KNOWLEDGE_SERVICES[2].id),
+      services: KNOWLEDGE_SERVICES,
+      semanticUnderstandingProvider: semanticProvider({
+        primaryIntent: 'medical_question', conversationAct: 'question',
+        signals: { medicalQuestion: true },
+        serviceMentions: [{ text: '\u0627\u0644\u0641\u064a\u0644\u0631', concept: KNOWLEDGE_SERVICES[1].name, role: 'requested', confidence: 0.99 }],
+      }),
+      knowledgeService: knowledgeFound('filler fact', calls),
+    }).send('\u0639\u0646\u062f\u064a \u0633\u0624\u0627\u0644 \u0639\u0646 \u0627\u0644\u0641\u064a\u0644\u0631');
+    assert.equal(calls[0].serviceId, IDS.filler);
+  });
+
+  test('unknown, multiple, and ambiguous semantic evidence never guesses a service', async (t) => {
+    const cases = [
+      { name: 'unknown service', serviceMentions: [{ text: 'unknown treatment', concept: 'unknown treatment', role: 'requested', confidence: 0.99 }], services: KNOWLEDGE_SERVICES, text: 'unknown treatment' },
+      { name: 'service comparison', serviceMentions: [
+        { text: '\u0627\u0644\u0628\u0648\u062a\u0643\u0633', concept: KNOWLEDGE_SERVICES[0].name, role: 'requested', confidence: 0.99 },
+        { text: '\u0627\u0644\u0641\u064a\u0644\u0631', concept: KNOWLEDGE_SERVICES[1].name, role: 'requested', confidence: 0.99 },
+      ], services: KNOWLEDGE_SERVICES, text: '\u0627\u064a\u0634 \u0627\u0644\u0641\u0631\u0642 \u0628\u064a\u0646 \u0627\u0644\u0628\u0648\u062a\u0643\u0633 \u0648\u0627\u0644\u0641\u064a\u0644\u0631' },
+      { name: 'ambiguous generic laser', serviceMentions: [{ text: '\u0627\u0644\u0644\u064a\u0632\u0631', concept: '\u0644\u064a\u0632\u0631', role: 'requested', confidence: 0.99 }], services: [
+        ...KNOWLEDGE_SERVICES,
+        { id: '55555555-5555-4555-8555-555555555555', name: '\u0644\u064a\u0632\u0631 \u0627\u0644\u062a\u0635\u0628\u063a\u0627\u062a', aliases: [], is_active: true },
+      ], text: '\u0627\u0644\u0644\u064a\u0632\u0631' },
+    ];
+
+    for (const item of cases) {
+      await t.test(item.name, async () => {
+        const calls = [];
+        await createHarness({
+          services: item.services,
+          semanticUnderstandingProvider: semanticProvider({
+            primaryIntent: 'medical_question', conversationAct: 'question',
+            signals: { medicalQuestion: true },
+            serviceMentions: item.serviceMentions,
+          }),
+          knowledgeService: knowledgeFound('general fact', calls),
+        }).send(item.text);
+        assert.equal(calls[0].serviceId, null);
+      });
+    }
+  });
+
+  test('semantic failure retains deterministic service grounding', async () => {
+    const calls = [];
+    await createHarness({
+      services: KNOWLEDGE_SERVICES,
+      semanticUnderstandingProvider: { async understand() { throw new Error('model unavailable'); } },
+      knowledgeService: knowledgeFound('laser fact', calls),
+    }).send('\u0643\u064a\u0641 \u0623\u062a\u062d\u0636\u0631 \u0644\u062c\u0644\u0633\u0629 \u0627\u0644\u0644\u064a\u0632\u0631');
+    assert.equal(calls[0].serviceId, KNOWLEDGE_SERVICES[2].id);
+  });
+});
+
 function createHarness({
   conversationalIntelligenceOrchestrator = null,
+  semanticUnderstandingProvider = null,
   appointmentService = null,
   knowledgeService = null,
   initialState = null,
@@ -986,6 +1262,7 @@ function createHarness({
     knowledgeService,
 
     conversationalIntelligenceOrchestrator,
+    semanticUnderstandingProvider,
 
     async sendMessage(payload) {
       deliveries.push(payload);
@@ -1010,6 +1287,45 @@ function createHarness({
         text,
         rawPayload: {},
       });
+    },
+  };
+}
+
+function semanticProvider(overrides = {}, calls = []) {
+  return {
+    async understand(input) {
+      calls.push(input);
+      const signalNames = [
+        'confirmation', 'rejection', 'correction', 'interruption',
+        'conditional', 'hesitation', 'objection', 'complaint',
+        'medicalQuestion', 'medicalRisk', 'humanHandover',
+        'legalEscalation', 'botFrustration', 'abuseOrThreat',
+      ];
+      return {
+        version: 1,
+        conversationAct: overrides.conversationAct || 'statement',
+        primaryIntent: overrides.primaryIntent || 'unknown',
+        knowledgeTopic: overrides.knowledgeTopic || null,
+        secondaryIntents: [],
+        entities: {
+          serviceMentions: overrides.serviceMentions || [],
+          branchMentions: [], providerMentions: [],
+          dateTimeMentions: [], bookingReference: null,
+          appointmentManagementTarget: 'unspecified', corrections: [],
+        },
+        signals: Object.fromEntries(signalNames.map((name) => [
+          name,
+          overrides.signals?.[name] === true,
+        ])),
+        sentiment: overrides.sentiment || 'neutral',
+        confidence: 0.95,
+        ambiguity: {
+          requiresClarification: false,
+          reason: 'none',
+          candidateIntents: [],
+          ambiguousEntityTypes: [],
+        },
+      };
     },
   };
 }

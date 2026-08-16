@@ -12,6 +12,11 @@ const KNOWLEDGE_TYPES = new Set([
   'service_faq',
   'clinic_policy',
 ]);
+const SEMANTIC_TOPICS = new Set([
+  'preparation',
+  'aftercare',
+  'comparison',
+]);
 
 class KnowledgeService {
   constructor(knowledgeBaseRepository) {
@@ -97,6 +102,13 @@ function validateRequest(input) {
   ) {
     throw new ValidationError('Knowledge request query must be a string.');
   }
+  if (
+    input.semanticTopic !== undefined &&
+    input.semanticTopic !== null &&
+    !SEMANTIC_TOPICS.has(input.semanticTopic)
+  ) {
+    throw new ValidationError('Knowledge request semanticTopic is unsupported.');
+  }
   if (input.keywords !== undefined && !Array.isArray(input.keywords)) {
     throw new ValidationError('Knowledge request keywords must be an Array.');
   }
@@ -127,6 +139,7 @@ function validateRequest(input) {
     query,
     normalizedQuery: normalizeText(query),
     queryTokens: tokenize(query),
+    semanticTopic: input.semanticTopic || null,
     keywords: Object.freeze(uniqueNormalized(keywords)),
   });
 }
@@ -146,14 +159,20 @@ function scoreCandidate(row, request) {
   );
   const titleOverlap = overlapCount(request.queryTokens, titleTokens);
   const contentOverlap = overlapCount(request.queryTokens, contentTokens);
+  const rowTopic = medicalTopicForRow(row);
+  const topicMatch = request.type === 'medical_faq' &&
+    request.semanticTopic !== null &&
+    rowTopic === request.semanticTopic;
   const qualifies = request.type === 'medical_faq'
-    ? exactTitle ||
+    ? topicMatch ||
+      exactTitle ||
       keywordMatches.length >= 2 ||
       titleOverlap >= 2
     : exactTitle || keywordMatches.length > 0 || titleOverlap >= 2;
 
   return {
     row,
+    topicMatch: topicMatch ? 1 : 0,
     exactTitle: exactTitle ? 1 : 0,
     keywordMatches: keywordMatches.length,
     titleOverlap,
@@ -167,6 +186,7 @@ function scoreCandidate(row, request) {
 
 function compareCandidates(left, right) {
   const descendingFields = [
+    'topicMatch',
     'exactTitle',
     'keywordMatches',
     'titleOverlap',
@@ -192,15 +212,18 @@ function normalizeText(value) {
     .replace(/[\u0610-\u061a\u064b-\u065f\u0670\u06d6-\u06ed]/gu, '')
     .replace(/[\u0622\u0623\u0625]/gu, '\u0627')
     .replace(/\u0649/gu, '\u064a')
-    .replace(/(?:^|\s)(?:اتحضر|استعد)(?=\s|$)/gu, ' تحضير')
-    .replace(/(?:^|\s)(?:وش\s+)?اسوي\s+قبل(?=\s|$)/gu, ' تحضير')
-    .replace(
-      /(?:^|\s)ل(?:ال)?(ليزر|فيلر|بوتوكس|بوتكس|تقشير|تنظيف)(?=\s|$)/gu,
-      ' ال$1'
-    )
     .replace(/[\p{P}\p{S}]+/gu, ' ')
     .replace(/\s+/gu, ' ')
     .trim();
+}
+
+function medicalTopicForRow(row) {
+  if (row?.category !== 'medical_faq') return null;
+  const title = normalizeText(row.title);
+  if (title.startsWith('تحضير ')) return 'preparation';
+  if (title.startsWith('عناية ما بعد ')) return 'aftercare';
+  if (title.startsWith('الفرق ')) return 'comparison';
+  return null;
 }
 
 function tokenize(value) {

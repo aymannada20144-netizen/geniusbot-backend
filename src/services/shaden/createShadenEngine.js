@@ -2,6 +2,9 @@
 const DeterministicUnderstandingProvider = require(
   './DeterministicUnderstandingProvider'
 );
+const HybridUnderstandingProvider = require(
+  './HybridUnderstandingProvider'
+);
 const DeterministicDialogueDecisionProvider = require(
   './DeterministicDialogueDecisionProvider'
 );
@@ -37,6 +40,7 @@ function createShadenEngine({
   appointmentService = null,
   priceService = null,
   knowledgeService = null,
+  semanticUnderstandingProvider = null,
   conversationalIntelligenceOrchestrator = null,
   sendMessage,
 } = {}) {
@@ -68,8 +72,12 @@ function createShadenEngine({
   conversationalIntelligenceOrchestrator ||
   new ShadenConversationalIntelligenceOrchestrator({
     understandingProvider:
-      new DeterministicUnderstandingProvider({
-        policy,
+      new HybridUnderstandingProvider({
+        deterministicProvider:
+          new DeterministicUnderstandingProvider({
+            policy,
+          }),
+        semanticProvider: semanticUnderstandingProvider,
       }),
 
     decisionProvider:
@@ -137,6 +145,12 @@ function createShadenEngine({
     clinicContext: {
       clinicId: clinic.id,
       clinicName: clinic.display_name_ar || clinic.name || null,
+      ...(clinicData.services.length > 0 ? {
+        services: clinicData.services.map(({ name, aliases }) => ({
+          name,
+          aliases,
+        })),
+      } : {}),
     },
     patientContext: {
       patientId: conversation.patientId || null,
@@ -155,6 +169,7 @@ function createShadenEngine({
         notificationAttempted,
       } = await engine.handle({
         message,
+        dialogueDecision: ciResult?.decision || null,
         currentState: preservedData.shaden,
         clinicData,
         patientIdentity: identityContext,
@@ -204,12 +219,17 @@ function createShadenEngine({
         reply = `${policy.objectionResponse()}\n\n${reply}`;
       }
 
-      if (shouldRetrieveMedicalKnowledge(ciResult) && knowledgeService) {
+      if (
+        shouldRetrieveMedicalKnowledge(ciResult, message.text) &&
+        knowledgeService
+      ) {
         const serviceId = resolveMedicalKnowledgeServiceId({
           text: message.text,
           state: preservedData.shaden,
           services: clinicData.services,
           policy,
+          serviceMentions:
+            ciResult?.understanding?.entities?.serviceMentions,
         });
         let knowledgeResult;
         try {
@@ -219,6 +239,7 @@ function createShadenEngine({
               serviceId,
               type: 'medical_faq',
               query: message.text,
+              semanticTopic: ciResult?.understanding?.knowledgeTopic || null,
               keywords: [],
               required: true,
             })
@@ -297,10 +318,11 @@ function createShadenEngine({
   };
 }
 
-function shouldRetrieveMedicalKnowledge(ciResult) {
+function shouldRetrieveMedicalKnowledge(ciResult, text) {
   const signals = ciResult?.understanding?.signals;
   const decision = ciResult?.decision;
-  return decision?.action === 'RETRIEVE_KNOWLEDGE' &&
+  return Array.from(String(text || '').trim()).length > 1 &&
+    decision?.action === 'RETRIEVE_KNOWLEDGE' &&
     signals?.medicalQuestion === true &&
     Array.isArray(decision.requiredKnowledge) &&
     decision.requiredKnowledge.includes('medical_question') &&
@@ -312,16 +334,37 @@ function shouldRetrieveMedicalKnowledge(ciResult) {
     signals.complaint !== true;
 }
 
-function resolveMedicalKnowledgeServiceId({ text, state, services, policy }) {
+function resolveMedicalKnowledgeServiceId({
+  text,
+  state,
+  services,
+  policy,
+  serviceMentions = [],
+}) {
   const activeServices = Array.isArray(services) ? services : [];
+  if (Array.isArray(serviceMentions) && serviceMentions.length > 0) {
+    return groundSemanticServiceMentions({
+      mentions: serviceMentions,
+      services: activeServices,
+      policy,
+    });
+  }
   const explicitMatches = ShadenEngine.matchingServices(
     text,
     activeServices,
     policy
   );
   if (explicitMatches.length === 1) return String(explicitMatches[0].id);
+  if (explicitMatches.length > 1) return null;
+
+  const tokenMatches = matchingServicesByDistinctiveToken(
+    text,
+    activeServices,
+    policy
+  );
+  if (tokenMatches.length === 1) return String(tokenMatches[0].id);
   if (
-    explicitMatches.length > 1 ||
+    tokenMatches.length > 1 ||
     hasUnresolvedExplicitServiceWording(text, policy)
   ) return null;
 
@@ -332,6 +375,81 @@ function resolveMedicalKnowledgeServiceId({ text, state, services, policy }) {
   ].filter((id) => typeof id === 'string' && activeIds.has(id));
   const distinctIds = [...new Set(persistedIds)];
   return distinctIds.length === 1 ? distinctIds[0] : null;
+}
+
+function groundSemanticServiceMentions({ mentions, services, policy }) {
+  const relevant = mentions.filter((mention) =>
+    mention?.role !== 'excluded' && mention?.confidence >= 0.85
+  );
+  if (relevant.length === 0) return null;
+
+  const groundedIds = new Set();
+  for (const mention of relevant) {
+    const evidence = mention.concept || mention.text;
+    const matches = catalogMatchesForSemanticEvidence(
+      evidence,
+      services,
+      policy
+    );
+    if (matches.length !== 1) return null;
+    groundedIds.add(String(matches[0].id));
+  }
+  return groundedIds.size === 1 ? [...groundedIds][0] : null;
+}
+
+function catalogMatchesForSemanticEvidence(value, services, policy) {
+  const normalized = policy.normalize(value);
+  if (!normalized) return [];
+  const exact = services.filter((service) =>
+    [service.name, ...(Array.isArray(service.aliases) ? service.aliases : [])]
+      .some((candidate) => policy.normalize(candidate) === normalized)
+  );
+  if (exact.length > 0) return distinctServices(exact);
+
+  const contained = services.filter((service) =>
+    [service.name, ...(Array.isArray(service.aliases) ? service.aliases : [])]
+      .some((candidate) => {
+        const catalogValue = policy.normalize(candidate);
+        return catalogValue.includes(normalized) ||
+          normalized.includes(catalogValue);
+      })
+  );
+  return distinctServices(contained);
+}
+
+function distinctServices(services) {
+  return [...new Map(services.map((service) => [String(service.id), service])).values()];
+}
+
+const MEDICAL_SERVICE_CONTEXT_WORDS = new Set([
+  'كيف', 'وش', 'ايش', 'هل', 'تحضير', 'اتحضر', 'استعد', 'اسوي',
+  'قبل', 'بعد', 'جلسه', 'جلسة', 'علاج', 'خدمه', 'خدمة',
+  'معلومات', 'تعليمات',
+]);
+
+function matchingServicesByDistinctiveToken(text, services, policy) {
+  const queryTokens = serviceContextTokens(text, policy);
+  if (queryTokens.size === 0) return [];
+  return services.filter((service) => {
+    const serviceTokens = serviceContextTokens([
+      service.name,
+      ...(Array.isArray(service.aliases) ? service.aliases : []),
+    ].join(' '), policy);
+    return [...queryTokens].some((token) => serviceTokens.has(token));
+  });
+}
+
+function serviceContextTokens(value, policy) {
+  return new Set(policy.normalize(value)
+    .split(/[^\p{L}\p{N}]+/u)
+    .map(stripArabicServiceClitics)
+    .filter((token) =>
+      token.length >= 4 && !MEDICAL_SERVICE_CONTEXT_WORDS.has(token)
+    ));
+}
+
+function stripArabicServiceClitics(token) {
+  return token.replace(/^(?:و|ف)?(?:ب|ك|ل)?ال/u, '');
 }
 
 function hasUnresolvedExplicitServiceWording(text, policy) {

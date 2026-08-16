@@ -30,6 +30,11 @@ const ALLOWED_SOURCES = new Set([
   'booking_engine',
   'appointment_service',
 ]);
+const ALLOWED_SEMANTIC_TOPICS = new Set([
+  'preparation',
+  'aftercare',
+  'comparison',
+]);
 
 const TYPE_SOURCE_POLICY = Object.freeze({
   none: 'none',
@@ -68,6 +73,8 @@ function createKnowledgeRequest(input = {}) {
 
     query: normalizeNullableString(input.query),
 
+    semanticTopic: normalizeSemanticTopic(input.semanticTopic),
+
     keywords: normalizeStringArray(input.keywords),
 
     allowGeneralModelKnowledge: false,
@@ -93,6 +100,13 @@ function normalizeNullableString(value) {
   return normalized || null;
 }
 
+function normalizeSemanticTopic(value) {
+  if (value === undefined || value === null) return null;
+  return typeof value === 'string' && ALLOWED_SEMANTIC_TOPICS.has(value)
+    ? value
+    : null;
+}
+
 function normalizeStringArray(value) {
   if (!Array.isArray(value)) return [];
 
@@ -109,4 +123,5 @@ module.exports = Object.freeze({
   ALLOWED_KNOWLEDGE_TYPES,
   ALLOWED_SOURCES,
   TYPE_SOURCE_POLICY,
+  ALLOWED_SEMANTIC_TOPICS,
 });

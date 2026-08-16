@@ -4,15 +4,16 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const SemanticUnderstandingProvider = require('../../src/services/shaden/SemanticUnderstandingProvider');
 
-function output({ intent, act, text, service = null, branch = null, date = null, signals = {}, secondary = [], correction = null }) {
+function output({ intent, act, text, service = null, branch = null, date = null, signals = {}, secondary = [], correction = null, knowledgeTopic = null }) {
   return {
     version: 1,
     conversationAct: act,
     primaryIntent: intent,
+    knowledgeTopic,
     secondaryIntents: secondary,
     entities: {
-      serviceMentions: service ? [{ text: service, role: correction ? 'requested' : 'requested', confidence: 0.95 }] : [],
-      branchMentions: branch ? [{ text: branch, role: 'requested', confidence: 0.95 }] : [],
+      serviceMentions: service ? [{ text: service, concept: service, role: correction ? 'requested' : 'requested', confidence: 0.95 }] : [],
+      branchMentions: branch ? [{ text: branch, concept: null, role: 'requested', confidence: 0.95 }] : [],
       providerMentions: [],
       dateTimeMentions: date ? [{ text: date, kind: 'date', role: 'requested', confidence: 0.95 }] : [],
       bookingReference: null,
@@ -50,15 +51,18 @@ async function understand(text, result) {
 
 test('SemanticUnderstandingProvider supports semantic language families through model output', async (t) => {
   const preparation = [
-    ['كيف أتحضر لجلسة الليزر', 'جلسة الليزر'],
-    ['وش أسوي قبل الليزر', 'الليزر'],
-    ['ايش المطلوب قبل جلسة إزالة الشعر', 'جلسة إزالة الشعر'],
-    ['في شي أسويه قبل موعد الليزر؟', 'موعد الليزر'],
+    ['كيف أتحضر للفيلر', 'فيلر'],
+    ['وش أسوي قبل الفيلر', 'الفيلر'],
+    ['في تجهيزات قبل جلسة الفيلر؟', 'الفيلر'],
+    ['تحضير الفيلر', 'الفيلر'],
+    ['كيف أتحضر لليزر', 'لليزر'],
+    ['وش المطلوب قبل جلسة إزالة الشعر بالليزر؟', 'إزالة الشعر بالليزر'],
   ];
   for (const [text, service] of preparation) {
     await t.test(`preparation: ${text}`, async () => {
-      const result = await understand(text, output({ intent: 'medical_question', act: 'question', text, service, signals: { medicalQuestion: true } }));
+      const result = await understand(text, output({ intent: 'medical_question', act: 'question', text, service, knowledgeTopic: 'preparation', signals: { medicalQuestion: true } }));
       assert.equal(result.primaryIntent, 'medical_question');
+      assert.equal(result.knowledgeTopic, 'preparation');
       assert.equal(result.signals.medicalQuestion, true);
     });
   }
@@ -75,6 +79,28 @@ test('SemanticUnderstandingProvider supports semantic language families through 
     await t.test(`cancellation: ${text}`, async () => {
       const result = await understand(text, output({ intent: 'appointment_cancellation', act: 'request', text }));
       assert.equal(result.primaryIntent, 'appointment_cancellation');
+    });
+  }
+});
+
+test('SemanticUnderstandingProvider represents aftercare and comparison paraphrases as bounded topics', async (t) => {
+  const cases = [
+    ['وش أسوي بعد البوتوكس؟', 'البوتوكس', 'aftercare'],
+    ['ايش التعليمات بعد الجلسة؟', null, 'aftercare'],
+    ['ايش الفرق بين البوتوكس والفيلر؟', 'البوتوكس', 'comparison'],
+    ['وش الأنسب بوتوكس ولا فيلر؟', 'بوتوكس', 'comparison'],
+  ];
+  for (const [text, service, knowledgeTopic] of cases) {
+    await t.test(text, async () => {
+      const result = await understand(text, output({
+        intent: 'medical_question',
+        act: 'question',
+        text,
+        service,
+        knowledgeTopic,
+        signals: { medicalQuestion: true },
+      }));
+      assert.equal(result.knowledgeTopic, knowledgeTopic);
     });
   }
 });
@@ -121,4 +147,31 @@ test('SemanticUnderstandingProvider rejects invalid JSON and unanchored entities
     });
     await assert.rejects(provider.understand({ text: 'كيف أتحضر لجلسة الليزر' }), { code: 'VALIDATION_ERROR' });
   });
+});
+
+test('SemanticUnderstandingProvider exposes only message text to the model', async () => {
+  const calls = [];
+  const provider = new SemanticUnderstandingProvider({
+    modelClient: {
+      async inferUnderstanding(input) {
+        calls.push(input);
+        return output({ intent: 'unknown', act: 'statement', text: 'hello' });
+      },
+    },
+  });
+
+  await provider.understand({
+    text: 'hello',
+    clinic: {
+      services: [{
+        id: 'model-must-not-see-this',
+        name: 'Service A',
+        aliases: ['Alias A'],
+      }],
+    },
+  });
+
+  assert.deepEqual(calls, [{ text: 'hello' }]);
+  assert.equal(JSON.stringify(calls).includes('model-must-not-see-this'), false);
+  assert.equal(JSON.stringify(calls).includes('Service A'), false);
 });

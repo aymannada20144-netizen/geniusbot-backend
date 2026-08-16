@@ -62,12 +62,19 @@ const ALLOWED_SENTIMENTS = new Set([
   'angry',
   'worried',
 ]);
+const ALLOWED_KNOWLEDGE_TOPICS = new Set([
+  'preparation',
+  'aftercare',
+  'comparison',
+]);
 
 function createConversationalUnderstandingResult(input = {}) {
   const result = {
     version: 1,
 
     primaryIntent: normalizePrimaryIntent(input.primaryIntent),
+
+    knowledgeTopic: normalizeKnowledgeTopic(input.knowledgeTopic),
 
     secondaryIntents: normalizeStringArray(input.secondaryIntents),
 
@@ -160,6 +167,12 @@ function normalizeEntities(value) {
   for (const [key, entityValue] of Object.entries(value)) {
     if (!key.trim()) continue;
 
+    if (key === 'serviceMentions') {
+      const mentions = normalizeServiceMentions(entityValue);
+      if (mentions.length > 0) entities.serviceMentions = mentions;
+      continue;
+    }
+
     if (
       entityValue === null ||
       typeof entityValue === 'string' ||
@@ -173,9 +186,37 @@ function normalizeEntities(value) {
   return entities;
 }
 
+function normalizeKnowledgeTopic(value) {
+  if (typeof value !== 'string') return null;
+  return ALLOWED_KNOWLEDGE_TOPICS.has(value) ? value : null;
+}
+
+function normalizeServiceMentions(value) {
+  if (!Array.isArray(value) || value.length > 8) return [];
+  const roles = new Set(['current', 'requested', 'excluded', 'unspecified']);
+  const result = [];
+  for (const item of value) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return [];
+    const keys = Object.keys(item);
+    if (keys.some((key) => !['text', 'concept', 'role', 'confidence'].includes(key))) return [];
+    if (typeof item.text !== 'string' || !item.text || item.text.length > 200) return [];
+    if (item.concept !== null && (typeof item.concept !== 'string' || !item.concept || item.concept.length > 200)) return [];
+    if (!roles.has(item.role)) return [];
+    if (typeof item.confidence !== 'number' || !Number.isFinite(item.confidence) || item.confidence < 0 || item.confidence > 1) return [];
+    result.push(Object.freeze({
+      text: item.text,
+      concept: item.concept,
+      role: item.role,
+      confidence: item.confidence,
+    }));
+  }
+  return Object.freeze(result);
+}
+
 module.exports = Object.freeze({
   createConversationalUnderstandingResult,
   ALLOWED_PRIMARY_INTENTS,
   ALLOWED_CONVERSATION_ACTS,
   ALLOWED_SENTIMENTS,
+  ALLOWED_KNOWLEDGE_TOPICS,
 });

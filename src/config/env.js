@@ -23,6 +23,8 @@ module.exports = {
   databaseUrl: process.env.DATABASE_URL,
 
   groqApiKey: process.env.GROQ_API_KEY,
+  groqSemanticModel:
+    process.env.GROQ_SEMANTIC_MODEL || 'openai/gpt-oss-20b',
 
   whatsapp: {
     token: process.env.WHATSAPP_TOKEN,

@@ -29,6 +29,7 @@ class ShadenEngine {
 
   handle({
     message,
+    dialogueDecision = null,
     currentState,
     clinicData,
     bookingContext = null,
@@ -44,6 +45,10 @@ class ShadenEngine {
       ? message.rawPayload?.value
       : null;
     let inquiry = this.policy.recognize(text);
+
+    if (inquiry.type === 'unknown' && !interactiveReplyId) {
+      inquiry = inquiryForDialogueDecision(dialogueDecision) || inquiry;
+    }
 
     if (isCurrentChangeServiceInteractiveReply(nextState.changeService, interactiveReplyId)) {
       inquiry = { type: 'unknown' };
@@ -4844,6 +4849,33 @@ function matchingNamed(value, items, policy) {
       name === needle || name.includes(needle) || needle.includes(name)
     );
   }));
+}
+
+function inquiryForDialogueDecision(decision) {
+  switch (decision?.action) {
+    case 'START_BOOKING':
+      return { type: 'booking', serviceText: null };
+    case 'REQUEST_CANCELLATION':
+      return { type: 'booking_cancellation_request' };
+    case 'REQUEST_RESCHEDULE':
+      return { type: 'booking_modification_request' };
+    case 'REQUEST_CHANGE_SERVICE':
+      return { type: 'change_service_request' };
+    case 'REQUEST_CHANGE_BRANCH':
+      return { type: 'change_branch_request' };
+    case 'REQUEST_CHANGE_PROVIDER':
+      return { type: 'change_provider_request' };
+    case 'CHECK_AVAILABILITY':
+      return { type: 'availability_request' };
+    case 'LOOKUP_APPOINTMENT':
+      return { type: 'appointment_query' };
+    case 'ANSWER':
+      return decision.targetIntent === 'courtesy'
+        ? { type: 'courtesy', kind: 'praise' }
+        : null;
+    default:
+      return null;
+  }
 }
 
 function compactArabic(value, policy) {

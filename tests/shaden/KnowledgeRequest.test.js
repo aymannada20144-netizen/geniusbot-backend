@@ -16,6 +16,7 @@ test('KnowledgeRequest', async (t) => {
     assert.equal(result.source, 'none');
     assert.equal(result.allowGeneralModelKnowledge, false);
     assert.equal(result.required, false);
+    assert.equal(result.semanticTopic, null);
     assert.deepEqual(result.keywords, []);
   });
 
@@ -25,6 +26,7 @@ test('KnowledgeRequest', async (t) => {
       clinicId: 'clinic-1',
       serviceId: 'service-1',
       query: 'هل الليزر يسبب ألم؟',
+      semanticTopic: 'preparation',
       keywords: ['ليزر', 'ألم'],
       required: true,
     });
@@ -33,6 +35,7 @@ test('KnowledgeRequest', async (t) => {
     assert.equal(result.source, 'knowledge_base');
     assert.equal(result.allowGeneralModelKnowledge, false);
     assert.equal(result.required, true);
+    assert.equal(result.semanticTopic, 'preparation');
   });
 
   await t.test('routes availability only to booking engine', () => {
@@ -83,6 +86,14 @@ test('KnowledgeRequest', async (t) => {
     });
 
     assert.deepEqual(result.keywords, ['ليزر', 'جلسة']);
+  });
+
+  await t.test('fails closed for an unsupported semantic topic', () => {
+    const result = createKnowledgeRequest({
+      type: 'medical_faq',
+      semanticTopic: 'anything',
+    });
+    assert.equal(result.semanticTopic, null);
   });
 
   await t.test('returns immutable structures', () => {

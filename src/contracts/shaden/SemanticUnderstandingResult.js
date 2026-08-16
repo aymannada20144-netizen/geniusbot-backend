@@ -37,6 +37,12 @@ const AMBIGUOUS_ENTITY_TYPES = Object.freeze([
   'service', 'branch', 'provider', 'date_time', 'booking_reference',
   'appointment_target',
 ]);
+const KNOWLEDGE_TOPICS = Object.freeze([
+  'preparation', 'aftercare', 'comparison',
+]);
+const CANDIDATE_INTENTS = Object.freeze(
+  PRIMARY_INTENTS.filter((intent) => intent !== 'unknown')
+);
 
 const LIMITS = Object.freeze({
   secondaryIntents: 5,
@@ -51,7 +57,8 @@ const LIMITS = Object.freeze({
 
 const TOP_LEVEL_KEYS = Object.freeze([
   'version', 'conversationAct', 'primaryIntent', 'secondaryIntents',
-  'entities', 'signals', 'sentiment', 'confidence', 'ambiguity',
+  'knowledgeTopic', 'entities', 'signals', 'sentiment', 'confidence',
+  'ambiguity',
 ]);
 const ENTITY_KEYS = Object.freeze([
   'serviceMentions', 'branchMentions', 'providerMentions',
@@ -61,9 +68,16 @@ const ENTITY_KEYS = Object.freeze([
 
 const mentionSchema = Object.freeze({
   type: 'object', additionalProperties: false,
-  required: ['text', 'role', 'confidence'],
+  required: ['text', 'concept', 'role', 'confidence'],
   properties: {
-    text: { type: 'string', minLength: 1, maxLength: LIMITS.entityText },
+    text: {
+      type: 'string', minLength: 1, maxLength: LIMITS.entityText,
+      description: 'Exact contiguous surface substring copied from the user text; never a reconstructed grammatical form.',
+    },
+    concept: {
+      description: 'Same-language normalized meaning supported by the surface span; never a more specific service or subtype.',
+      anyOf: [{ type: 'null' }, { type: 'string', minLength: 1, maxLength: LIMITS.entityText }],
+    },
     role: { type: 'string', enum: ENTITY_ROLES },
     confidence: { type: 'number', minimum: 0, maximum: 1 },
   },
@@ -73,8 +87,18 @@ const SEMANTIC_UNDERSTANDING_JSON_SCHEMA = deepFreeze({
   properties: {
     version: { type: 'integer', const: 1 },
     conversationAct: { type: 'string', enum: CONVERSATION_ACTS },
-    primaryIntent: { type: 'string', enum: PRIMARY_INTENTS },
-    secondaryIntents: { type: 'array', maxItems: LIMITS.secondaryIntents, uniqueItems: true, items: { type: 'string', enum: PRIMARY_INTENTS } },
+    primaryIntent: {
+      type: 'string', enum: PRIMARY_INTENTS,
+      description: 'Single best semantic intent under the system-defined conceptual boundaries.',
+    },
+    knowledgeTopic: {
+      description: 'Bounded medical knowledge meaning; null for other medical meanings and all non-medical intents.',
+      anyOf: [
+        { type: 'null' },
+        { type: 'string', enum: KNOWLEDGE_TOPICS },
+      ],
+    },
+    secondaryIntents: { type: 'array', maxItems: LIMITS.secondaryIntents, items: { type: 'string', enum: PRIMARY_INTENTS } },
     entities: {
       type: 'object', additionalProperties: false, required: ENTITY_KEYS,
       properties: {
@@ -123,8 +147,12 @@ const SEMANTIC_UNDERSTANDING_JSON_SCHEMA = deepFreeze({
       properties: {
         requiresClarification: { type: 'boolean' },
         reason: { type: 'string', enum: AMBIGUITY_REASONS },
-        candidateIntents: { type: 'array', maxItems: LIMITS.candidateIntents, uniqueItems: true, items: { type: 'string', enum: PRIMARY_INTENTS } },
-        ambiguousEntityTypes: { type: 'array', maxItems: LIMITS.ambiguousEntityTypes, uniqueItems: true, items: { type: 'string', enum: AMBIGUOUS_ENTITY_TYPES } },
+        candidateIntents: {
+          type: 'array', maxItems: LIMITS.candidateIntents,
+          description: 'Supported non-unknown alternatives only; empty when no supported alternative exists.',
+          items: { type: 'string', enum: CANDIDATE_INTENTS },
+        },
+        ambiguousEntityTypes: { type: 'array', maxItems: LIMITS.ambiguousEntityTypes, items: { type: 'string', enum: AMBIGUOUS_ENTITY_TYPES } },
       },
     },
   },
@@ -148,6 +176,11 @@ function createSemanticUnderstandingResult(input) {
     version: 1,
     conversationAct: enumValue(input.conversationAct, CONVERSATION_ACTS, 'conversationAct'),
     primaryIntent,
+    knowledgeTopic: nullableEnumValue(
+      input.knowledgeTopic,
+      KNOWLEDGE_TOPICS,
+      'knowledgeTopic'
+    ),
     secondaryIntents,
     entities,
     signals,
@@ -176,9 +209,10 @@ function mentionArray(value, field) {
   boundedArray(value, field, LIMITS.mentions);
   return value.map((item, index) => {
     requirePlainObject(item, `${field}[${index}]`);
-    exactKeys(item, ['text', 'role', 'confidence'], `${field}[${index}]`);
+    exactKeys(item, ['text', 'concept', 'role', 'confidence'], `${field}[${index}]`);
     return {
       text: boundedString(item.text, `${field}[${index}].text`, LIMITS.entityText),
+      concept: nullableBoundedString(item.concept, `${field}[${index}].concept`, LIMITS.entityText),
       role: enumValue(item.role, ENTITY_ROLES, `${field}[${index}].role`),
       confidence: confidence(item.confidence, `${field}[${index}].confidence`),
     };
@@ -277,6 +311,11 @@ function enumValue(value, allowed, field) {
   return value;
 }
 
+function nullableEnumValue(value, allowed, field) {
+  if (value === null) return null;
+  return enumValue(value, allowed, field);
+}
+
 function confidence(value, field) {
   if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > 1) {
     invalid(`${field} must be a number between 0 and 1.`);
@@ -324,6 +363,8 @@ module.exports = Object.freeze({
   CORRECTION_TYPES,
   AMBIGUITY_REASONS,
   AMBIGUOUS_ENTITY_TYPES,
+  KNOWLEDGE_TOPICS,
+  CANDIDATE_INTENTS,
   LIMITS,
   SEMANTIC_UNDERSTANDING_JSON_SCHEMA,
 });

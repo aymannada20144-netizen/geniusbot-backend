@@ -25,6 +25,12 @@ const ConversationService = require('./services/ConversationService');
 const PatientService = require('./modules/patients/PatientService');
 const KnowledgeBaseRepository = require('./repositories/KnowledgeBaseRepository');
 const KnowledgeService = require('./services/KnowledgeService');
+const SemanticUnderstandingProvider = require(
+  './services/shaden/SemanticUnderstandingProvider'
+);
+const {
+  createGroqSemanticModelClient,
+} = require('./services/shaden/GroqSemanticModelClient');
 const PriceService = require('./services/PriceService');
 const CommunicationService = require(
   './communication/services/CommunicationService'
@@ -181,6 +187,13 @@ async function buildApp() {
   const knowledgeService = new KnowledgeService(
     new KnowledgeBaseRepository(db)
   );
+  const semanticUnderstandingProvider =
+    new SemanticUnderstandingProvider({
+      modelClient: createGroqSemanticModelClient({
+        apiKey: env.groqApiKey,
+        model: env.groqSemanticModel,
+      }),
+    });
   const catalogService = new MasterDataService(
     new MasterDataRepository(db)
   );
@@ -198,6 +211,7 @@ async function buildApp() {
     appointmentService,
     priceService,
     knowledgeService,
+    semanticUnderstandingProvider,
     sendMessage: sendWhatsAppMessage,
   });
   const whatsappController = new WhatsAppController(conversationEngine);

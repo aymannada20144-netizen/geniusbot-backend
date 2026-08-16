@@ -242,7 +242,7 @@ describe('KnowledgeService normalization and qualification', () => {
     assert.equal(result.status, 'not_found');
   });
 
-  test('normalizes natural preparation morphology without weakening qualification', async () => {
+  test('trusted semantic preparation qualifies without lexical re-proof', async () => {
     const row = candidate({
       title: 'تحضير الليزر',
       keywords: ['تحضير', 'حلاقة', 'شمع', 'نتف'],
@@ -254,10 +254,45 @@ describe('KnowledgeService normalization and qualification', () => {
       'وش أسوي قبل جلسة الليزر',
     ]) {
       const result = await retrieve([row], { query });
-      assert.equal(result.status, 'found', query);
+      const semanticResult = await retrieve([row], {
+        query,
+        semanticTopic: 'preparation',
+      });
+      assert.equal(result.status, 'not_found', query);
+      assert.equal(semanticResult.status, 'found', query);
     }
 
     assert.equal((await retrieve([row], { query: 'تحضير' })).status, 'not_found');
+  });
+
+  test('semantic topics deterministically select controlled medical title metadata', async () => {
+    const rows = [
+      candidate({ id: 'preparation', title: 'تحضير الفيلر' }),
+      candidate({ id: 'aftercare', title: 'عناية ما بعد الفيلر' }),
+      candidate({ id: 'comparison', title: 'الفرق بوتكس/فيلر', service_id: null }),
+    ];
+    for (const [semanticTopic, expected] of [
+      ['preparation', 'preparation'],
+      ['aftercare', 'aftercare'],
+      ['comparison', 'comparison'],
+    ]) {
+      const result = await retrieve(rows, {
+        query: 'unrelated natural language',
+        semanticTopic,
+      });
+      assert.equal(result.references[0].id, expected);
+    }
+  });
+
+  test('rejects unknown semantic topic and does not infer from arbitrary content', async () => {
+    await assert.rejects(
+      retrieve([candidate()], { semanticTopic: 'unknown-topic' }),
+      /semanticTopic is unsupported/u
+    );
+    const result = await retrieve([
+      candidate({ title: 'عنوان عام', content: 'تحضير الفيلر' }),
+    ], { query: 'natural language', semanticTopic: 'preparation' });
+    assert.equal(result.status, 'not_found');
   });
 
   test('a weak generic query cannot choose between competing medical rows', async () => {
