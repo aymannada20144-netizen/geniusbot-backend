@@ -5,6 +5,9 @@ const DeterministicUnderstandingProvider = require(
 const HybridUnderstandingProvider = require(
   './HybridUnderstandingProvider'
 );
+const SemanticCoreCompatibilityProvider = require(
+  './SemanticCoreCompatibilityProvider'
+);
 const DeterministicDialogueDecisionProvider = require(
   './DeterministicDialogueDecisionProvider'
 );
@@ -41,6 +44,8 @@ function createShadenEngine({
   priceService = null,
   knowledgeService = null,
   semanticUnderstandingProvider = null,
+  semanticCoreProvider = null,
+  semanticCoreTimeoutMs = undefined,
   conversationalIntelligenceOrchestrator = null,
   sendMessage,
 } = {}) {
@@ -78,6 +83,12 @@ function createShadenEngine({
             policy,
           }),
         semanticProvider: semanticUnderstandingProvider,
+        semanticCoreProvider: semanticCoreProvider
+          ? new SemanticCoreCompatibilityProvider({ semanticCoreProvider })
+          : null,
+        ...(semanticCoreTimeoutMs === undefined
+          ? {}
+          : { semanticCoreTimeoutMs }),
       }),
 
     decisionProvider:

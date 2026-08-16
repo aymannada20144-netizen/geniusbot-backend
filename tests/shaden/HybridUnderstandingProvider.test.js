@@ -254,3 +254,87 @@ test('semantic failures and gates preserve deterministic behavior unchanged', as
 test('semantic confidence threshold is conservatively fixed at 0.85', () => {
   assert.equal(SEMANTIC_CONFIDENCE_THRESHOLD, 0.85);
 });
+
+test('contextual core is used only after deterministic authority gates', async (t) => {
+  const contextual = semantic({
+    primaryIntent: 'booking',
+    conversationAct: 'confirmation',
+  });
+  const input = {
+    text: 'natural response',
+    interactive: false,
+    context: {
+      contextVersion: 1,
+      active: { goal: 'booking', step: 'awaiting_confirmation' },
+      pending: { kind: 'confirmation', targetType: 'appointment' },
+    },
+  };
+  await t.test('unresolved turn may use compatible contextual evidence', async () => {
+    const result = await new HybridUnderstandingProvider({
+      deterministicProvider: { understand: async () => deterministic() },
+      semanticCoreProvider: { understand: async () => contextual },
+    }).understand(input);
+    assert.equal(result.primaryIntent, 'booking');
+  });
+  for (const [name, deterministicResult, interactive] of [
+    ['interactive reply', deterministic(), true],
+    ['explicit deterministic intent', deterministic({
+      primaryIntent: 'booking', confidence: 1,
+    }), false],
+    ['state-dependent signal', deterministic({
+      signals: signals({ confirmation: true }),
+    }), false],
+  ]) {
+    await t.test(name, async () => {
+      let called = false;
+      const result = await new HybridUnderstandingProvider({
+        deterministicProvider: { understand: async () => deterministicResult },
+        semanticCoreProvider: {
+          understand: async () => {
+            called = true;
+            return contextual;
+          },
+        },
+      }).understand({ ...input, interactive });
+      assert.equal(called, false);
+      assert.deepEqual(result, deterministicResult);
+    });
+  }
+});
+
+test('contextual core failure falls through without changing deterministic result', async () => {
+  const baseline = deterministic();
+  const result = await new HybridUnderstandingProvider({
+    deterministicProvider: { understand: async () => baseline },
+    semanticCoreProvider: {
+      understand: async () => { throw new Error('timeout'); },
+    },
+  }).understand({
+    text: 'response',
+    interactive: false,
+    context: {
+      contextVersion: 1,
+      active: { goal: 'booking', step: 'awaiting_confirmation' },
+      pending: { kind: 'confirmation', targetType: 'appointment' },
+    },
+  });
+  assert.deepEqual(result, baseline);
+});
+
+test('contextual core timeout falls through safely', async () => {
+  const baseline = deterministic();
+  const result = await new HybridUnderstandingProvider({
+    deterministicProvider: { understand: async () => baseline },
+    semanticCoreProvider: { understand: async () => new Promise(() => {}) },
+    semanticCoreTimeoutMs: 5,
+  }).understand({
+    text: 'response',
+    interactive: false,
+    context: {
+      contextVersion: 1,
+      active: { goal: 'booking', step: 'awaiting_confirmation' },
+      pending: { kind: 'confirmation', targetType: 'appointment' },
+    },
+  });
+  assert.deepEqual(result, baseline);
+});

@@ -7,6 +7,12 @@ const {
 const {
   createDialogueDecision,
 } = require('../../contracts/shaden/DialogueDecision');
+const {
+  buildSemanticContext,
+} = require('./SemanticContextBuilder');
+const {
+  createSemanticInteractionEvent,
+} = require('../../contracts/shaden/SemanticInteractionEvent');
 
 class ShadenConversationalIntelligenceOrchestrator {
   constructor({
@@ -32,7 +38,8 @@ class ShadenConversationalIntelligenceOrchestrator {
       patientContext,
     });
 
-    const understanding = await this.#understand(input);
+    const analyzed = await this.#understand(input);
+    const understanding = analyzed.understanding;
     const decision = await this.#decide({
       input,
       understanding,
@@ -43,6 +50,7 @@ class ShadenConversationalIntelligenceOrchestrator {
       mode: 'shadow',
       input,
       understanding,
+      interactionEvent: analyzed.interactionEvent,
       decision,
 
       affectsRuntime: false,
@@ -58,15 +66,16 @@ class ShadenConversationalIntelligenceOrchestrator {
 
   async #understand(input) {
     if (typeof this.understandingProvider?.understand !== 'function') {
-      return createConversationalUnderstandingResult();
+      return normalizedUnderstanding();
     }
 
     try {
-      const raw = await this.understandingProvider.understand(input);
-
-      return createConversationalUnderstandingResult(raw);
+      const raw = typeof this.understandingProvider.understandWithMetadata === 'function'
+        ? await this.understandingProvider.understandWithMetadata(input)
+        : { understanding: await this.understandingProvider.understand(input) };
+      return normalizedUnderstanding(raw.understanding, raw.interactionEvent);
     } catch {
-      return createConversationalUnderstandingResult();
+      return normalizedUnderstanding();
     }
   }
 
@@ -106,10 +115,52 @@ function createSafeInput({
 }) {
   return Object.freeze({
     text: normalizeText(message),
+    context: buildSemanticContext(currentState),
+    interactive: Boolean(
+      message && typeof message === 'object' && message.rawPayload?.value
+    ),
     state: freezePlainSnapshot(currentState),
-    clinic: freezePlainSnapshot(clinicContext),
+    clinic: freezeClinicSnapshot(clinicContext),
     patient: freezePlainSnapshot(patientContext),
   });
+}
+
+function normalizedUnderstanding(understanding, interactionEvent = null) {
+  let event = null;
+  if (interactionEvent !== null && interactionEvent !== undefined) {
+    try {
+      event = createSemanticInteractionEvent(interactionEvent);
+    } catch {
+      event = null;
+    }
+  }
+  return Object.freeze({
+    understanding: createConversationalUnderstandingResult(understanding),
+    interactionEvent: event,
+  });
+}
+
+function freezeClinicSnapshot(value) {
+  const snapshot = { ...freezePlainSnapshot(value) };
+  if (Array.isArray(value?.services)) {
+    snapshot.services = Object.freeze(
+      value.services.slice(0, 100).map((service) => Object.freeze({
+        name: boundedString(service?.name),
+        aliases: Object.freeze(
+          Array.isArray(service?.aliases)
+            ? service.aliases.slice(0, 20).map(boundedString).filter(Boolean)
+            : []
+        ),
+      })).filter(({ name }) => name)
+    );
+  }
+  return Object.freeze(snapshot);
+}
+
+function boundedString(value) {
+  return typeof value === 'string' && value.trim()
+    ? value.trim().slice(0, 200)
+    : null;
 }
 
 function normalizeText(message) {

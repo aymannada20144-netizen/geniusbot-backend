@@ -191,6 +191,58 @@ test('ShadenConversationalIntelligenceOrchestrator', async (t) => {
     assert.deepEqual(result.input.patient, {
       patientId: 'patient-1',
     });
+    assert.deepEqual(result.input.context, {
+      contextVersion: 1,
+      active: null,
+      pending: null,
+    });
+  });
+
+  await t.test('builds bounded context and exposes only interactive presence', async () => {
+    const orchestrator = new ShadenConversationalIntelligenceOrchestrator();
+    const result = await orchestrator.analyze({
+      message: { text: 'نعم', rawPayload: { value: 'private-option-id' } },
+      currentState: {
+        version: 1,
+        booking: { step: 'confirmation', appointmentId: 'private-id' },
+      },
+    });
+    assert.deepEqual(result.input.context, {
+      contextVersion: 1,
+      active: { goal: 'booking', step: 'awaiting_confirmation' },
+      pending: { kind: 'confirmation', targetType: 'appointment' },
+    });
+    assert.equal(result.input.interactive, true);
+    assert.equal(JSON.stringify(result.input).includes('private-option-id'), false);
+    assert.equal(JSON.stringify(result.input.context).includes('private-id'), false);
+  });
+
+  await t.test('propagates only a validated interaction event as metadata', async () => {
+    const event = {
+      eventVersion: 1,
+      type: 'ACCEPT_PENDING',
+      source: 'semantic_core',
+      guard: {
+        contextVersion: 1,
+        goal: 'booking',
+        step: 'awaiting_confirmation',
+        pendingKind: 'confirmation',
+        targetType: 'appointment',
+      },
+    };
+    const orchestrator = new ShadenConversationalIntelligenceOrchestrator({
+      understandingProvider: {
+        understand: async () => ({}),
+        understandWithMetadata: async () => ({
+          understanding: { primaryIntent: 'booking', confidence: 1 },
+          interactionEvent: event,
+        }),
+      },
+    });
+    const result = await orchestrator.analyze({ message: 'response' });
+    assert.deepEqual(result.interactionEvent, event);
+    assert.equal(Object.isFrozen(result.interactionEvent), true);
+    assert.equal(result.decision.action, 'NOOP');
   });
 
   await t.test('returns immutable shadow structures', async () => {

@@ -9,6 +9,7 @@ const {
 
 const SEMANTIC_CONFIDENCE_THRESHOLD = 0.85;
 const DETERMINISTIC_CONFIDENCE_THRESHOLD = 0.85;
+const SEMANTIC_CORE_TIMEOUT_MS = 10000;
 
 const STATE_DEPENDENT_SIGNALS = new Set([
   'confirmation',
@@ -34,7 +35,12 @@ const SENTIMENT_PRIORITY = Object.freeze({
 });
 
 class HybridUnderstandingProvider {
-  constructor({ deterministicProvider, semanticProvider = null } = {}) {
+  constructor({
+    deterministicProvider,
+    semanticProvider = null,
+    semanticCoreProvider = null,
+    semanticCoreTimeoutMs = SEMANTIC_CORE_TIMEOUT_MS,
+  } = {}) {
     if (typeof deterministicProvider?.understand !== 'function') {
       throw new TypeError(
         'HybridUnderstandingProvider requires deterministicProvider.understand().'
@@ -50,14 +56,45 @@ class HybridUnderstandingProvider {
     }
     this.deterministicProvider = deterministicProvider;
     this.semanticProvider = semanticProvider;
+    this.semanticCoreProvider = semanticCoreProvider;
+    this.semanticCoreTimeoutMs = semanticCoreTimeoutMs;
   }
 
   async understand(input = {}) {
+    return (await this.understandWithMetadata(input)).understanding;
+  }
+
+  async understandWithMetadata(input = {}) {
     const deterministic = createConversationalUnderstandingResult(
       await this.deterministicProvider.understand(input)
     );
 
-    if (!this.semanticProvider) return deterministic;
+    if (shouldUseSemanticCore(this.semanticCoreProvider, deterministic, input)) {
+      try {
+        const raw = typeof this.semanticCoreProvider
+          .understandWithInteractionEvent === 'function'
+          ? await withTimeout(
+            this.semanticCoreProvider.understandWithInteractionEvent(input),
+            this.semanticCoreTimeoutMs
+          )
+          : {
+            understanding: await withTimeout(
+              this.semanticCoreProvider.understand(input),
+              this.semanticCoreTimeoutMs
+            ),
+            interactionEvent: null,
+          };
+        const contextual = createSemanticUnderstandingResult(raw.understanding);
+        return metadata(
+          mergeUnderstanding(deterministic, contextual),
+          raw.interactionEvent
+        );
+      } catch {
+        // Contextual semantics fail open to the unchanged legacy path.
+      }
+    }
+
+    if (!this.semanticProvider) return metadata(deterministic);
 
     let semantic;
     try {
@@ -65,11 +102,44 @@ class HybridUnderstandingProvider {
         await this.semanticProvider.understand(input)
       );
     } catch {
-      return deterministic;
+      return metadata(deterministic);
     }
 
-    return mergeUnderstanding(deterministic, semantic);
+    return metadata(mergeUnderstanding(deterministic, semantic));
   }
+}
+
+function metadata(understanding, interactionEvent = null) {
+  return Object.freeze({ understanding, interactionEvent });
+}
+
+function withTimeout(promise, timeoutMs) {
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+    return Promise.reject(new TypeError('Semantic Core timeout must be positive.'));
+  }
+  let timer;
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      timer = setTimeout(
+        () => reject(new Error('Semantic Core inference timed out.')),
+        timeoutMs
+      );
+    }),
+  ]).finally(() => clearTimeout(timer));
+}
+
+function shouldUseSemanticCore(provider, deterministic, input) {
+  if (typeof provider?.understand !== 'function') return false;
+  if (input?.interactive === true) return false;
+  if (!input?.context?.active || !input?.context?.pending) return false;
+  if (
+    deterministic.primaryIntent !== 'unknown' ||
+    deterministic.confidence >= DETERMINISTIC_CONFIDENCE_THRESHOLD
+  ) return false;
+  const signals = deterministic.signals || {};
+  return !['confirmation', 'rejection', 'correction', 'interruption']
+    .some((key) => signals[key] === true);
 }
 
 function mergeUnderstanding(deterministic, semantic) {
@@ -173,3 +243,4 @@ function strongerSentiment(left, right) {
 
 module.exports = HybridUnderstandingProvider;
 module.exports.SEMANTIC_CONFIDENCE_THRESHOLD = SEMANTIC_CONFIDENCE_THRESHOLD;
+module.exports.SEMANTIC_CORE_TIMEOUT_MS = SEMANTIC_CORE_TIMEOUT_MS;

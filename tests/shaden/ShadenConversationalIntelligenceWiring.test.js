@@ -1190,9 +1190,177 @@ describe('Shaden live hybrid understanding composition', () => {
   });
 });
 
+describe('Shaden Semantic Core processMessage behavioral gate', () => {
+  test('deterministic authority ignores conflicting Core interpretation', async () => {
+    const calls = [];
+    const initialState = stateAtServiceSelection();
+    const baseline = await createHarness({ initialState }).send('مرحبا');
+    const integrated = await createHarness({
+      initialState,
+      semanticCoreProvider: coreProvider({
+        primaryGoal: 'appointment_cancel',
+        conversationAct: 'request',
+      }, calls),
+    }).send('مرحبا');
+
+    assert.equal(calls.length, 0);
+    assert.equal(integrated.replyText, baseline.replyText);
+    assert.deepEqual(integrated.state, baseline.state);
+  });
+
+  test('valid Core evidence assists an unresolved active-flow turn', async () => {
+    const calls = [];
+    const initialState = stateAtServiceSelection();
+    const baseline = await createHarness({ initialState })
+      .send('contextual utterance');
+    const integrated = await createHarness({
+      initialState,
+      semanticCoreProvider: coreProvider({
+        primaryGoal: 'booking',
+        conversationAct: 'inform',
+      }, calls),
+    }).send('contextual utterance');
+
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].context.active.goal, 'booking');
+    assert.equal(typeof integrated.replyText, 'string');
+    assert.deepEqual(integrated.state, baseline.state);
+  });
+
+  test('Core error, invalid output, and timeout fail open to R1 behavior', async (t) => {
+    const initialState = stateAtServiceSelection();
+    const text = 'contextual utterance';
+    const baseline = await createHarness({ initialState }).send(text);
+    const cases = [
+      ['error', { async understand() { throw new Error('core unavailable'); } }],
+      ['invalid', { async understand() { return { action: 'EXECUTE' }; } }],
+      ['timeout', { async understand() { return new Promise(() => {}); } }],
+    ];
+    for (const [name, semanticCoreProvider] of cases) {
+      await t.test(name, async () => {
+        const integrated = await createHarness({
+          initialState,
+          semanticCoreProvider,
+          semanticCoreTimeoutMs: 5,
+        }).send(text);
+        assert.equal(integrated.replyText, baseline.replyText);
+        assert.deepEqual(integrated.state, baseline.state);
+      });
+    }
+  });
+
+  test('courtesy remains conversational and cannot enter an operational flow', async () => {
+    const calls = [];
+    const baseline = await createHarness().send('اسمك جميل يا شادن');
+    const integrated = await createHarness({
+      semanticCoreProvider: coreProvider({
+        primaryGoal: 'booking',
+        conversationAct: 'request',
+      }, calls),
+    }).send('اسمك جميل يا شادن');
+
+    assert.equal(calls.length, 0);
+    assert.equal(integrated.replyText, baseline.replyText);
+    assert.deepEqual(integrated.state, baseline.state);
+    assert.equal(integrated.state.data.shaden.booking, undefined);
+  });
+
+  test('R1 medical knowledge routing remains authoritative with Core configured', async () => {
+    const coreCalls = [];
+    const knowledgeCalls = [];
+    const semantic = semanticProvider({
+      primaryIntent: 'medical_question',
+      knowledgeTopic: 'preparation',
+      conversationAct: 'question',
+      signals: { medicalQuestion: true },
+    });
+    const options = {
+      services: KNOWLEDGE_SERVICES,
+      semanticUnderstandingProvider: semantic,
+      knowledgeService: knowledgeFound('تعليمات التحضير المعتمدة', knowledgeCalls),
+    };
+    const integrated = await createHarness({
+      ...options,
+      semanticCoreProvider: coreProvider({
+        primaryGoal: 'appointment_cancel',
+        conversationAct: 'request',
+      }, coreCalls),
+    }).send('كيف أتحضر لجلسة الليزر');
+
+    assert.equal(coreCalls.length, 0);
+    assert.equal(knowledgeCalls.length, 1);
+    assert.match(integrated.replyText, /تعليمات التحضير المعتمدة/u);
+  });
+
+  test('Core appointment-management intent cannot authorize execution', async () => {
+    let mutations = 0;
+    const calls = [];
+    const initialState = persistedState(rootShadenState({
+      cancellation: {
+        intent: 'appointment_cancellation',
+        step: 'awaiting_reference',
+      },
+    }));
+    const integrated = await createHarness({
+      initialState,
+      semanticCoreProvider: coreProvider({
+        primaryGoal: 'appointment_cancel',
+        conversationAct: 'request',
+      }, calls),
+      appointmentService: {
+        async cancelAppointment() { mutations += 1; },
+        async applyValidatedChange() { mutations += 1; },
+      },
+    }).send('contextual utterance');
+
+    assert.equal(calls.length, 1);
+    assert.equal(mutations, 0);
+    assert.equal(typeof integrated.replyText, 'string');
+  });
+
+  test('interactive reply authority prevents Core invocation', async () => {
+    const calls = [];
+    const initialState = stateAtServiceSelection();
+    const baseline = await createHarness({ initialState })
+      .send('اختيار', { value: 'service:authoritative-option' });
+    const integrated = await createHarness({
+      initialState,
+      semanticCoreProvider: coreProvider({
+        primaryGoal: 'booking',
+        conversationAct: 'inform',
+      }, calls),
+    }).send('اختيار', { value: 'service:authoritative-option' });
+
+    assert.equal(calls.length, 0);
+    assert.equal(integrated.replyText, baseline.replyText);
+    assert.deepEqual(integrated.state, baseline.state);
+  });
+
+  test('Core-only interpretation does not create hidden state mutation', async () => {
+    const calls = [];
+    const initialState = stateAtServiceSelection();
+    const before = structuredClone(initialState);
+    const baseline = await createHarness({ initialState })
+      .send('contextual utterance');
+    const integrated = await createHarness({
+      initialState,
+      semanticCoreProvider: coreProvider({
+        primaryGoal: 'booking',
+        conversationAct: 'inform',
+      }, calls),
+    }).send('contextual utterance');
+
+    assert.equal(calls.length, 1);
+    assert.deepEqual(initialState, before);
+    assert.deepEqual(integrated.state, baseline.state);
+  });
+});
+
 function createHarness({
   conversationalIntelligenceOrchestrator = null,
   semanticUnderstandingProvider = null,
+  semanticCoreProvider = null,
+  semanticCoreTimeoutMs = undefined,
   appointmentService = null,
   knowledgeService = null,
   initialState = null,
@@ -1263,6 +1431,8 @@ function createHarness({
 
     conversationalIntelligenceOrchestrator,
     semanticUnderstandingProvider,
+    semanticCoreProvider,
+    semanticCoreTimeoutMs,
 
     async sendMessage(payload) {
       deliveries.push(payload);
@@ -1276,7 +1446,7 @@ function createHarness({
     lastDelivery() {
       return deliveries.at(-1) || null;
     },
-    async send(text) {
+    async send(text, rawPayload = {}) {
       return runtime.processMessage({
         channel: 'whatsapp',
         waMessageId: `in-${++messageNumber}`,
@@ -1285,8 +1455,26 @@ function createHarness({
         metaPhoneNumberId: '123456789',
         messageType: 'text',
         text,
-        rawPayload: {},
+        rawPayload,
       });
+    },
+  };
+}
+
+function coreProvider(overrides = {}, calls = []) {
+  return {
+    async understand(input) {
+      calls.push(input);
+      return {
+        contractVersion: 2,
+        primaryGoal: 'booking',
+        conversationAct: 'inform',
+        confidence: 0.95,
+        interpretation: { status: 'clear' },
+        mentionedEntities: [],
+        additionalGoals: [],
+        ...overrides,
+      };
     },
   };
 }

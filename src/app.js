@@ -31,6 +31,10 @@ const SemanticUnderstandingProvider = require(
 const {
   createGroqSemanticModelClient,
 } = require('./services/shaden/GroqSemanticModelClient');
+const SemanticCoreProvider = require('./services/shaden/SemanticCoreProvider');
+const {
+  createGroqSemanticCoreModelClient,
+} = require('./services/shaden/GroqSemanticCoreModelClient');
 const PriceService = require('./services/PriceService');
 const CommunicationService = require(
   './communication/services/CommunicationService'
@@ -194,6 +198,12 @@ async function buildApp() {
         model: env.groqSemanticModel,
       }),
     });
+  const semanticCoreProvider = new SemanticCoreProvider({
+    modelClient: createGroqSemanticCoreModelClient({
+      apiKey: env.groqApiKey,
+      model: env.groqSemanticModel,
+    }),
+  });
   const catalogService = new MasterDataService(
     new MasterDataRepository(db)
   );
@@ -212,6 +222,7 @@ async function buildApp() {
     priceService,
     knowledgeService,
     semanticUnderstandingProvider,
+    semanticCoreProvider,
     sendMessage: sendWhatsAppMessage,
   });
   const whatsappController = new WhatsAppController(conversationEngine);
