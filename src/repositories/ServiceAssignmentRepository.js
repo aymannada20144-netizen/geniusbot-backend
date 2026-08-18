@@ -180,6 +180,31 @@ class ServiceAssignmentRepository extends BaseRepository {
     return result.rows;
   }
 
+  async listActiveServiceBranchPairs(clinicId) {
+    if (!clinicId) {
+      throw new Error(
+        'ServiceAssignmentRepository.listActiveServiceBranchPairs requires clinicId'
+      );
+    }
+    const result = await this.query(
+      `SELECT DISTINCT sa."service_id", sa."branch_id"
+         FROM ${this.fullTableName} sa
+         JOIN "geniusbot"."branches" b
+           ON b."id" = sa."branch_id"
+          AND b."clinic_id" = sa."clinic_id"
+          AND b."is_active" = TRUE
+         JOIN "geniusbot"."services" s
+           ON s."id" = sa."service_id"
+          AND s."clinic_id" = sa."clinic_id"
+          AND s."is_active" = TRUE
+          AND s."is_booking_enabled" = TRUE
+        WHERE sa."clinic_id" = $1
+          AND sa."is_active" = TRUE`,
+      [clinicId]
+    );
+    return result.rows;
+  }
+
   async findAvailabilityWindow({
     clinicId,
     branchId,

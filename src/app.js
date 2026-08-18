@@ -216,6 +216,7 @@ async function buildApp() {
     patientService,
     messageRepository,
     catalogService,
+    serviceAssignmentRepository: bookingRepositories.serviceAssignments,
     clinicConfigurationSource: assistantIdentity.service,
     bookingEngine,
     appointmentService,

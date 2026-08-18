@@ -157,6 +157,10 @@ class ShadenEngine {
       insuranceCompanies: clinicData?.insuranceCompanies || [],
       insuranceClasses: clinicData?.insuranceClasses || [],
       workingHours: clinicData?.workingHours || [],
+      serviceBranchCompatibilityAvailable:
+        clinicData?.serviceBranchCompatibilityAvailable === true,
+      serviceBranchAssignments:
+        clinicData?.serviceBranchAssignments || [],
     };
 
     const knownPatientId = patientIdentity?.patient?.id || null;
@@ -265,7 +269,7 @@ class ShadenEngine {
           const choice = bookingServiceChoiceReply(
             this.policy.bookingNameCaptured(
               name,
-              bookableServices(safeData.services),
+              compatibleBookableServices(safeData),
               safeData.clinic
             ),
             nextState.booking,
@@ -279,13 +283,6 @@ class ShadenEngine {
     }
 
     if (inquiry.type === 'booking' && !nextState.booking) {
-      const serviceText = inquiry.serviceText === 'موعد' ? null : inquiry.serviceText;
-      const requestedService = serviceText
-        ? findNamedSelection(serviceText, bookableServices(safeData.services), this.policy)
-        : null;
-      if (serviceText && !requestedService) {
-        return { reply: this.policy.serviceExists(null), nextState };
-      }
       nextState.booking = emptyBookingState();
       try {
         const initialPreference = parseBookingPreferredStart(text, null, this.policy, {
@@ -306,22 +303,8 @@ class ShadenEngine {
           nextState,
         };
       }
-      if (requestedService) {
-        return normalizeEngineReply(
-          advanceFromServiceSelection(
-            nextState.booking,
-            requestedService,
-            safeData,
-            this.policy
-          ),
-          nextState
-        );
-      }
       const choice = bookingServiceChoiceReply(
-        this.policy.bookingChooseService(
-          bookableServices(safeData.services),
-          safeData.clinic
-        ),
+        null,
         nextState.booking,
         safeData,
         this.policy
@@ -2033,22 +2016,177 @@ function extractVolunteeredCancellationReason(text, policy) {
   return match?.[1]?.trim() || null;
 }
 
-function advanceFromServiceSelection(booking, service, data, policy) {
-  booking.serviceId = service.id;
-  const cities = availableCities(data.branches, policy);
+function advanceFromServiceSelection(booking, service, data, policy, text = '') {
+  transitionBookingSelection(booking, 'serviceId', service.id);
+  const branchesForService = compatibleBranches(data, service.id);
+  if (branchesForService.length === 0) {
+    transitionBookingSelection(booking, 'serviceId', null);
+    booking.step = 'service';
+    return policy.bookingServiceNotOffered();
+  }
+  const cities = availableCities(branchesForService, policy);
+  const mentionedCity = cities.find((city) =>
+    policy.normalize(text).includes(policy.normalize(city))
+  );
+  if (mentionedCity) {
+    transitionBookingSelection(booking, 'city', mentionedCity);
+    booking.step = 'branch';
+    const branches = branchesForCity(
+      branchesForService,
+      mentionedCity,
+      policy
+    );
+    return branchListReply(policy.bookingChooseBranch(branches), branches, policy);
+  }
   if (cities.length > 1) {
     booking.step = 'city';
     return cityListReply(policy.bookingChooseCity(cities), cities, policy);
   }
   booking.city = cities[0] || null;
   booking.step = 'branch';
-  const branches = branchesForCity(data.branches, booking.city, policy);
+  const branches = branchesForCity(branchesForService, booking.city, policy);
   return branchListReply(policy.bookingChooseBranch(branches), branches, policy);
+}
+
+const BOOKING_DEPENDENCIES = Object.freeze({
+  specialtyId: Object.freeze([
+    'serviceId', 'city', 'branchId', 'doctorId', 'roomId', 'date',
+    'datePeriod', 'timePeriod', 'preferredStart', 'paymentMethodId',
+    'insuranceCompanyId', 'insuranceClassId',
+  ]),
+  serviceId: Object.freeze([
+    'city', 'branchId', 'doctorId', 'roomId', 'date', 'datePeriod',
+    'timePeriod', 'preferredStart', 'paymentMethodId',
+    'insuranceCompanyId', 'insuranceClassId',
+  ]),
+  city: Object.freeze([
+    'branchId', 'doctorId', 'roomId', 'date', 'datePeriod', 'timePeriod',
+    'preferredStart', 'paymentMethodId', 'insuranceCompanyId',
+    'insuranceClassId',
+  ]),
+  branchId: Object.freeze([
+    'doctorId', 'roomId', 'date', 'datePeriod', 'timePeriod',
+    'preferredStart', 'paymentMethodId', 'insuranceCompanyId',
+    'insuranceClassId',
+  ]),
+});
+
+function transitionBookingSelection(booking, field, value) {
+  booking[field] = value;
+  for (const dependent of BOOKING_DEPENDENCIES[field] || []) {
+    booking[dependent] = null;
+  }
+}
+
+function compatibleBranches(data, serviceId) {
+  if (!data.serviceBranchCompatibilityAvailable) return data.branches;
+  const branchIds = new Set(
+    data.serviceBranchAssignments
+      .filter((item) => String(item.serviceId) === String(serviceId))
+      .map((item) => String(item.branchId))
+  );
+  return data.branches.filter((branch) => branchIds.has(String(branch.id)));
+}
+
+function compatibleBookableServices(data) {
+  const services = bookableServices(data.services);
+  if (!data.serviceBranchCompatibilityAvailable) return services;
+  return services.filter((service) =>
+    compatibleBranches(data, service.id).length > 0
+  );
+}
+
+function serviceOfferedAtBranch(data, serviceId, branchId) {
+  if (!data.serviceBranchCompatibilityAvailable) return true;
+  return data.serviceBranchAssignments.some((item) =>
+    String(item.serviceId) === String(serviceId) &&
+    String(item.branchId) === String(branchId)
+  );
+}
+
+function handleBookingUpstreamChange({
+  text,
+  interactiveReplyId,
+  booking,
+  data,
+  policy,
+  bookingEngine,
+  bookingContext,
+  now,
+}) {
+  if (['specialty', 'service'].includes(booking.step)) {
+    return null;
+  }
+  const specialty = findSpecialtySelection(
+    interactiveReplyId,
+    text,
+    data,
+    policy
+  );
+  if (specialty.matched && specialty.specialtyId !== booking.specialtyId) {
+    transitionBookingSelection(booking, 'specialtyId', specialty.specialtyId);
+    booking.step = 'service';
+    const services = servicesForSpecialty(
+      compatibleBookableServices(data),
+      specialty.specialtyId
+    );
+    return serviceListReply(
+      policy.bookingChooseService(services, data.clinic),
+      services,
+      policy
+    );
+  }
+  const service = findServiceSelection(
+    interactiveReplyId,
+    text,
+    compatibleBookableServices(data),
+    policy
+  );
+  if (service && service.id !== booking.serviceId) {
+    return advanceFromServiceSelection(booking, service, data, policy, text);
+  }
+  const serviceBranches = compatibleBranches(data, booking.serviceId);
+  const serviceCities = availableCities(serviceBranches, policy);
+  const city = findCitySelection(interactiveReplyId, text, serviceCities, policy);
+  if (city && policy.normalize(city) !== policy.normalize(booking.city)) {
+    transitionBookingSelection(booking, 'city', city);
+    booking.step = 'branch';
+    const branches = branchesForCity(serviceBranches, city, policy);
+    return branchListReply(policy.bookingChooseBranch(branches), branches, policy);
+  }
+  const branch = findBranchSelection(
+    interactiveReplyId,
+    text,
+    data.branches,
+    policy
+  );
+  if (branch && branch.id !== booking.branchId) {
+    if (!serviceBranches.some((item) => item.id === branch.id)) {
+      booking.step = 'branch';
+      return branchListReply(
+        policy.bookingServiceNotOffered(),
+        branchesForCity(serviceBranches, booking.city, policy),
+        policy
+      );
+    }
+    transitionBookingSelection(booking, 'city', branch.city || booking.city);
+    transitionBookingSelection(booking, 'branchId', branch.id);
+    booking.step = 'date_period';
+    return bookingDatePeriodListReply({
+      booking,
+      data,
+      policy,
+      bookingEngine,
+      bookingContext,
+      now,
+    });
+  }
+  return null;
 }
 
 function emptyBookingState() {
   return {
-    step: 'service',
+    step: 'specialty',
     specialtyId: null,
     serviceId: null,
     city: null,
@@ -2079,6 +2217,35 @@ function handleBookingStep({
   now,
 }) {
   const booking = state.booking;
+
+  const upstreamChange = handleBookingUpstreamChange({
+    text,
+    interactiveReplyId,
+    booking,
+    data,
+    policy,
+    bookingEngine,
+    bookingContext,
+    now,
+  });
+  if (upstreamChange) return upstreamChange;
+  if (
+    booking.branchId &&
+    !serviceOfferedAtBranch(data, booking.serviceId, booking.branchId)
+  ) {
+    transitionBookingSelection(booking, 'branchId', null);
+    booking.step = 'branch';
+    const branches = branchesForCity(
+      compatibleBranches(data, booking.serviceId),
+      booking.city,
+      policy
+    );
+    return branchListReply(
+      policy.bookingServiceNotOffered(),
+      branches,
+      policy
+    );
+  }
 
   if (typeof interactiveReplyId !== 'string') {
     const branch = findById(data.branches, booking.branchId);
@@ -2121,10 +2288,14 @@ function handleBookingStep({
           policy
         );
       }
-      booking.specialtyId = selection.specialtyId;
+      transitionBookingSelection(
+        booking,
+        'specialtyId',
+        selection.specialtyId
+      );
       booking.step = 'service';
       const services = servicesForSpecialty(
-        bookableServices(data.services),
+        compatibleBookableServices(data),
         selection.specialtyId
       );
       const reply = policy.bookingChooseService(services, data.clinic);
@@ -2139,13 +2310,7 @@ function handleBookingStep({
     }
 
     case 'service': {
-      const availableServices = booking.specialtyId == null
-        ? bookableServices(data.services)
-        : servicesForSpecialty(
-          bookableServices(data.services),
-          booking.specialtyId
-        );
-      if (booking.specialtyId == null && availableServices.length > 10) {
+      if (booking.specialtyId == null) {
         booking.step = 'specialty';
         return specialtyListReply(
           policy.specialties(bookingSpecialties(data), data.clinic),
@@ -2153,6 +2318,10 @@ function handleBookingStep({
           policy
         );
       }
+      const availableServices = servicesForSpecialty(
+        compatibleBookableServices(data),
+        booking.specialtyId
+      );
       const service = findServiceSelection(
         interactiveReplyId,
         text,
@@ -2160,25 +2329,7 @@ function handleBookingStep({
         policy
       );
       if (service) {
-        booking.serviceId = service.id;
-        const cities = availableCities(data.branches, policy);
-        const mentionedCity = cities.find(city =>
-          policy.normalize(text).includes(policy.normalize(city))
-        );
-        if (mentionedCity) {
-          booking.city = mentionedCity;
-          booking.step = 'branch';
-          const branches = branchesForCity(data.branches, mentionedCity, policy);
-          return branchListReply(policy.bookingChooseBranch(branches), branches, policy);
-        }
-        if (cities.length > 1) {
-          booking.step = 'city';
-          return cityListReply(policy.bookingChooseCity(cities), cities, policy);
-        }
-        booking.city = cities[0] || null;
-        booking.step = 'branch';
-        const branches = branchesForCity(data.branches, booking.city, policy);
-        return branchListReply(policy.bookingChooseBranch(branches), branches, policy);
+        return advanceFromServiceSelection(booking, service, data, policy, text);
       }
       const reply = bookingKnowledgeOrReminder({
         inquiry,
@@ -2193,12 +2344,13 @@ function handleBookingStep({
     }
 
     case 'city': {
-      const cities = availableCities(data.branches, policy);
+      const serviceBranches = compatibleBranches(data, booking.serviceId);
+      const cities = availableCities(serviceBranches, policy);
       const hasCityReplyId = typeof interactiveReplyId === 'string' &&
         interactiveReplyId.startsWith('city:');
       const directBranch = hasCityReplyId
         ? null
-        : findBranchSelection(null, text, data.branches, policy);
+        : findBranchSelection(null, text, serviceBranches, policy);
       if (directBranch) {
         booking.city = directBranch.city || null;
         booking.branchId = directBranch.id;
@@ -2222,18 +2374,20 @@ function handleBookingStep({
         policy
       );
       if (selectedCity) {
-        booking.city = selectedCity;
-        booking.branchId = null;
-        booking.doctorId = null;
+        transitionBookingSelection(booking, 'city', selectedCity);
         booking.step = 'branch';
-        const branches = branchesForCity(data.branches, selectedCity, policy);
+        const branches = branchesForCity(serviceBranches, selectedCity, policy);
         return branchListReply(policy.bookingChooseBranch(branches), branches, policy);
       }
       return cityListReply(policy.bookingChooseCity(cities), cities, policy);
     }
 
     case 'branch': {
-      const candidates = branchesForCity(data.branches, booking.city, policy);
+      const candidates = branchesForCity(
+        compatibleBranches(data, booking.serviceId),
+        booking.city,
+        policy
+      );
       const branch = findBranchSelection(
         interactiveReplyId,
         text,
@@ -2241,11 +2395,12 @@ function handleBookingStep({
         policy
       );
       if (branch) {
-        booking.city = branch.city || booking.city;
-        booking.branchId = branch.id;
-        booking.date = null;
-        booking.datePeriod = null;
-        booking.timePeriod = null;
+        transitionBookingSelection(
+          booking,
+          'city',
+          branch.city || booking.city
+        );
+        transitionBookingSelection(booking, 'branchId', branch.id);
         booking.step = 'date_period';
         return bookingDatePeriodListReply({
           booking,
@@ -3710,16 +3865,22 @@ function addIsoDays(date, count) {
 }
 
 function bookingServiceChoiceReply(reply, booking, data, policy) {
-  const services = bookableServices(data.services);
-  booking.specialtyId = null;
-  if (services.length <= 10) {
-    booking.step = 'service';
-    return serviceListReply(reply, services, policy);
+  if (booking.specialtyId == null) {
+    booking.step = 'specialty';
+    return specialtyListReply(
+      policy.specialties(bookingSpecialties(data), data.clinic),
+      data,
+      policy
+    );
   }
-  booking.step = 'specialty';
-  return specialtyListReply(
-    policy.specialties(bookingSpecialties(data), data.clinic),
-    data,
+  booking.step = 'service';
+  const services = servicesForSpecialty(
+    compatibleBookableServices(data),
+    booking.specialtyId
+  );
+  return serviceListReply(
+    reply || policy.bookingChooseService(services, data.clinic),
+    services,
     policy
   );
 }
@@ -3779,7 +3940,7 @@ function bookableServices(services) {
 }
 
 function bookingSpecialties(data) {
-  const services = bookableServices(data.services);
+  const services = compatibleBookableServices(data);
   const usedIds = new Set(
     services
       .map(({ specialtyId }) => normalizedSpecialtyId(specialtyId))

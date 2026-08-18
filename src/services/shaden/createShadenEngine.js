@@ -38,6 +38,7 @@ function createShadenEngine({
   patientService = null,
   messageRepository,
   catalogService,
+  serviceAssignmentRepository = null,
   clinicConfigurationSource,
   bookingEngine,
   appointmentService = null,
@@ -63,6 +64,7 @@ function createShadenEngine({
   const dataProvider = new ShadenDataProvider({
     catalogService,
     clinicConfigurationSource,
+    serviceAssignmentRepository,
   });
   const engine = new ShadenEngine({
     policy,

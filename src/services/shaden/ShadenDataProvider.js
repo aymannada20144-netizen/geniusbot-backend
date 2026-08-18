@@ -1,7 +1,11 @@
 'use strict';
 
 class ShadenDataProvider {
-  constructor({ catalogService, clinicConfigurationSource } = {}) {
+  constructor({
+    catalogService,
+    clinicConfigurationSource,
+    serviceAssignmentRepository = null,
+  } = {}) {
     if (typeof catalogService?.list !== 'function') {
       throw new TypeError('ShadenDataProvider requires catalogService.list().');
     }
@@ -10,6 +14,7 @@ class ShadenDataProvider {
       throw new TypeError('ShadenDataProvider requires clinicConfigurationSource.get().');
     }
     this.clinicConfigurationSource = clinicConfigurationSource;
+    this.serviceAssignmentRepository = serviceAssignmentRepository;
   }
 
   async load(clinic) {
@@ -24,6 +29,7 @@ class ShadenDataProvider {
       insuranceClasses,
       workingHours,
       assistantIdentity,
+      serviceBranchAssignments,
     ] = await Promise.all([
       this.catalogService.list('branches', clinicId, { active: true }),
       this.catalogService.list('specialties', clinicId, { active: true }),
@@ -33,6 +39,10 @@ class ShadenDataProvider {
       this.catalogService.list('insurance-classes', clinicId, {}),
       this.catalogService.list('branch-working-hours', clinicId, {}),
       this.clinicConfigurationSource.get(clinicId),
+      typeof this.serviceAssignmentRepository
+        ?.listActiveServiceBranchPairs === 'function'
+        ? this.serviceAssignmentRepository.listActiveServiceBranchPairs(clinicId)
+        : [],
     ]);
     return {
       clinic: {
@@ -63,6 +73,13 @@ class ShadenDataProvider {
         opensAt: item.opens_at || null,
         closesAt: item.closes_at || null,
         isClosed: item.is_closed === true,
+      })),
+      serviceBranchCompatibilityAvailable:
+        typeof this.serviceAssignmentRepository
+          ?.listActiveServiceBranchPairs === 'function',
+      serviceBranchAssignments: serviceBranchAssignments.map((item) => ({
+        serviceId: item.service_id,
+        branchId: item.branch_id,
       })),
     };
   }

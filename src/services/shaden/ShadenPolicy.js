@@ -347,6 +347,7 @@ class ShadenPolicy {
   bookingChooseService(services, clinic) { return this.services(services, clinic, true); }
   bookingChooseCity(cities) { return messageFormatter.formatCities({ items: cities.map(city => this.display(city)), selection: true }); }
   bookingChooseBranch(branches) { return messageFormatter.formatBranches({ items: branches.map(b => ({ ...b, name: this.cleanBranchName(b.name), city: this.display(b.city) })), city: branches[0]?.city, selection: true }); }
+  bookingServiceNotOffered() { return 'الخدمة المختارة غير متاحة في هذا الفرع أو المدينة. اختاري موقعًا متاحًا للخدمة أو غيّري الخدمة. 🌸'; }
   bookingAskAvailability() { return 'ما التاريخ والوقت المناسبان لكِ؟ 🌸'; }
   bookingAskTime() { return messageFormatter.formatBookingClarification({ kind: 'time' }); }
   bookingAskDate() { return messageFormatter.formatBookingClarification({ kind: 'date' }); }
