@@ -14,6 +14,14 @@ const DeterministicDialogueDecisionProvider = require(
 const ShadenDataProvider = require('./ShadenDataProvider');
 const ShadenPolicy = require('./ShadenPolicy');
 const ShadenEngine = require('./ShadenEngine');
+const {
+  lifecycleMetadataFrom,
+  userFacingHandlerResult,
+} = require('../../contracts/shaden/InternalHandlerResult');
+const {
+  validateLifecycleTransition,
+  validatePersistedFlowState,
+} = require('./FlowLifecycle');
 const ClinicDomainQuery = require('./ClinicDomainQuery');
 const FactualQueryPolicy = require('./FactualQueryPolicy');
 const {
@@ -55,6 +63,7 @@ function createShadenEngine({
   semanticCoreProvider = null,
   semanticCoreTimeoutMs = undefined,
   conversationalIntelligenceOrchestrator = null,
+  shadenEngine = null,
   sendMessage,
 } = {}) {
   if (
@@ -85,7 +94,7 @@ function createShadenEngine({
     clinicConfigurationSource,
     serviceAssignmentRepository,
   });
-  const engine = new ShadenEngine({
+  const engine = shadenEngine || new ShadenEngine({
     policy,
     bookingEngine,
     appointmentService,
@@ -202,12 +211,7 @@ function createShadenEngine({
         query: clinicDomainQuery,
         factualQueryPolicy,
       });
-      let {
-        reply,
-        nextState,
-        interaction,
-        notificationAttempted,
-      } = await engine.handle({
+      const internalResult = await engine.handle({
         message,
         dialogueDecision: ciResult?.decision || null,
         clinicDomainRead,
@@ -222,6 +226,13 @@ function createShadenEngine({
           patientId: conversation.patientId || null,
         },
       });
+      validateInternalLifecycleResult(internalResult);
+      let {
+        reply,
+        nextState,
+        interaction,
+        notificationAttempted,
+      } = userFacingHandlerResult(internalResult);
 
       const hasActiveBooking =
         preservedData.shaden?.booking &&
@@ -709,6 +720,31 @@ function safePhoneNumberId(value) {
     : null;
 }
 
+function validateInternalLifecycleResult(result) {
+  try {
+    const metadata = lifecycleMetadataFrom(result);
+    if (metadata.lifecycleOutcome) {
+      validateLifecycleTransition({
+        outcome: metadata.lifecycleOutcome,
+        resultingState: result.nextState,
+      });
+    } else if (metadata.undeclaredLifecycleReason) {
+      validatePersistedFlowState(result.nextState);
+      console.warn('Shaden handler lifecycle remains temporarily undeclared.', {
+        reason: metadata.undeclaredLifecycleReason,
+      });
+    } else {
+      throw new TypeError('Handler result must declare lifecycle metadata.');
+    }
+  } catch (error) {
+    const invariantError = new Error(error?.message || 'Invalid lifecycle result.');
+    invariantError.name = 'LifecycleInvariantError';
+    invariantError.code = 'SHADEN_LIFECYCLE_INVARIANT';
+    invariantError.cause = error;
+    throw invariantError;
+  }
+}
+
 function lastFourDigits(value) {
   if (typeof value !== 'string') return null;
   const digits = value.replace(/\D/g, '');
@@ -716,3 +752,4 @@ function lastFourDigits(value) {
 }
 
 module.exports = createShadenEngine;
+module.exports.validateInternalLifecycleResult = validateInternalLifecycleResult;

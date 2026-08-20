@@ -252,7 +252,12 @@ describe('Shaden conversational intelligence shadow wiring', () => {
   test('REASSURE cannot synthesize a reply when the engine reply is empty', async () => {
     const originalHandle = ShadenEngine.prototype.handle;
     ShadenEngine.prototype.handle = async function handleEmptyReply() {
-      return { reply: null, nextState: { safe: true }, interaction: { dangerous: true } };
+      return {
+        reply: null,
+        nextState: { safe: true },
+        interaction: { dangerous: true },
+        undeclaredLifecycleReason: 'legacy_undeclared',
+      };
     };
     try {
       const harness = createHarness({
@@ -764,7 +769,12 @@ describe('Shaden authoritative medical knowledge wiring', () => {
   test('objection overlay cannot synthesize an empty engine reply', async () => {
     const originalHandle = ShadenEngine.prototype.handle;
     ShadenEngine.prototype.handle = async function handleEmptyReply() {
-      return { reply: '', nextState: { safe: true }, interaction: { unchanged: true } };
+      return {
+        reply: '',
+        nextState: { safe: true },
+        interaction: { unchanged: true },
+        undeclaredLifecycleReason: 'legacy_undeclared',
+      };
     };
     try {
       const harness = createHarness({

@@ -9,6 +9,9 @@ const {
   parsePreferredStart: parseBookingPreferredStart,
   DEFAULT_TIME_ZONE,
 } = require('./BookingDateTimeParser');
+const {
+  lifecycleMetadataFrom,
+} = require('../../contracts/shaden/InternalHandlerResult');
 
 class ShadenEngine {
   constructor({
@@ -94,7 +97,7 @@ class ShadenEngine {
 
     if (inquiry.type === 'appointment_management_clarification') {
       nextState.context = { inquiry: 'appointment_management_clarification' };
-      return {
+      return legacyEngineResult({
         reply: this.policy.appointmentManagementClarification(),
         interaction: {
           version: 1,
@@ -107,7 +110,7 @@ class ShadenEngine {
           ],
         },
         nextState,
-      };
+      });
     }
 
     if (
@@ -175,7 +178,7 @@ class ShadenEngine {
         bookingEngine: this.bookingEngine, clinicId: bookingContext?.clinicId,
         patientId: knownPatientId, conversationId: bookingContext?.conversationId,
         branches: safeData.branches, now: this.clock.now(),
-      }).then((result) => normalizeEngineReply(result, nextState));
+      }).then((result) => normalizeFlowReply(result, nextState, 'changeBranch'));
     }
     if (
       inquiry.type === 'change_service_request' ||
@@ -187,7 +190,7 @@ class ShadenEngine {
         bookingEngine: this.bookingEngine, clinicId: bookingContext?.clinicId,
         patientId: knownPatientId, conversationId: bookingContext?.conversationId,
         services: safeData.services, now: this.clock.now(),
-      }).then((result) => normalizeEngineReply(result, nextState));
+      }).then((result) => normalizeFlowReply(result, nextState, 'changeService'));
     }
     if (
       !nextState.booking &&
@@ -205,7 +208,7 @@ class ShadenEngine {
         patientId: knownPatientId,
         conversationId: bookingContext?.conversationId,
         now: this.clock.now(),
-      }).then((result) => normalizeEngineReply(result, nextState));
+      }).then((result) => normalizeFlowReply(result, nextState, 'reschedule'));
     }
     if (
       !nextState.booking &&
@@ -237,7 +240,7 @@ class ShadenEngine {
           conversationId: bookingContext?.conversationId,
         });
       return handler.then((result) =>
-        normalizeEngineReply(result, nextState)
+        normalizeFlowReply(result, nextState, 'cancellation')
       );
     }
 
@@ -255,7 +258,7 @@ class ShadenEngine {
         priceService: this.priceService,
         now: this.clock.now(),
         bookingContext,
-      }).then((result) => normalizeEngineReply(result, nextState));
+      }).then((result) => normalizeLegacyReply(result, nextState));
     }
 
     if (canonicalCustomerName && nextState.step === 'customer_name') {
@@ -277,9 +280,9 @@ class ShadenEngine {
             safeData,
             this.policy
           );
-          return { ...choice, nextState };
+          return normalizeFlowReply(choice, nextState, 'booking');
         }
-        return { reply: this.policy.nameCaptured(name), nextState };
+        return legacyEngineResult({ reply: this.policy.nameCaptured(name), nextState });
       }
     }
 
@@ -299,10 +302,9 @@ class ShadenEngine {
       nextState.context = null;
       if (!customerName) {
         nextState.step = 'customer_name';
-        return {
+        return normalizeFlowReply({
           reply: this.policy.bookingCustomerName(),
-          nextState,
-        };
+        }, nextState, 'booking');
       }
       const choice = bookingServiceChoiceReply(
         null,
@@ -310,7 +312,7 @@ class ShadenEngine {
         safeData,
         this.policy
       );
-      return { ...choice, nextState };
+      return normalizeFlowReply(choice, nextState, 'booking');
     }
 
     if (nextState.booking) {
@@ -330,17 +332,17 @@ class ShadenEngine {
       if (bookingReply) {
         if (typeof bookingReply.then === 'function') {
           return bookingReply.then((result) =>
-            normalizeEngineReply(result, nextState)
+            normalizeFlowReply(result, nextState, 'booking')
           );
         }
-        return normalizeEngineReply(bookingReply, nextState);
+        return normalizeFlowReply(bookingReply, nextState, 'booking');
       }
     }
 
     if (inquiry.type === 'change_service_request') {
       nextState.context = { inquiry: 'change_service_request' };
       const reply = this.policy.changeServiceUnsupported();
-      return {
+      return legacyEngineResult({
         reply,
         interaction: {
           version: 1,
@@ -353,7 +355,7 @@ class ShadenEngine {
           ],
         },
         nextState,
-      };
+      });
     }
 
     let reply;
@@ -365,7 +367,7 @@ class ShadenEngine {
     }
 
     applySocialState(nextState, inquiry);
-    return { reply, nextState };
+    return legacyEngineResult({ reply, nextState });
   }
 
   replyFor(inquiry, data, customerName, clinicDomainRead = null) {
@@ -657,7 +659,10 @@ async function handleAppointmentReschedule({
           source: 'shaden', ...(conversationId ? { conversationId } : {}) }
       );
       clearRescheduleState(state);
-      return policy.rescheduleSuccessful(result);
+      return {
+        reply: policy.rescheduleSuccessful(result),
+        lifecycleTerminalReason: 'completed',
+      };
     } catch (error) {
       clearRescheduleState(state);
       return String(error?.code || '').includes('SLOT') || error?.name === 'ConflictError'
@@ -812,7 +817,10 @@ async function handleChangeBranch({
         }, flow.reviewedUpdatedAt
       );
       clearChangeBranchState(state);
-      return policy.changeBranchSuccessful(result.booking_reference);
+      return {
+        reply: policy.changeBranchSuccessful(result.booking_reference),
+        lifecycleTerminalReason: 'completed',
+      };
     } catch {
       return terminalChangeBranchFailure(state, policy);
     }
@@ -1149,7 +1157,10 @@ async function handleChangeService({
         }, flow.reviewedUpdatedAt
       );
       clearChangeServiceState(state);
-      return policy.changeServiceSuccessful(result.booking_reference);
+      return {
+        reply: policy.changeServiceSuccessful(result.booking_reference),
+        lifecycleTerminalReason: 'completed',
+      };
     } catch {
       return terminalChangeServiceFailure(state, policy);
     }
@@ -1796,9 +1807,13 @@ async function handleCancellationConfirmation({
           ? policy.cancellationNotificationPending()
           : null,
         notificationAttempted: true,
+        lifecycleTerminalReason: 'completed',
       };
     }
-    return policy.cancellationSuccessful();
+    return {
+      reply: policy.cancellationSuccessful(),
+      lifecycleTerminalReason: 'completed',
+    };
   } catch (error) {
     clearCancellationState(state);
     return cancellationFailureReply(error, policy);
@@ -2923,7 +2938,8 @@ async function executeConfirmedBooking({
       booking.patientName || customerName || null;
     const resolvedBookingReference = appointment?.booking_reference ||
       result.references?.[0] || null;
-    return policy.bookingCreated({
+    return {
+      reply: policy.bookingCreated({
       service: appointment?.service_name
         ? { ...catalogService, name: appointment.service_name }
         : catalogService,
@@ -2952,7 +2968,9 @@ async function executeConfirmedBooking({
       bookingReference: resolvedBookingReference,
       quotedPrice: appointment?.quoted_price ?? null,
       currency: appointment?.currency ?? null,
-    });
+      }),
+      lifecycleTerminalReason: 'completed',
+    };
   }
   if (result.status === 'unavailable') {
     booking.step = 'availability';
@@ -3028,9 +3046,47 @@ function normalizeEngineReply(result, nextState) {
       ...(result.notificationAttempted
         ? { notificationAttempted: true }
         : {}),
+      ...lifecycleMetadataFrom(result),
     };
   }
   return { reply: result, nextState };
+}
+
+function normalizeFlowReply(result, nextState, owner) {
+  const normalized = normalizeEngineReply(result, nextState);
+  const activeFlow = nextState?.[owner];
+  const terminalReason = result && typeof result === 'object'
+    ? result.lifecycleTerminalReason
+    : null;
+  normalized.lifecycleOutcome = activeFlow
+    ? {
+      lifecycleVersion: 1,
+      type: 'continue',
+      owner,
+      nextStep: activeFlow.step,
+      reason: null,
+    }
+    : {
+      lifecycleVersion: 1,
+      type: 'terminal',
+      owner,
+      nextStep: null,
+      reason: terminalReason || 'aborted',
+    };
+  return normalized;
+}
+
+function normalizeLegacyReply(result, nextState) {
+  const normalized = normalizeEngineReply(result, nextState);
+  normalized.undeclaredLifecycleReason = 'legacy_undeclared';
+  return normalized;
+}
+
+function legacyEngineResult(result) {
+  return {
+    ...result,
+    undeclaredLifecycleReason: 'legacy_undeclared',
+  };
 }
 
 function paymentMethodReply(reply, paymentMethods, policy) {
@@ -5722,11 +5778,23 @@ function time(value) { return value ? String(value).slice(0, 5) : 'غير محد
 
 ShadenEngine.MAX_CANCELLATION_VERIFICATION_ATTEMPTS =
   MAX_CANCELLATION_VERIFICATION_ATTEMPTS;
+ShadenEngine.createBookingState = emptyBookingState;
 ShadenEngine.createCancellationState = createCancellationState;
+ShadenEngine.createRescheduleState = createRescheduleState;
+ShadenEngine.createChangeServiceState = createChangeServiceState;
+ShadenEngine.createChangeBranchState = createChangeBranchState;
 ShadenEngine.clearCancellationState = clearCancellationState;
 ShadenEngine.replaceCancellationState = replaceCancellationState;
 ShadenEngine.recordCancellationVerificationFailure =
   recordCancellationVerificationFailure;
 ShadenEngine.matchingServices = matchingServices;
+ShadenEngine.normalizeEngineReply = normalizeEngineReply;
+ShadenEngine.FLOW_LIFECYCLE_STEPS = Object.freeze({
+  booking: Object.freeze([...BOOKING_STEPS]),
+  cancellation: Object.freeze([...CANCELLATION_STEPS]),
+  reschedule: Object.freeze([...RESCHEDULE_STEPS]),
+  changeService: Object.freeze([...CHANGE_SERVICE_STEPS]),
+  changeBranch: Object.freeze([...CHANGE_BRANCH_STEPS]),
+});
 
 module.exports = ShadenEngine;
