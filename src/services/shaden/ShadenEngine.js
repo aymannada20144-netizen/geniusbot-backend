@@ -659,6 +659,15 @@ async function handleAppointmentReschedule({
           source: 'shaden', ...(conversationId ? { conversationId } : {}) }
       );
       clearRescheduleState(state);
+      if (result?.communication?.attempted === true) {
+        return {
+          reply: result.communication.success === false
+            ? policy.rescheduleNotificationPending()
+            : null,
+          notificationAttempted: true,
+          lifecycleTerminalReason: 'completed',
+        };
+      }
       return {
         reply: policy.rescheduleSuccessful(result),
         lifecycleTerminalReason: 'completed',

@@ -181,6 +181,51 @@ class NotificationRepository extends BaseRepository {
     return result.rows[0] || null;
   }
 
+  async loadAppointmentDeliveryContext(appointmentId) {
+    const result = await this.query(
+      `SELECT
+         a.id AS appointment_id,
+         a.clinic_id,
+         a.status AS appointment_status,
+         a.booking_reference AS appointment_reference,
+         a.appointment_start,
+         p.id AS patient_id,
+         p.full_name AS patient_name,
+         COALESCE(
+           p.whatsapp_id,
+           p.phone_number
+         ) AS recipient,
+         s.name AS service_name,
+         d.full_name AS doctor_name,
+         b.name AS branch_name,
+         r.room_number,
+         c.name AS clinic_name,
+         c.timezone AS clinic_timezone
+       FROM geniusbot.appointments AS a
+       JOIN geniusbot.clinics AS c
+         ON c.id = a.clinic_id
+       JOIN geniusbot.patients AS p
+         ON p.id = a.patient_id
+        AND p.clinic_id = a.clinic_id
+       JOIN geniusbot.services AS s
+         ON s.id = a.service_id
+        AND s.clinic_id = a.clinic_id
+       JOIN geniusbot.branches AS b
+         ON b.id = a.branch_id
+        AND b.clinic_id = a.clinic_id
+       LEFT JOIN geniusbot.doctors AS d
+         ON d.id = a.doctor_id
+        AND d.clinic_id = a.clinic_id
+       LEFT JOIN geniusbot.rooms AS r
+         ON r.id = a.room_id
+       WHERE a.id = $1
+       LIMIT 1`,
+      [appointmentId]
+    );
+
+    return result.rows[0] || null;
+  }
+
   async markSent(reminderId) {
     const result = await this.query(
       `UPDATE geniusbot.appointment_reminders

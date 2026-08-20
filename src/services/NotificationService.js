@@ -107,6 +107,85 @@ class NotificationService {
     return this.#deliver(claimed, { recoverCancellation: true });
   }
 
+  async sendRescheduleConfirmation(appointmentId) {
+    validateUuid(appointmentId, 'appointmentId');
+    if (!this.communicationService) {
+      return { attempted: false, success: false, status: 'not_configured' };
+    }
+
+    try {
+      const context = await this.notificationRepository
+        .loadAppointmentDeliveryContext(appointmentId);
+      if (!context?.recipient) {
+        const error = new Error('Reschedule delivery context is missing recipient.');
+        error.code = 'RESCHEDULE_CONTEXT_INCOMPLETE';
+        throw error;
+      }
+
+      const messageContext = this.messageContextBuilder.build(
+        {
+          patient: { full_name: context.patient_name },
+          service: { name: context.service_name },
+          branch: { name: context.branch_name },
+          appointment: {
+            ...context,
+            booking_reference: context.appointment_reference,
+          },
+        },
+        {
+          timezone: context.clinic_timezone,
+          locale: 'ar-SA-u-ca-gregory-nu-latn',
+        }
+      ).context;
+
+      const payload = {
+        phone: normalizeSaudiMobileDigits(
+          context.recipient,
+          'appointment.recipient'
+        ),
+        patientName: messageContext.patient_name,
+        appointmentNumber: messageContext.booking_reference,
+        serviceName: messageContext.service_name,
+        branchName: messageContext.branch_name,
+        appointmentDate: messageContext.appointment_date,
+        appointmentTime: messageContext.appointment_time,
+        appointmentId: context.appointment_id,
+        patientId: context.patient_id,
+        clinicId: context.clinic_id,
+      };
+      this.#validateReschedulePayload(payload);
+
+      const result = await this.communicationService.send(
+        MessageTypes.APPOINTMENT_RESCHEDULED,
+        payload
+      );
+      if (result?.success !== true) {
+        return {
+          attempted: true,
+          success: false,
+          status: 'failed',
+          errorCode: result?.error?.code || 'RESCHEDULE_NOTIFICATION_FAILED',
+          retryable: result?.error?.retryable !== false,
+        };
+      }
+
+      return {
+        attempted: true,
+        success: true,
+        status: 'sent',
+        messageId: result.transportResult?.messageId || null,
+      };
+    } catch (error) {
+      return {
+        attempted: true,
+        success: false,
+        status: 'failed',
+        errorCode: error?.code || 'RESCHEDULE_NOTIFICATION_FAILED',
+        retryable: error?.retryable !== false,
+      };
+    }
+  }
+
   async rescheduleAppointmentNotifications(appointment) {
     await this.cancelAppointmentNotifications(appointment.id);
     return this.scheduleAppointmentLifecycle(appointment);
@@ -370,6 +449,26 @@ class NotificationService {
         `Reminder delivery context is missing ${missingField}.`
       );
       error.code = 'REMINDER_CONTEXT_INCOMPLETE';
+      throw error;
+    }
+  }
+
+  #validateReschedulePayload(payload) {
+    const requiredFields = [
+      'phone', 'patientName', 'appointmentNumber', 'serviceName',
+      'branchName', 'appointmentDate', 'appointmentTime', 'appointmentId',
+      'patientId', 'clinicId',
+    ];
+    const missingField = requiredFields.find((field) => {
+      const value = payload[field];
+      return value === null || value === undefined ||
+        (typeof value === 'string' && value.trim() === '');
+    });
+    if (missingField) {
+      const error = new Error(
+        `Reschedule delivery context is missing ${missingField}.`
+      );
+      error.code = 'RESCHEDULE_CONTEXT_INCOMPLETE';
       throw error;
     }
   }

@@ -118,6 +118,9 @@ class ShadenPolicy {
   }
   rescheduleAskConfirmation() { return 'يرجى تأكيد تغيير الموعد أو الاحتفاظ بالموعد الحالي. 🌸'; }
   rescheduleSuccessful() { return 'تم تغيير الموعد بنجاح. 🌸'; }
+  rescheduleNotificationPending() {
+    return 'تم تغيير الموعد بنجاح، وتعذر إرسال إشعار التأكيد الآن.';
+  }
   rescheduleSlotUnavailable() { return 'الوقت المختار لم يعد متاحًا. ابدأ الطلب مجددًا لاختيار وقت آخر. 🌸'; }
   rescheduleExecutionFailed() { return 'تعذر تغيير الموعد حاليًا. يرجى المحاولة لاحقًا. 🌸'; }
 

@@ -806,22 +806,27 @@ class AppointmentService {
       success: false,
       status: 'not_configured',
     };
+    let reminders = null;
+    let reminderMaintenance = {
+      attempted: false,
+      success: false,
+      status: 'not_configured',
+    };
     if (
       this.notificationService &&
       typeof this.notificationService.rescheduleAppointmentNotifications ===
-        'function'
+      'function'
     ) {
       try {
-        const reminders = await this.notificationService
+        reminders = await this.notificationService
           .rescheduleAppointmentNotifications(result.appointment);
-        communication = {
+        reminderMaintenance = {
           attempted: true,
           success: true,
           status: 'rescheduled',
-          reminders,
         };
       } catch (error) {
-        communication = {
+        reminderMaintenance = {
           attempted: true,
           success: false,
           status: 'failed',
@@ -830,9 +835,39 @@ class AppointmentService {
         console.error('Appointment reminder rescheduling failed.', {
           appointmentId,
           clinicId,
+          errorCode: reminderMaintenance.errorCode,
+        });
+      }
+    }
+
+    if (
+      this.notificationService &&
+      typeof this.notificationService.sendRescheduleConfirmation === 'function'
+    ) {
+      try {
+        communication = await this.notificationService
+          .sendRescheduleConfirmation(result.appointment.id);
+      } catch (error) {
+        communication = {
+          attempted: true,
+          success: false,
+          status: 'failed',
+          errorCode: error?.code || 'RESCHEDULE_NOTIFICATION_FAILED',
+          retryable: error?.retryable !== false,
+        };
+        console.error('Reschedule confirmation delivery failed.', {
+          appointmentId,
+          clinicId,
           errorCode: communication.errorCode,
         });
       }
+      communication = {
+        ...communication,
+        reminders,
+        reminderMaintenance,
+      };
+    } else if (reminderMaintenance.attempted) {
+      communication = { ...reminderMaintenance, reminders };
     }
 
     return {

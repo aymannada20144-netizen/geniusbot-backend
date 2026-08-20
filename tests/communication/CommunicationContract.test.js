@@ -16,6 +16,7 @@ describe('Communication Contract v1', () => {
       'VISIT_COMPLETED',
       'REVIEW_REQUEST',
       'APPOINTMENT_CANCELLED',
+      'APPOINTMENT_RESCHEDULED',
       'NO_SHOW',
     ]);
   });
