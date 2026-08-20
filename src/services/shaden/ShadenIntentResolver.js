@@ -4,8 +4,9 @@ const { normalizeArabic } = require('./ShadenArabicNormalizer');
 
 const REQUEST_PREFIX = '(?:(?:اريد|ريد|ابي|ابغي|ابغى|ابغا|ودي|ممكن|هل يمكنني)\\s+)?';
 const APPOINTMENT_OBJECT = '(?:الحجز|حجز|حجزي|الموعد|موعد|موعدي)';
+const EXPLICIT_CANCELLATION_ACTION = '(?:الغاء|الغي|الغئ|الغيه)';
 const CANCELLATION_PATTERN = new RegExp(
-  `^(?:${REQUEST_PREFIX}(?:الغاء|الغي|الغئ|حذف|احذف|اعتذر عن|افك|فكي|شيلي|شيل)\\s*${APPOINTMENT_OBJECT}|(?:كنسل|كانسل|الغا|الالغاء|حذف)(?:\\s+${APPOINTMENT_OBJECT})?|ما\\s+ابغ[ىي]\\s+(?:الموعد|احضر)|(?:please\\s+)?cancel(?:\\s+(?:my\\s+)?(?:appointment|booking))?)(?:\\s|$)`,
+  `^(?:${REQUEST_PREFIX}${EXPLICIT_CANCELLATION_ACTION}$|${REQUEST_PREFIX}(?:${EXPLICIT_CANCELLATION_ACTION}|حذف|احذف|اعتذر عن|افك|فكي|شيلي|شيل)\\s*${APPOINTMENT_OBJECT}|(?:كنسل|كانسل|الغا|الالغاء|حذف)(?:\\s+${APPOINTMENT_OBJECT})?|ما\\s+ابغ[ىي]\\s+(?:الموعد|احضر)|(?:please\\s+)?cancel(?:\\s+(?:my\\s+)?(?:appointment|booking))?)(?:\\s|$)`,
   'u'
 );
 const RESCHEDULE_PATTERN = new RegExp(

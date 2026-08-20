@@ -45,6 +45,17 @@ describe('Shaden cancellation production wiring', () => {
     });
   });
 
+  test('raw bare cancellation enters review before production execution', async () => {
+    const harness = createHarness({ knownPatient: true });
+    const reviewed = await harness.send('الغاء');
+
+    assert.match(reviewed.replyText, /تأكيد إلغاء هذا الموعد/u);
+    assert.equal(harness.cancelCalls.length, 0);
+
+    await harness.send('نعم');
+    assert.equal(harness.cancelCalls.length, 1);
+  });
+
   test('unknown patient verifies before the injected service can cancel', async () => {
     const harness = createHarness({ knownPatient: false });
     const challenge = await harness.send('إلغاء الحجز 25DD4527');
