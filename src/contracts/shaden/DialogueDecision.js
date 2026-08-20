@@ -1,5 +1,9 @@
 'use strict';
 
+const {
+  createClinicDomainEntityProposals,
+} = require('./ClinicDomainEntityProposals');
+
 const ALLOWED_ACTIONS = new Set([
   'NOOP',
 
@@ -69,6 +73,10 @@ function createDialogueDecision(input = {}) {
 
     resumeGoal: normalizeNullableString(input.resumeGoal),
 
+    proposedDomainConstraints: normalizeProposedDomainConstraints(
+      input.proposedDomainConstraints
+    ),
+
     flags: {
       sensitive: SENSITIVE_ACTIONS.has(action),
       requiresKnowledge: input.flags?.requiresKnowledge === true,
@@ -86,8 +94,17 @@ function createDialogueDecision(input = {}) {
   return Object.freeze({
     ...decision,
     requiredKnowledge: Object.freeze([...decision.requiredKnowledge]),
+    proposedDomainConstraints: decision.proposedDomainConstraints,
     flags: Object.freeze({ ...decision.flags }),
   });
+}
+
+function normalizeProposedDomainConstraints(value) {
+  try {
+    return createClinicDomainEntityProposals(value);
+  } catch {
+    return createClinicDomainEntityProposals();
+  }
 }
 
 function enforceSafety(decision) {

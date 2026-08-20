@@ -599,6 +599,24 @@ function createHarness(initialShadenState) {
       catalogService: {
         list: async (resource) => reload(resources[resource] || []),
       },
+      serviceRepository: {
+        findBookableByClinicId: async () => reload(resources.services),
+      },
+      branchRepository: {
+        findActiveByClinicId: async () => reload(resources.branches),
+      },
+      serviceAssignmentRepository: {
+        listActiveDomainAssignments: async () => resources.services.flatMap((service) =>
+          resources.branches.map((branch) => ({
+            service_id: service.id,
+            branch_id: branch.id,
+          }))),
+        listActiveServiceBranchPairs: async () => resources.services.flatMap((service) =>
+          resources.branches.map((branch) => ({
+            service_id: service.id,
+            branch_id: branch.id,
+          }))),
+      },
       clinicConfigurationSource: {
         get: async () => ({ assistantName: 'شادن', assistantGender: 'female' }),
       },

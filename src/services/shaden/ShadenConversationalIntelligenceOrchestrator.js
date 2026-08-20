@@ -14,6 +14,11 @@ const {
   createSemanticInteractionEvent,
 } = require('../../contracts/shaden/SemanticInteractionEvent');
 
+const DOMAIN_CONSTRAINT_FIELDS = Object.freeze([
+  'specialtyId', 'specialtyText', 'serviceId', 'serviceText', 'city',
+  'branchId', 'branchText', 'doctorId', 'doctorText', 'date', 'timePeriod',
+]);
+
 class ShadenConversationalIntelligenceOrchestrator {
   constructor({
     understandingProvider = null,
@@ -90,7 +95,13 @@ class ShadenConversationalIntelligenceOrchestrator {
         understanding,
       });
 
-      return createDialogueDecision(raw);
+      return createDialogueDecision({
+        ...raw,
+        proposedDomainConstraints: proposedDomainConstraints(
+          understanding.entities,
+          raw?.proposedDomainConstraints
+        ),
+      });
     } catch {
       return createDialogueDecision();
     }
@@ -123,6 +134,39 @@ function createSafeInput({
     clinic: freezeClinicSnapshot(clinicContext),
     patient: freezePlainSnapshot(patientContext),
   });
+}
+
+function proposedDomainConstraints(entities, existing = null) {
+  if (!entities || typeof entities !== 'object' || Array.isArray(entities)) {
+    return {};
+  }
+  const constraints = existing && typeof existing === 'object' && !Array.isArray(existing)
+    ? { ...existing }
+    : {};
+  DOMAIN_CONSTRAINT_FIELDS.reduce((result, field) => {
+    if (Object.hasOwn(entities, field)) result[field] = entities[field];
+    return result;
+  }, constraints);
+  applySemanticMentions(constraints, entities.serviceMentions, 'service');
+  applySemanticMentions(constraints, entities.branchMentions, 'branch');
+  return constraints;
+}
+
+function applySemanticMentions(constraints, mentions, entityType) {
+  if (!Array.isArray(mentions)) return;
+  const candidates = [...new Set(mentions
+    .filter((mention) => mention?.role !== 'excluded' && mention?.confidence >= 0.85)
+    .map((mention) => mention.concept || mention.text)
+    .filter((value) => typeof value === 'string' && value.trim())
+    .map((value) => value.trim()))];
+  const textField = `${entityType}Text`;
+  const candidateField = `${entityType}Candidates`;
+  if (candidates.length === 1) {
+    constraints[textField] = candidates[0];
+  } else if (candidates.length > 1) {
+    delete constraints[textField];
+    constraints[candidateField] = candidates;
+  }
 }
 
 function normalizedUnderstanding(understanding, interactionEvent = null) {

@@ -167,9 +167,9 @@ function normalizeEntities(value) {
   for (const [key, entityValue] of Object.entries(value)) {
     if (!key.trim()) continue;
 
-    if (key === 'serviceMentions') {
-      const mentions = normalizeServiceMentions(entityValue);
-      if (mentions.length > 0) entities.serviceMentions = mentions;
+    if (key === 'serviceMentions' || key === 'branchMentions') {
+      const mentions = normalizeEntityMentions(entityValue);
+      if (mentions.length > 0) entities[key] = mentions;
       continue;
     }
 
@@ -191,7 +191,7 @@ function normalizeKnowledgeTopic(value) {
   return ALLOWED_KNOWLEDGE_TOPICS.has(value) ? value : null;
 }
 
-function normalizeServiceMentions(value) {
+function normalizeEntityMentions(value) {
   if (!Array.isArray(value) || value.length > 8) return [];
   const roles = new Set(['current', 'requested', 'excluded', 'unspecified']);
   const result = [];

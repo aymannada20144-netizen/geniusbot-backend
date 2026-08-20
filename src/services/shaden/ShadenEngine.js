@@ -30,6 +30,7 @@ class ShadenEngine {
   handle({
     message,
     dialogueDecision = null,
+    clinicDomainRead = null,
     currentState,
     clinicData,
     bookingContext = null,
@@ -357,7 +358,7 @@ class ShadenEngine {
 
     let reply;
     try {
-      reply = this.replyFor(inquiry, safeData, customerName);
+      reply = this.replyFor(inquiry, safeData, customerName, clinicDomainRead);
     } catch (error) {
       console.error('❌ Error generating reply:', error);
       reply = this.policy.unknown();
@@ -367,7 +368,7 @@ class ShadenEngine {
     return { reply, nextState };
   }
 
-  replyFor(inquiry, data, customerName) {
+  replyFor(inquiry, data, customerName, clinicDomainRead = null) {
     if (!inquiry || !inquiry.type) return this.policy.unknown();
 
     switch (inquiry.type) {
@@ -391,6 +392,12 @@ class ShadenEngine {
         return this.policy.changeProviderUnsupported();
 
       case 'branches':
+        if (clinicDomainRead?.ownership === 'authoritative') {
+          if (clinicDomainRead.outcome === 'CLARIFY') return this.policy.unknown();
+          if (clinicDomainRead.outcome === 'ERROR') return this.policy.medicalKnowledgeUnavailable();
+          if (clinicDomainRead.outcome === 'ZERO_MATCHES') return this.policy.bookingServiceNotOffered();
+          return this.policy.branches(clinicDomainRead.branches);
+        }
         if (inquiry.city) {
           const branchesInCity = data.branches.filter(
             b => this.policy.normalize(b.city) === this.policy.normalize(inquiry.city)
@@ -401,8 +408,21 @@ class ShadenEngine {
         return this.policy.branches(data.branches);
 
       case 'specialties': return this.policy.specialties(data.specialties, data.clinic);
-      case 'services': return this.policy.services(data.services, data.clinic);
+      case 'services':
+        if (clinicDomainRead?.ownership === 'authoritative') {
+          if (clinicDomainRead.outcome === 'CLARIFY') return this.policy.unknown();
+          if (clinicDomainRead.outcome === 'ERROR') return this.policy.medicalKnowledgeUnavailable();
+          if (clinicDomainRead.outcome === 'ZERO_MATCHES') return this.policy.bookingServiceNotOffered();
+          return this.policy.services(clinicDomainRead.services, data.clinic);
+        }
+        return this.policy.services(data.services, data.clinic);
       case 'services_under_specialty':
+        if (clinicDomainRead?.ownership === 'authoritative') {
+          if (clinicDomainRead.outcome === 'CLARIFY') return this.policy.unknown();
+          if (clinicDomainRead.outcome === 'ERROR') return this.policy.medicalKnowledgeUnavailable();
+          if (clinicDomainRead.outcome === 'ZERO_MATCHES') return this.policy.bookingServiceNotOffered();
+          return this.policy.services(clinicDomainRead.services, data.clinic);
+        }
         const cleanSpec = this.policy.normalize(inquiry.specialtyText).replace(/ال/g, '').replace(/\s/g, '');
         const filteredServices = data.services.filter(s => {
           const cleanServiceName = this.policy.normalize(s.name).replace(/ال/g, '').replace(/\s/g, '');

@@ -14,6 +14,11 @@ const DeterministicDialogueDecisionProvider = require(
 const ShadenDataProvider = require('./ShadenDataProvider');
 const ShadenPolicy = require('./ShadenPolicy');
 const ShadenEngine = require('./ShadenEngine');
+const ClinicDomainQuery = require('./ClinicDomainQuery');
+const FactualQueryPolicy = require('./FactualQueryPolicy');
+const {
+  ClinicDomainEntityResolver,
+} = require('./ClinicDomainEntityResolver');
 const ShadenConversationContextProvider = require(
   './ShadenConversationContextProvider'
 );
@@ -38,6 +43,8 @@ function createShadenEngine({
   patientService = null,
   messageRepository,
   catalogService,
+  serviceRepository = null,
+  branchRepository = null,
   serviceAssignmentRepository = null,
   clinicConfigurationSource,
   bookingEngine,
@@ -61,6 +68,18 @@ function createShadenEngine({
     new ConversationService(conversationRepository);
   const patients = patientService || new PatientService(patientRepository);
   const policy = new ShadenPolicy();
+  const factualQueryPolicy = new FactualQueryPolicy();
+  const clinicDomainEntityResolver = new ClinicDomainEntityResolver({
+    catalogService,
+  });
+  const clinicDomainQuery = serviceRepository && branchRepository &&
+    serviceAssignmentRepository
+    ? new ClinicDomainQuery({
+      serviceRepository,
+      branchRepository,
+      serviceAssignmentRepository,
+    })
+    : null;
   const dataProvider = new ShadenDataProvider({
     catalogService,
     clinicConfigurationSource,
@@ -170,11 +189,19 @@ function createShadenEngine({
       knownPatient: identityContext?.patient ? true : false,
     },
   });
-} catch (error) {
+      } catch (error) {
   console.warn('Shaden CI shadow analysis failed safely.', {
     message: error?.message || 'unknown error',
   });
 }
+      const clinicDomainRead = await resolveClinicDomainRead({
+        clinicId: clinic.id,
+        messageText: message.text,
+        ciResult,
+        resolver: clinicDomainEntityResolver,
+        query: clinicDomainQuery,
+        factualQueryPolicy,
+      });
       let {
         reply,
         nextState,
@@ -183,6 +210,7 @@ function createShadenEngine({
       } = await engine.handle({
         message,
         dialogueDecision: ciResult?.decision || null,
+        clinicDomainRead,
         currentState: preservedData.shaden,
         clinicData,
         patientIdentity: identityContext,
@@ -326,6 +354,7 @@ function createShadenEngine({
       return {
         replyText: reply,
         state: { data: { ...preservedData, shaden: nextState } },
+        factualProvenance: factualProvenance(clinicDomainRead),
       };
     },
   };
@@ -388,6 +417,104 @@ function resolveMedicalKnowledgeServiceId({
   ].filter((id) => typeof id === 'string' && activeIds.has(id));
   const distinctIds = [...new Set(persistedIds)];
   return distinctIds.length === 1 ? distinctIds[0] : null;
+}
+
+async function resolveClinicDomainRead({
+  clinicId, messageText, ciResult, resolver, query, factualQueryPolicy,
+}) {
+  const intent = ciResult?.understanding?.primaryIntent;
+  const dialogAct = ciResult?.understanding?.conversationAct || null;
+  const scopeDecision = factualQueryPolicy.decide({
+    dialogAct, inquiryTarget: intent,
+  });
+  if (scopeDecision.action === 'OUT_OF_SCOPE') {
+    return null;
+  }
+  const proposals = {
+    ...(ciResult?.understanding?.entities || {}),
+    ...nonNullValues(ciResult?.decision?.proposedDomainConstraints),
+  };
+  let resolved;
+  try {
+    resolved = await resolver.resolve(clinicId, proposals, { text: messageText });
+  } catch {
+    return authoritativeRead('ERROR', {
+      source: 'ClinicDomainEntityResolver',
+      policyDecision: Object.freeze({
+        action: 'CLARIFY', reason: 'RESOLVER_FAILURE',
+        inquiryTarget: intent, relevantConstraints: Object.freeze([]),
+      }),
+    });
+  }
+  const policyDecision = factualQueryPolicy.decide({
+    dialogAct, inquiryTarget: intent,
+    proposals: resolved.proposals || proposals,
+    resolution: resolved.resolution,
+  });
+  if (policyDecision.action === 'CLARIFY') {
+    return authoritativeRead('CLARIFY', {
+      source: 'FactualQueryPolicy',
+      policyDecision, resolution: resolved.resolution,
+    });
+  }
+  if (!query) {
+    return authoritativeRead('ERROR', {
+      source: 'ClinicDomainQuery',
+      policyDecision, resolution: resolved.resolution,
+      constraints: resolved.constraints,
+    });
+  }
+  try {
+    const [services, branches] = await Promise.all([
+      query.servicesMatching(clinicId, resolved.constraints),
+      query.branchesMatching(clinicId, resolved.constraints),
+    ]);
+    const selected = intent === 'branches' ? branches : services;
+    const outcome = selected.length > 0 ? 'MATCHES' : 'ZERO_MATCHES';
+    return authoritativeRead(outcome, {
+      source: 'ClinicDomainQuery',
+      policyDecision,
+      resolution: resolved.resolution,
+      constraints: resolved.constraints,
+      services,
+      branches,
+    });
+  } catch {
+    return authoritativeRead('ERROR', {
+      source: 'ClinicDomainQuery',
+      policyDecision, resolution: resolved.resolution,
+      constraints: resolved.constraints,
+    });
+  }
+}
+
+function authoritativeRead(outcome, fields = {}) {
+  return Object.freeze({ ownership: 'authoritative', outcome, ...fields });
+}
+
+function factualProvenance(read) {
+  if (read?.ownership !== 'authoritative') return null;
+  return Object.freeze({
+    owner: 'authoritative_domain',
+    source: read.source || null,
+    outcome: read.outcome,
+    policyDecision: read.policyDecision?.action || null,
+    policyReason: read.policyDecision?.reason || null,
+    relevantConstraints: read.policyDecision?.relevantConstraints || [],
+    constraints: read.constraints || null,
+    resolution: read.resolution || null,
+    resultCount: Object.freeze({
+      services: Array.isArray(read.services) ? read.services.length : null,
+      branches: Array.isArray(read.branches) ? read.branches.length : null,
+    }),
+  });
+}
+
+function nonNullValues(value) {
+  if (!value || typeof value !== 'object') return {};
+  return Object.fromEntries(
+    Object.entries(value).filter(([, item]) => item !== null && item !== undefined)
+  );
 }
 
 function groundSemanticServiceMentions({ mentions, services, policy }) {

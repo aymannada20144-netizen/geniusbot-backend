@@ -181,13 +181,26 @@ class ServiceAssignmentRepository extends BaseRepository {
   }
 
   async listActiveServiceBranchPairs(clinicId) {
+    const assignments = await this.listActiveDomainAssignments(clinicId);
+    const seen = new Set();
+    return assignments.reduce((pairs, item) => {
+      const key = `${item.service_id}:${item.branch_id}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        pairs.push({ service_id: item.service_id, branch_id: item.branch_id });
+      }
+      return pairs;
+    }, []);
+  }
+
+  async listActiveDomainAssignments(clinicId) {
     if (!clinicId) {
       throw new Error(
-        'ServiceAssignmentRepository.listActiveServiceBranchPairs requires clinicId'
+        'ServiceAssignmentRepository.listActiveDomainAssignments requires clinicId'
       );
     }
     const result = await this.query(
-      `SELECT DISTINCT sa."service_id", sa."branch_id"
+      `SELECT DISTINCT sa."service_id", sa."branch_id", sa."doctor_id"
          FROM ${this.fullTableName} sa
          JOIN "geniusbot"."branches" b
            ON b."id" = sa."branch_id"

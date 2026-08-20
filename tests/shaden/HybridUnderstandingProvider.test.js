@@ -260,6 +260,33 @@ test('contextual core is used only after deterministic authority gates', async (
     primaryIntent: 'booking',
     conversationAct: 'confirmation',
   });
+
+  await t.test('service and branch mentions survive merge independently', async () => {
+    const entities = semantic().entities;
+    const result = await provider({
+      deterministicResult: deterministic({
+        primaryIntent: 'services', confidence: 1,
+        entities: { city: 'جدة' }, conversationAct: 'question',
+      }),
+      semanticResult: semantic({
+        primaryIntent: 'services', conversationAct: 'question',
+        entities: {
+          ...entities,
+          serviceMentions: [{
+            text: 'الليزر', concept: 'الليزر',
+            role: 'requested', confidence: 0.99,
+          }],
+          branchMentions: [{
+            text: 'الحمدانية', concept: 'فرع الحمدانية',
+            role: 'requested', confidence: 0.99,
+          }],
+        },
+      }),
+    }).understand({ text: 'compound factual inquiry' });
+    assert.equal(result.entities.serviceMentions.length, 1);
+    assert.equal(result.entities.branchMentions.length, 1);
+    assert.equal(result.entities.city, 'جدة');
+  });
   const input = {
     text: 'natural response',
     interactive: false,

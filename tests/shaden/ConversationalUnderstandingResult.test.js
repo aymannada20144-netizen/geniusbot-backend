@@ -23,6 +23,24 @@ test('ConversationalUnderstandingResult', async (t) => {
     assert.equal(result.entities.serviceMentions[0].concept, 'Ø¥Ø²Ø§Ù„Ø© Ø§Ù„Ø´Ø¹Ø± Ø¨Ø§Ù„Ù„ÙŠØ²Ø±');
     assert.equal(Object.isFrozen(result.entities.serviceMentions), true);
   });
+  await t.test('preserves service and branch semantic evidence equivalently', () => {
+    const result = createConversationalUnderstandingResult({
+      entities: {
+        serviceMentions: [{
+          text: 'الليزر', concept: 'الليزر',
+          role: 'requested', confidence: 0.99,
+        }],
+        branchMentions: [{
+          text: 'الحمدانية', concept: 'فرع الحمدانية',
+          role: 'requested', confidence: 0.98,
+        }],
+      },
+    });
+    assert.equal(result.entities.serviceMentions[0].concept, 'الليزر');
+    assert.equal(result.entities.branchMentions[0].concept, 'فرع الحمدانية');
+    assert.equal(Object.isFrozen(result.entities.serviceMentions), true);
+    assert.equal(Object.isFrozen(result.entities.branchMentions), true);
+  });
   await t.test('creates a safe default result', () => {
     const result = createConversationalUnderstandingResult();
 

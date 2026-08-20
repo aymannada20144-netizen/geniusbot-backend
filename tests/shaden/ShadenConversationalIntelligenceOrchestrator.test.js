@@ -198,6 +198,43 @@ test('ShadenConversationalIntelligenceOrchestrator', async (t) => {
     });
   });
 
+  await t.test('transports independent service and branch proposals', async () => {
+    const orchestrator = proposalOrchestrator({
+      serviceMentions: [mention('الليزر', 'الليزر')],
+      branchMentions: [mention('الحمدانية', 'فرع الحمدانية')],
+      city: 'جدة',
+    });
+    const result = await orchestrator.analyze({ message: 'compound inquiry' });
+    assert.equal(result.decision.proposedDomainConstraints.serviceText, 'الليزر');
+    assert.equal(result.decision.proposedDomainConstraints.branchText, 'فرع الحمدانية');
+    assert.equal(result.decision.proposedDomainConstraints.city, 'جدة');
+  });
+
+  await t.test('does not collapse competing mentions to one proposal', async () => {
+    const orchestrator = proposalOrchestrator({
+      serviceMentions: [
+        mention('إزالة الشعر بالليزر', 'إزالة الشعر بالليزر'),
+        mention('حقن البوتوكس', 'حقن البوتوكس'),
+      ],
+    });
+    const result = await orchestrator.analyze({ message: 'comparison' });
+    assert.equal('serviceText' in result.decision.proposedDomainConstraints, false);
+    assert.deepEqual(
+      result.decision.proposedDomainConstraints.serviceCandidates,
+      ['إزالة الشعر بالليزر', 'حقن البوتوكس']
+    );
+  });
+
+  await t.test('preserves unrelated decision constraints', async () => {
+    const orchestrator = proposalOrchestrator({
+      serviceMentions: [mention('الليزر', 'الليزر')],
+    }, { city: 'جدة', date: '2026-08-21' });
+    const result = await orchestrator.analyze({ message: 'service inquiry' });
+    assert.equal(result.decision.proposedDomainConstraints.serviceText, 'الليزر');
+    assert.equal(result.decision.proposedDomainConstraints.city, 'جدة');
+    assert.equal(result.decision.proposedDomainConstraints.date, '2026-08-21');
+  });
+
   await t.test('builds bounded context and exposes only interactive presence', async () => {
     const orchestrator = new ShadenConversationalIntelligenceOrchestrator();
     const result = await orchestrator.analyze({
@@ -340,3 +377,25 @@ await t.test('logger failure never breaks shadow analysis', async () => {
   assert.equal(result.executable, false);
 });
 });
+
+function mention(text, concept = null) {
+  return { text, concept, role: 'requested', confidence: 0.99 };
+}
+
+function proposalOrchestrator(entities, existing = {}) {
+  return new ShadenConversationalIntelligenceOrchestrator({
+    understandingProvider: {
+      async understand() {
+        return {
+          primaryIntent: 'services', conversationAct: 'question',
+          confidence: 1, entities,
+        };
+      },
+    },
+    decisionProvider: {
+      async decide() {
+        return { proposedDomainConstraints: existing };
+      },
+    },
+  });
+}

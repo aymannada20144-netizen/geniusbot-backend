@@ -68,7 +68,6 @@ class HybridUnderstandingProvider {
     const deterministic = createConversationalUnderstandingResult(
       await this.deterministicProvider.understand(input)
     );
-
     if (shouldUseSemanticCore(this.semanticCoreProvider, deterministic, input)) {
       try {
         const raw = typeof this.semanticCoreProvider
@@ -94,7 +93,9 @@ class HybridUnderstandingProvider {
       }
     }
 
-    if (!this.semanticProvider) return metadata(deterministic);
+    if (!this.semanticProvider) {
+      return metadata(deterministic);
+    }
 
     let semantic;
     try {
@@ -105,7 +106,8 @@ class HybridUnderstandingProvider {
       return metadata(deterministic);
     }
 
-    return metadata(mergeUnderstanding(deterministic, semantic));
+    const merged = mergeUnderstanding(deterministic, semantic);
+    return metadata(merged);
   }
 }
 
@@ -197,12 +199,12 @@ function mergeUnderstanding(deterministic, semantic) {
 }
 
 function mergeEntities(deterministic, semantic) {
-  const serviceMentions = Array.isArray(semantic?.serviceMentions)
-    ? semantic.serviceMentions
-    : [];
-  return serviceMentions.length > 0
-    ? { ...deterministic, serviceMentions }
-    : deterministic;
+  const result = { ...deterministic };
+  for (const field of ['serviceMentions', 'branchMentions']) {
+    const mentions = Array.isArray(semantic?.[field]) ? semantic[field] : [];
+    if (mentions.length > 0) result[field] = mentions;
+  }
+  return result;
 }
 
 function compatibleSecondaryIntents({ deterministic, semantic }) {
