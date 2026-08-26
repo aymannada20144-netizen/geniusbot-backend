@@ -23,18 +23,7 @@ const AvailabilityService = require('./services/availability/AvailabilityService
 const ClinicService = require('./services/ClinicService');
 const ConversationService = require('./services/ConversationService');
 const PatientService = require('./modules/patients/PatientService');
-const KnowledgeBaseRepository = require('./repositories/KnowledgeBaseRepository');
-const KnowledgeService = require('./services/KnowledgeService');
-const SemanticUnderstandingProvider = require(
-  './services/shaden/SemanticUnderstandingProvider'
-);
-const {
-  createGroqSemanticModelClient,
-} = require('./services/shaden/GroqSemanticModelClient');
-const SemanticCoreProvider = require('./services/shaden/SemanticCoreProvider');
-const {
-  createGroqSemanticCoreModelClient,
-} = require('./services/shaden/GroqSemanticCoreModelClient');
+const WhatsAppMessageDebouncer = require('./channels/whatsapp/WhatsAppMessageDebouncer');
 const PriceService = require('./services/PriceService');
 const CommunicationService = require(
   './communication/services/CommunicationService'
@@ -188,22 +177,6 @@ async function buildApp() {
   );
   const patientService = new PatientService(bookingRepositories.patients);
   const priceService = new PriceService(bookingRepositories.prices);
-  const knowledgeService = new KnowledgeService(
-    new KnowledgeBaseRepository(db)
-  );
-  const semanticUnderstandingProvider =
-    new SemanticUnderstandingProvider({
-      modelClient: createGroqSemanticModelClient({
-        apiKey: env.groqApiKey,
-        model: env.groqSemanticModel,
-      }),
-    });
-  const semanticCoreProvider = new SemanticCoreProvider({
-    modelClient: createGroqSemanticCoreModelClient({
-      apiKey: env.groqApiKey,
-      model: env.groqSemanticModel,
-    }),
-  });
   const catalogService = new MasterDataService(
     new MasterDataRepository(db)
   );
@@ -223,12 +196,21 @@ async function buildApp() {
     bookingEngine,
     appointmentService,
     priceService,
-    knowledgeService,
-    semanticUnderstandingProvider,
-    semanticCoreProvider,
+    logger: app.log,
     sendMessage: sendWhatsAppMessage,
   });
-  const whatsappController = new WhatsAppController(conversationEngine);
+  const inboundConversationService = new WhatsAppMessageDebouncer({
+    target: conversationEngine,
+    windowMs: env.whatsappMessageDebounceMs,
+    logger: app.log,
+  });
+  app.log.info({
+    event: 'SHADEN_WHATSAPP_COMPOSITION',
+    route: 'DETERMINISTIC',
+    debouncerConstructed: true,
+    debounceMs: env.whatsappMessageDebounceMs,
+  });
+  const whatsappController = new WhatsAppController(inboundConversationService);
   app.get('/api/whatsapp/webhook', whatsappController.verifyWebhook.bind(whatsappController));
   app.post('/api/whatsapp/webhook', whatsappController.receiveWebhook.bind(whatsappController));
 

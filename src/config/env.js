@@ -2,7 +2,6 @@ require('dotenv').config();
 
 const requiredEnv = [
   'DATABASE_URL',
-  'GROQ_API_KEY',
   'WHATSAPP_TOKEN',
   'VERIFY_TOKEN',
   'PHONE_NUMBER_ID',
@@ -22,9 +21,10 @@ module.exports = {
 
   databaseUrl: process.env.DATABASE_URL,
 
-  groqApiKey: process.env.GROQ_API_KEY,
-  groqSemanticModel:
-    process.env.GROQ_SEMANTIC_MODEL || 'openai/gpt-oss-20b',
+  whatsappMessageDebounceMs:
+    Number.isFinite(Number(process.env.WHATSAPP_MESSAGE_DEBOUNCE_MS))
+      ? Number(process.env.WHATSAPP_MESSAGE_DEBOUNCE_MS)
+      : 2750,
 
   whatsapp: {
     token: process.env.WHATSAPP_TOKEN,

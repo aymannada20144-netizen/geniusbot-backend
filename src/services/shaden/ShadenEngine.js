@@ -32,8 +32,6 @@ class ShadenEngine {
 
   handle({
     message,
-    dialogueDecision = null,
-    clinicDomainRead = null,
     currentState,
     clinicData,
     bookingContext = null,
@@ -49,10 +47,6 @@ class ShadenEngine {
       ? message.rawPayload?.value
       : null;
     let inquiry = this.policy.recognize(text);
-
-    if (inquiry.type === 'unknown' && !interactiveReplyId) {
-      inquiry = inquiryForDialogueDecision(dialogueDecision) || inquiry;
-    }
 
     if (isCurrentChangeServiceInteractiveReply(nextState.changeService, interactiveReplyId)) {
       inquiry = { type: 'unknown' };
@@ -360,7 +354,7 @@ class ShadenEngine {
 
     let reply;
     try {
-      reply = this.replyFor(inquiry, safeData, customerName, clinicDomainRead);
+      reply = this.replyFor(inquiry, safeData, customerName);
     } catch (error) {
       console.error('❌ Error generating reply:', error);
       reply = this.policy.unknown();
@@ -370,7 +364,7 @@ class ShadenEngine {
     return legacyEngineResult({ reply, nextState });
   }
 
-  replyFor(inquiry, data, customerName, clinicDomainRead = null) {
+  replyFor(inquiry, data, customerName) {
     if (!inquiry || !inquiry.type) return this.policy.unknown();
 
     switch (inquiry.type) {
@@ -394,12 +388,6 @@ class ShadenEngine {
         return this.policy.changeProviderUnsupported();
 
       case 'branches':
-        if (clinicDomainRead?.ownership === 'authoritative') {
-          if (clinicDomainRead.outcome === 'CLARIFY') return this.policy.unknown();
-          if (clinicDomainRead.outcome === 'ERROR') return this.policy.medicalKnowledgeUnavailable();
-          if (clinicDomainRead.outcome === 'ZERO_MATCHES') return this.policy.bookingServiceNotOffered();
-          return this.policy.branches(clinicDomainRead.branches);
-        }
         if (inquiry.city) {
           const branchesInCity = data.branches.filter(
             b => this.policy.normalize(b.city) === this.policy.normalize(inquiry.city)
@@ -411,20 +399,8 @@ class ShadenEngine {
 
       case 'specialties': return this.policy.specialties(data.specialties, data.clinic);
       case 'services':
-        if (clinicDomainRead?.ownership === 'authoritative') {
-          if (clinicDomainRead.outcome === 'CLARIFY') return this.policy.unknown();
-          if (clinicDomainRead.outcome === 'ERROR') return this.policy.medicalKnowledgeUnavailable();
-          if (clinicDomainRead.outcome === 'ZERO_MATCHES') return this.policy.bookingServiceNotOffered();
-          return this.policy.services(clinicDomainRead.services, data.clinic);
-        }
         return this.policy.services(data.services, data.clinic);
       case 'services_under_specialty':
-        if (clinicDomainRead?.ownership === 'authoritative') {
-          if (clinicDomainRead.outcome === 'CLARIFY') return this.policy.unknown();
-          if (clinicDomainRead.outcome === 'ERROR') return this.policy.medicalKnowledgeUnavailable();
-          if (clinicDomainRead.outcome === 'ZERO_MATCHES') return this.policy.bookingServiceNotOffered();
-          return this.policy.services(clinicDomainRead.services, data.clinic);
-        }
         const cleanSpec = this.policy.normalize(inquiry.specialtyText).replace(/ال/g, '').replace(/\s/g, '');
         const filteredServices = data.services.filter(s => {
           const cleanServiceName = this.policy.normalize(s.name).replace(/ال/g, '').replace(/\s/g, '');
@@ -5095,33 +5071,6 @@ function matchingNamed(value, items, policy) {
       name === needle || name.includes(needle) || needle.includes(name)
     );
   }));
-}
-
-function inquiryForDialogueDecision(decision) {
-  switch (decision?.action) {
-    case 'START_BOOKING':
-      return { type: 'booking', serviceText: null };
-    case 'REQUEST_CANCELLATION':
-      return { type: 'booking_cancellation_request' };
-    case 'REQUEST_RESCHEDULE':
-      return { type: 'booking_modification_request' };
-    case 'REQUEST_CHANGE_SERVICE':
-      return { type: 'change_service_request' };
-    case 'REQUEST_CHANGE_BRANCH':
-      return { type: 'change_branch_request' };
-    case 'REQUEST_CHANGE_PROVIDER':
-      return { type: 'change_provider_request' };
-    case 'CHECK_AVAILABILITY':
-      return { type: 'availability_request' };
-    case 'LOOKUP_APPOINTMENT':
-      return { type: 'appointment_query' };
-    case 'ANSWER':
-      return decision.targetIntent === 'courtesy'
-        ? { type: 'courtesy', kind: 'praise' }
-        : null;
-    default:
-      return null;
-  }
 }
 
 function compactArabic(value, policy) {

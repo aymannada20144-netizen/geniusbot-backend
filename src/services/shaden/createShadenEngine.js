@@ -1,129 +1,39 @@
 'use strict';
-const DeterministicUnderstandingProvider = require(
-  './DeterministicUnderstandingProvider'
-);
-const HybridUnderstandingProvider = require(
-  './HybridUnderstandingProvider'
-);
-const SemanticCoreCompatibilityProvider = require(
-  './SemanticCoreCompatibilityProvider'
-);
-const DeterministicDialogueDecisionProvider = require(
-  './DeterministicDialogueDecisionProvider'
-);
 const ShadenDataProvider = require('./ShadenDataProvider');
 const ShadenPolicy = require('./ShadenPolicy');
 const ShadenEngine = require('./ShadenEngine');
-const {
-  lifecycleMetadataFrom,
-  userFacingHandlerResult,
-} = require('../../contracts/shaden/InternalHandlerResult');
-const {
-  validateLifecycleTransition,
-  validatePersistedFlowState,
-} = require('./FlowLifecycle');
-const ClinicDomainQuery = require('./ClinicDomainQuery');
-const FactualQueryPolicy = require('./FactualQueryPolicy');
-const {
-  ClinicDomainEntityResolver,
-} = require('./ClinicDomainEntityResolver');
-const ShadenConversationContextProvider = require(
-  './ShadenConversationContextProvider'
-);
+const { lifecycleMetadataFrom, userFacingHandlerResult } =
+  require('../../contracts/shaden/InternalHandlerResult');
+const { validateLifecycleTransition, validatePersistedFlowState } =
+  require('./FlowLifecycle');
+const ShadenConversationContextProvider = require('./ShadenConversationContextProvider');
 const ClinicService = require('../ClinicService');
 const ConversationService = require('../ConversationService');
 const PatientService = require('../../modules/patients/PatientService');
-const {
-  normalizeSaudiMobile,
-} = require('../../core/validators/saudiMobile');
-const ShadenConversationalIntelligenceOrchestrator = require(
-  './ShadenConversationalIntelligenceOrchestrator'
-);
-const {
-  createKnowledgeRequest,
-} = require('../../contracts/shaden/KnowledgeRequest');
+const { normalizeSaudiMobile } = require('../../core/validators/saudiMobile');
+
 function createShadenEngine({
-  clinicRepository,
-  conversationRepository,
-  patientRepository,
-  clinicService = null,
-  conversationService = null,
-  patientService = null,
-  messageRepository,
-  catalogService,
-  serviceRepository = null,
-  branchRepository = null,
-  serviceAssignmentRepository = null,
-  clinicConfigurationSource,
-  bookingEngine,
-  appointmentService = null,
-  priceService = null,
-  knowledgeService = null,
-  semanticUnderstandingProvider = null,
-  semanticCoreProvider = null,
-  semanticCoreTimeoutMs = undefined,
-  conversationalIntelligenceOrchestrator = null,
-  shadenEngine = null,
-  sendMessage,
+  clinicRepository, conversationRepository, patientRepository,
+  clinicService = null, conversationService = null, patientService = null,
+  messageRepository, catalogService, serviceAssignmentRepository = null,
+  clinicConfigurationSource, bookingEngine, appointmentService = null,
+  priceService = null, logger = console, shadenEngine = null, sendMessage,
 } = {}) {
-  if (
-    knowledgeService !== null &&
-    typeof knowledgeService?.retrieve !== 'function'
-  ) {
-    throw new TypeError('createShadenEngine knowledgeService must provide retrieve().');
-  }
   const clinics = clinicService || new ClinicService(clinicRepository);
   const conversations = conversationService ||
     new ConversationService(conversationRepository);
   const patients = patientService || new PatientService(patientRepository);
   const policy = new ShadenPolicy();
-  const factualQueryPolicy = new FactualQueryPolicy();
-  const clinicDomainEntityResolver = new ClinicDomainEntityResolver({
-    catalogService,
-  });
-  const clinicDomainQuery = serviceRepository && branchRepository &&
-    serviceAssignmentRepository
-    ? new ClinicDomainQuery({
-      serviceRepository,
-      branchRepository,
-      serviceAssignmentRepository,
-    })
-    : null;
   const dataProvider = new ShadenDataProvider({
-    catalogService,
-    clinicConfigurationSource,
-    serviceAssignmentRepository,
+    catalogService, clinicConfigurationSource, serviceAssignmentRepository,
   });
   const engine = shadenEngine || new ShadenEngine({
-    policy,
-    bookingEngine,
-    appointmentService,
-    priceService,
+    policy, bookingEngine, appointmentService, priceService,
   });
   const contextProvider = new ShadenConversationContextProvider({
     patientService: patients,
   });
-  const ciOrchestrator =
-  conversationalIntelligenceOrchestrator ||
-  new ShadenConversationalIntelligenceOrchestrator({
-    understandingProvider:
-      new HybridUnderstandingProvider({
-        deterministicProvider:
-          new DeterministicUnderstandingProvider({
-            policy,
-          }),
-        semanticProvider: semanticUnderstandingProvider,
-        semanticCoreProvider: semanticCoreProvider
-          ? new SemanticCoreCompatibilityProvider({ semanticCoreProvider })
-          : null,
-        ...(semanticCoreTimeoutMs === undefined
-          ? {}
-          : { semanticCoreTimeoutMs }),
-      }),
 
-    decisionProvider:
-      new DeterministicDialogueDecisionProvider(),
-  });
   return {
     async processMessage(rawMessage) {
       if (!rawMessage?.text) return null;
@@ -139,24 +49,21 @@ function createShadenEngine({
         });
         throw new Error('WhatsApp clinic could not be resolved.');
       }
-
       const conversation = await conversations.findOrCreateForChannel({
-        clinicId: clinic.id,
-        channel: message.channel,
+        clinicId: clinic.id, channel: message.channel,
         channelIdentity: message.senderId,
       });
+      logger.info({
+        event: 'SHADEN_RUNTIME_ENTRY', conversationId: conversation.id,
+        messageId: message.externalMessageId,
+      });
       const identityContext = await contextProvider.load({
-        clinicId: clinic.id,
-        channelIdentity: message.senderId,
-        conversation,
+        clinicId: clinic.id, channelIdentity: message.senderId, conversation,
       });
       if (conversation.botEnabled === false) return { suppressed: true };
       if (await messageRepository.findByExternalId(
-        conversation.id,
-        message.externalMessageId
-      )) {
-        return { duplicate: true };
-      }
+        conversation.id, message.externalMessageId
+      )) return { duplicate: true };
 
       await messageRepository.saveIncomingMessage({
         conversationId: conversation.id,
@@ -164,199 +71,64 @@ function createShadenEngine({
         messageText: message.text,
         rawPayload: message.rawPayload,
       });
-
-      const persistedState = await conversations.loadState(
-        conversation.id
-      );
+      const persistedState = await conversations.loadState(conversation.id);
       const preservedData = stateData(persistedState?.data);
-      const identityTrace = buildIdentityTrace({
-        clinicId: clinic.id,
-        senderId: message.senderId,
-        conversation,
-        identityContext,
-        preservedData,
-      });
-      console.info('Shaden patient identity trace.', identityTrace);
+      console.info('Shaden patient identity trace.', buildIdentityTrace({
+        clinicId: clinic.id, senderId: message.senderId, conversation,
+        identityContext, preservedData,
+      }));
       const clinicData = await dataProvider.load(clinic);
-      let ciResult = null;
-      try {
-  ciResult = await ciOrchestrator.analyze({
-    message,
-    currentState: preservedData.shaden,
-    clinicContext: {
-      clinicId: clinic.id,
-      clinicName: clinic.display_name_ar || clinic.name || null,
-      ...(clinicData.services.length > 0 ? {
-        services: clinicData.services.map(({ name, aliases }) => ({
-          name,
-          aliases,
-        })),
-      } : {}),
-    },
-    patientContext: {
-      patientId: conversation.patientId || null,
-      knownPatient: identityContext?.patient ? true : false,
-    },
-  });
-      } catch (error) {
-  console.warn('Shaden CI shadow analysis failed safely.', {
-    message: error?.message || 'unknown error',
-  });
-}
-      const clinicDomainRead = await resolveClinicDomainRead({
-        clinicId: clinic.id,
-        messageText: message.text,
-        ciResult,
-        resolver: clinicDomainEntityResolver,
-        query: clinicDomainQuery,
-        factualQueryPolicy,
+      logger.info({
+        event: 'SHADEN_RUNTIME_ROUTE', conversationId: conversation.id,
+        messageId: message.externalMessageId,
+        route: message.inputProvenance?.trusted === true
+          ? 'MACHINE_DETERMINISTIC' : 'DETERMINISTIC',
+      });
+      logger.info({
+        event: 'SHADEN_DETERMINISTIC_ENTER', conversationId: conversation.id,
+        messageId: message.externalMessageId,
       });
       const internalResult = await engine.handle({
-        message,
-        dialogueDecision: ciResult?.decision || null,
-        clinicDomainRead,
-        currentState: preservedData.shaden,
-        clinicData,
+        message, currentState: preservedData.shaden, clinicData,
         patientIdentity: identityContext,
         bookingContext: {
-          clinicId: clinic.id,
-          conversationId: conversation.id,
-          channel: message.channel,
-          channelIdentity: message.senderId,
+          clinicId: clinic.id, conversationId: conversation.id,
+          channel: message.channel, channelIdentity: message.senderId,
           patientId: conversation.patientId || null,
         },
       });
       validateInternalLifecycleResult(internalResult);
-      let {
-        reply,
-        nextState,
-        interaction,
-        notificationAttempted,
-      } = userFacingHandlerResult(internalResult);
-
-      const hasActiveBooking =
-        preservedData.shaden?.booking &&
-        typeof preservedData.shaden.booking === 'object';
-      const isBookingIntent =
-        ciResult?.understanding?.primaryIntent === 'booking';
-
-      if (
-        ciResult?.decision?.action === 'REASSURE' &&
-        (hasActiveBooking || isBookingIntent) &&
-        typeof reply === 'string' &&
-        reply.trim() !== ''
-      ) {
-        reply = `${policy.hesitation()}\n\n${reply}`;
-      }
-      if (
-        ciResult?.decision?.action === 'APOLOGIZE' &&
-        ciResult?.understanding?.signals?.complaint === true &&
-        typeof reply === 'string' &&
-        reply.trim() !== ''
-    ) {
-  reply = `${policy.complaintApology()}\n\n${reply}`;
-}
-      const objectionSignals = ciResult?.understanding?.signals;
-      if (
-        ciResult?.decision?.action === 'HANDLE_OBJECTION' &&
-        objectionSignals?.objection === true &&
-        objectionSignals?.complaint !== true &&
-        objectionSignals?.medicalRisk !== true &&
-        objectionSignals?.legalEscalation !== true &&
-        objectionSignals?.abuseOrThreat !== true &&
-        objectionSignals?.humanHandover !== true &&
-        typeof reply === 'string' &&
-        reply.trim() !== ''
-      ) {
-        reply = `${policy.objectionResponse()}\n\n${reply}`;
-      }
-
-      if (
-        shouldRetrieveMedicalKnowledge(ciResult, message.text) &&
-        knowledgeService
-      ) {
-        const serviceId = resolveMedicalKnowledgeServiceId({
-          text: message.text,
-          state: preservedData.shaden,
-          services: clinicData.services,
-          policy,
-          serviceMentions:
-            ciResult?.understanding?.entities?.serviceMentions,
-        });
-        let knowledgeResult;
-        try {
-          knowledgeResult = await knowledgeService.retrieve(
-            createKnowledgeRequest({
-              clinicId: clinic.id,
-              serviceId,
-              type: 'medical_faq',
-              query: message.text,
-              semanticTopic: ciResult?.understanding?.knowledgeTopic || null,
-              keywords: [],
-              required: true,
-            })
-          );
-        } catch (_error) {
-          knowledgeResult = null;
-        }
-        const activeFlow = hasOperationalFlow(nextState, interaction);
-        const fact = usableKnowledgeFact(knowledgeResult);
-        const knowledgeReply = fact || (
-          knowledgeResult?.status === 'not_found'
-            ? policy.medicalKnowledgeNotFound()
-            : policy.medicalKnowledgeUnavailable()
-        );
-        reply = composeKnowledgeReply({
-          knowledgeReply,
-          engineReply: reply,
-          activeFlow,
-        });
-      }
-
-      // 1. شبكة الأمان: التأكد من أن الرد ليس فارغاً
+      const { reply, nextState, interaction, notificationAttempted } =
+        userFacingHandlerResult(internalResult);
       if (!reply || typeof reply !== 'string' || reply.trim() === '') {
         console.warn('⚠️ Shaden Engine returned an empty reply. Message:', message.text);
-        // لا تقم بإرسال رسالة إذا كان الرد فارغاً
         await conversations.updateState(conversation.id, {
-          current: 'shaden',
-          data: {
-            ...preservedData,
-            shaden: nextState,
-          },
+          current: 'shaden', data: { ...preservedData, shaden: nextState },
         });
-        return { 
-          replyText: null, 
+        return {
+          replyText: null,
           state: { data: { ...preservedData, shaden: nextState } },
           skipped: true,
           notificationAttempted: notificationAttempted === true,
         };
       }
-
       await conversations.updateState(conversation.id, {
-        current: 'shaden',
-        data: {
-          ...preservedData,
-          shaden: nextState,
-        },
+        current: 'shaden', data: { ...preservedData, shaden: nextState },
       });
-
-      // 2. طباعة الرد للتأكد من محتواه قبل الإرسال
-      console.log(`📤 Sending reply to ${maskPhone(message.senderId)}: ${reply.substring(0, 50)}...`);
-            // 3. تعديل طريقة الإرسال (جرب تغيير 'body' إلى 'text' إذا استمر الخطأ)
+      console.log(
+        `📤 Sending reply to ${maskPhone(message.senderId)}: ${reply.substring(0, 50)}...`
+      );
       const delivery = await sendMessage({
-        to: message.senderId,
-        body: reply,
+        to: message.senderId, body: reply,
         ...(interaction ? { interaction } : {}),
       });
       await messageRepository.saveOutgoingMessage({
-        conversationId: conversation.id,
-        messageText: reply,
+        conversationId: conversation.id, messageText: reply,
         waMessageId: delivery?.messageId || null,
         rawPayload: {
           delivery: delivery || null,
           interaction: interaction ? {
-            version: interaction.version,
-            mode: interaction.mode,
+            version: interaction.version, mode: interaction.mode,
             purpose: interaction.purpose,
             optionIds: interaction.options.map((option) => option.id),
           } : null,
@@ -365,292 +137,20 @@ function createShadenEngine({
       return {
         replyText: reply,
         state: { data: { ...preservedData, shaden: nextState } },
-        factualProvenance: factualProvenance(clinicDomainRead),
+        notificationAttempted: notificationAttempted === true,
       };
     },
   };
 }
 
-function shouldRetrieveMedicalKnowledge(ciResult, text) {
-  const signals = ciResult?.understanding?.signals;
-  const decision = ciResult?.decision;
-  return Array.from(String(text || '').trim()).length > 1 &&
-    decision?.action === 'RETRIEVE_KNOWLEDGE' &&
-    signals?.medicalQuestion === true &&
-    Array.isArray(decision.requiredKnowledge) &&
-    decision.requiredKnowledge.includes('medical_question') &&
-    decision.flags?.requiresKnowledge === true &&
-    signals.medicalRisk !== true &&
-    signals.legalEscalation !== true &&
-    signals.abuseOrThreat !== true &&
-    signals.humanHandover !== true &&
-    signals.complaint !== true;
-}
-
-function resolveMedicalKnowledgeServiceId({
-  text,
-  state,
-  services,
-  policy,
-  serviceMentions = [],
-}) {
-  const activeServices = Array.isArray(services) ? services : [];
-  if (Array.isArray(serviceMentions) && serviceMentions.length > 0) {
-    return groundSemanticServiceMentions({
-      mentions: serviceMentions,
-      services: activeServices,
-      policy,
-    });
-  }
-  const explicitMatches = ShadenEngine.matchingServices(
-    text,
-    activeServices,
-    policy
-  );
-  if (explicitMatches.length === 1) return String(explicitMatches[0].id);
-  if (explicitMatches.length > 1) return null;
-
-  const tokenMatches = matchingServicesByDistinctiveToken(
-    text,
-    activeServices,
-    policy
-  );
-  if (tokenMatches.length === 1) return String(tokenMatches[0].id);
-  if (
-    tokenMatches.length > 1 ||
-    hasUnresolvedExplicitServiceWording(text, policy)
-  ) return null;
-
-  const activeIds = new Set(activeServices.map(({ id }) => String(id)));
-  const persistedIds = [
-    state?.booking?.serviceId,
-    state?.priceInquiry?.selected_service_id,
-  ].filter((id) => typeof id === 'string' && activeIds.has(id));
-  const distinctIds = [...new Set(persistedIds)];
-  return distinctIds.length === 1 ? distinctIds[0] : null;
-}
-
-async function resolveClinicDomainRead({
-  clinicId, messageText, ciResult, resolver, query, factualQueryPolicy,
-}) {
-  const intent = ciResult?.understanding?.primaryIntent;
-  const dialogAct = ciResult?.understanding?.conversationAct || null;
-  const scopeDecision = factualQueryPolicy.decide({
-    dialogAct, inquiryTarget: intent,
-  });
-  if (scopeDecision.action === 'OUT_OF_SCOPE') {
-    return null;
-  }
-  const proposals = {
-    ...(ciResult?.understanding?.entities || {}),
-    ...nonNullValues(ciResult?.decision?.proposedDomainConstraints),
-  };
-  let resolved;
-  try {
-    resolved = await resolver.resolve(clinicId, proposals, { text: messageText });
-  } catch {
-    return authoritativeRead('ERROR', {
-      source: 'ClinicDomainEntityResolver',
-      policyDecision: Object.freeze({
-        action: 'CLARIFY', reason: 'RESOLVER_FAILURE',
-        inquiryTarget: intent, relevantConstraints: Object.freeze([]),
-      }),
-    });
-  }
-  const policyDecision = factualQueryPolicy.decide({
-    dialogAct, inquiryTarget: intent,
-    proposals: resolved.proposals || proposals,
-    resolution: resolved.resolution,
-  });
-  if (policyDecision.action === 'CLARIFY') {
-    return authoritativeRead('CLARIFY', {
-      source: 'FactualQueryPolicy',
-      policyDecision, resolution: resolved.resolution,
-    });
-  }
-  if (!query) {
-    return authoritativeRead('ERROR', {
-      source: 'ClinicDomainQuery',
-      policyDecision, resolution: resolved.resolution,
-      constraints: resolved.constraints,
-    });
-  }
-  try {
-    const [services, branches] = await Promise.all([
-      query.servicesMatching(clinicId, resolved.constraints),
-      query.branchesMatching(clinicId, resolved.constraints),
-    ]);
-    const selected = intent === 'branches' ? branches : services;
-    const outcome = selected.length > 0 ? 'MATCHES' : 'ZERO_MATCHES';
-    return authoritativeRead(outcome, {
-      source: 'ClinicDomainQuery',
-      policyDecision,
-      resolution: resolved.resolution,
-      constraints: resolved.constraints,
-      services,
-      branches,
-    });
-  } catch {
-    return authoritativeRead('ERROR', {
-      source: 'ClinicDomainQuery',
-      policyDecision, resolution: resolved.resolution,
-      constraints: resolved.constraints,
-    });
-  }
-}
-
-function authoritativeRead(outcome, fields = {}) {
-  return Object.freeze({ ownership: 'authoritative', outcome, ...fields });
-}
-
-function factualProvenance(read) {
-  if (read?.ownership !== 'authoritative') return null;
-  return Object.freeze({
-    owner: 'authoritative_domain',
-    source: read.source || null,
-    outcome: read.outcome,
-    policyDecision: read.policyDecision?.action || null,
-    policyReason: read.policyDecision?.reason || null,
-    relevantConstraints: read.policyDecision?.relevantConstraints || [],
-    constraints: read.constraints || null,
-    resolution: read.resolution || null,
-    resultCount: Object.freeze({
-      services: Array.isArray(read.services) ? read.services.length : null,
-      branches: Array.isArray(read.branches) ? read.branches.length : null,
-    }),
-  });
-}
-
-function nonNullValues(value) {
-  if (!value || typeof value !== 'object') return {};
-  return Object.fromEntries(
-    Object.entries(value).filter(([, item]) => item !== null && item !== undefined)
-  );
-}
-
-function groundSemanticServiceMentions({ mentions, services, policy }) {
-  const relevant = mentions.filter((mention) =>
-    mention?.role !== 'excluded' && mention?.confidence >= 0.85
-  );
-  if (relevant.length === 0) return null;
-
-  const groundedIds = new Set();
-  for (const mention of relevant) {
-    const evidence = mention.concept || mention.text;
-    const matches = catalogMatchesForSemanticEvidence(
-      evidence,
-      services,
-      policy
-    );
-    if (matches.length !== 1) return null;
-    groundedIds.add(String(matches[0].id));
-  }
-  return groundedIds.size === 1 ? [...groundedIds][0] : null;
-}
-
-function catalogMatchesForSemanticEvidence(value, services, policy) {
-  const normalized = policy.normalize(value);
-  if (!normalized) return [];
-  const exact = services.filter((service) =>
-    [service.name, ...(Array.isArray(service.aliases) ? service.aliases : [])]
-      .some((candidate) => policy.normalize(candidate) === normalized)
-  );
-  if (exact.length > 0) return distinctServices(exact);
-
-  const contained = services.filter((service) =>
-    [service.name, ...(Array.isArray(service.aliases) ? service.aliases : [])]
-      .some((candidate) => {
-        const catalogValue = policy.normalize(candidate);
-        return catalogValue.includes(normalized) ||
-          normalized.includes(catalogValue);
-      })
-  );
-  return distinctServices(contained);
-}
-
-function distinctServices(services) {
-  return [...new Map(services.map((service) => [String(service.id), service])).values()];
-}
-
-const MEDICAL_SERVICE_CONTEXT_WORDS = new Set([
-  'كيف', 'وش', 'ايش', 'هل', 'تحضير', 'اتحضر', 'استعد', 'اسوي',
-  'قبل', 'بعد', 'جلسه', 'جلسة', 'علاج', 'خدمه', 'خدمة',
-  'معلومات', 'تعليمات',
-]);
-
-function matchingServicesByDistinctiveToken(text, services, policy) {
-  const queryTokens = serviceContextTokens(text, policy);
-  if (queryTokens.size === 0) return [];
-  return services.filter((service) => {
-    const serviceTokens = serviceContextTokens([
-      service.name,
-      ...(Array.isArray(service.aliases) ? service.aliases : []),
-    ].join(' '), policy);
-    return [...queryTokens].some((token) => serviceTokens.has(token));
-  });
-}
-
-function serviceContextTokens(value, policy) {
-  return new Set(policy.normalize(value)
-    .split(/[^\p{L}\p{N}]+/u)
-    .map(stripArabicServiceClitics)
-    .filter((token) =>
-      token.length >= 4 && !MEDICAL_SERVICE_CONTEXT_WORDS.has(token)
-    ));
-}
-
-function stripArabicServiceClitics(token) {
-  return token.replace(/^(?:و|ف)?(?:ب|ك|ل)?ال/u, '');
-}
-
-function hasUnresolvedExplicitServiceWording(text, policy) {
-  const normalized = policy.normalize(text);
-  return /(?:^|\s)(?:خدمة|علاج|جلسة)\s+[\p{L}\p{N}]+/u.test(normalized);
-}
-
-function hasOperationalFlow(state, interaction) {
-  if (interaction && typeof interaction === 'object') return true;
-  if (!state || typeof state !== 'object') return false;
-  return [
-    'booking',
-    'priceInquiry',
-    'cancellation',
-    'reschedule',
-    'changeService',
-    'changeBranch',
-  ].some((key) => state[key] && typeof state[key] === 'object');
-}
-
-function usableKnowledgeFact(result) {
-  if (result?.status !== 'found' || !Array.isArray(result.facts)) return null;
-  const fact = result.facts[0];
-  return typeof fact === 'string' && fact.trim() !== '' ? fact : null;
-}
-
-function composeKnowledgeReply({ knowledgeReply, engineReply, activeFlow }) {
-  if (
-    activeFlow &&
-    typeof engineReply === 'string' &&
-    engineReply.trim() !== ''
-  ) {
-    return `${knowledgeReply}\n\n${engineReply}`;
-  }
-  return knowledgeReply;
-}
-
 function buildIdentityTrace({
-  clinicId,
-  senderId,
-  conversation,
-  identityContext,
-  preservedData,
+  clinicId, senderId, conversation, identityContext, preservedData,
 }) {
   const shaden = plainObject(preservedData.shaden);
   const booking = plainObject(shaden.booking);
   const stateCustomer = plainObject(shaden.customer);
   return {
-    clinicId,
-    inboundSender: maskPhone(senderId),
+    clinicId, inboundSender: maskPhone(senderId),
     resolvedPatientId: identityContext.patient?.id || null,
     resolvedPatientFullName: identityContext.patient?.fullName || null,
     conversationId: conversation.id,
@@ -673,14 +173,12 @@ function buildIdentityTrace({
     },
   };
 }
-
 function maskPhone(value) {
   const digits = String(value || '').replace(/\D/g, '');
-  if (!digits) return null;
-  return `${digits.slice(0, 3)}******${digits.slice(-3)}`;
+  return digits ? `${digits.slice(0, 3)}******${digits.slice(-3)}` : null;
 }
-
 function normalizeMessage(rawMessage) {
+  const inputProvenance = normalizeInputProvenance(rawMessage.inputProvenance);
   return {
     channel: rawMessage.channel || 'whatsapp',
     externalMessageId: rawMessage.waMessageId,
@@ -688,45 +186,40 @@ function normalizeMessage(rawMessage) {
     receiverId: rawMessage.receiverPhone,
     receiverPhoneNumberId: rawMessage.metaPhoneNumberId,
     messageType: ['button', 'interactive'].includes(rawMessage.messageType)
-      ? 'text'
-      : rawMessage.messageType,
-    text: rawMessage.text,
-    receivedAt: rawMessage.timestamp,
+      ? 'text' : rawMessage.messageType,
+    text: rawMessage.text, receivedAt: rawMessage.timestamp,
     rawPayload: rawMessage.rawPayload &&
       typeof rawMessage.rawPayload === 'object'
-      ? rawMessage.rawPayload
-      : { value: rawMessage.rawPayload ?? null },
+      ? rawMessage.rawPayload : { value: rawMessage.rawPayload ?? null },
+    ...(inputProvenance ? { inputProvenance } : {}),
   };
 }
-
+function normalizeInputProvenance(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  if (value.trusted !== true || value.source !== 'meta_whatsapp') return null;
+  if (!['meta_legacy_button', 'meta_interactive_button',
+    'meta_interactive_list', 'structured_machine_event'].includes(value.kind)) {
+    return null;
+  }
+  return Object.freeze({ trusted: true, source: 'meta_whatsapp', kind: value.kind });
+}
 function plainObject(value) {
   return value && typeof value === 'object' && !Array.isArray(value)
-    ? structuredClone(value)
-    : {};
+    ? structuredClone(value) : {};
 }
-
 function stateData(value) {
   if (typeof value !== 'string') return plainObject(value);
-  try {
-    return plainObject(JSON.parse(value));
-  } catch {
-    return {};
-  }
+  try { return plainObject(JSON.parse(value)); } catch { return {}; }
 }
-
 function safePhoneNumberId(value) {
-  return typeof value === 'string' && /^\d{6,32}$/.test(value)
-    ? value
-    : null;
+  return typeof value === 'string' && /^\d{6,32}$/.test(value) ? value : null;
 }
-
 function validateInternalLifecycleResult(result) {
   try {
     const metadata = lifecycleMetadataFrom(result);
     if (metadata.lifecycleOutcome) {
       validateLifecycleTransition({
-        outcome: metadata.lifecycleOutcome,
-        resultingState: result.nextState,
+        outcome: metadata.lifecycleOutcome, resultingState: result.nextState,
       });
     } else if (metadata.undeclaredLifecycleReason) {
       validatePersistedFlowState(result.nextState);
@@ -744,12 +237,10 @@ function validateInternalLifecycleResult(result) {
     throw invariantError;
   }
 }
-
 function lastFourDigits(value) {
   if (typeof value !== 'string') return null;
   const digits = value.replace(/\D/g, '');
   return digits ? digits.slice(-4) : null;
 }
-
 module.exports = createShadenEngine;
 module.exports.validateInternalLifecycleResult = validateInternalLifecycleResult;

@@ -8,19 +8,20 @@ class WhatsAppWebhookParser {
    */
   static parse(body) {
     try {
-      if (!body || !body.object || !body.entry || !body.entry[0].changes) {
+      if (!body || !body.object || !Array.isArray(body.entry)) {
         return null;
       }
 
-      const value = body.entry[0].changes[0].value;
-
-      // تجاهل تحديثات الحالة (delivered, read, etc.)
-      if (!value.messages || value.messages.length === 0) {
+      const change = body.entry
+        .flatMap((entry) => Array.isArray(entry?.changes) ? entry.changes : [])
+        .find((item) => Array.isArray(item?.value?.messages) && item.value.messages.length > 0);
+      if (!change) {
         return null;
       }
+      const value = change.value;
 
       const msg = value.messages[0];
-      const metadata = value.metadata;
+      const metadata = value.metadata || {};
       const contact = Array.isArray(value.contacts)
         ? value.contacts.find((item) => item.wa_id === msg.from) || value.contacts[0]
         : null;
@@ -50,6 +51,7 @@ class WhatsAppWebhookParser {
           // عندما يضغط العميل على زر
           rawMessage.text = msg.button.text;
           rawMessage.rawPayload = msg.button.payload;
+          rawMessage.inputProvenance = trustedProvenance('meta_legacy_button');
           break;
 
         case 'interactive':
@@ -57,9 +59,11 @@ class WhatsAppWebhookParser {
           if (msg.interactive.type === 'button_reply') {
             rawMessage.text = msg.interactive.button_reply.title;
             rawMessage.rawPayload = msg.interactive.button_reply.id;
+            rawMessage.inputProvenance = trustedProvenance('meta_interactive_button');
           } else if (msg.interactive.type === 'list_reply') {
             rawMessage.text = msg.interactive.list_reply.title;
             rawMessage.rawPayload = msg.interactive.list_reply.id;
+            rawMessage.inputProvenance = trustedProvenance('meta_interactive_list');
           }
           break;
 
@@ -77,6 +81,14 @@ class WhatsAppWebhookParser {
       return null;
     }
   }
+}
+
+function trustedProvenance(kind) {
+  return Object.freeze({
+    trusted: true,
+    source: 'meta_whatsapp',
+    kind,
+  });
 }
 
 module.exports = WhatsAppWebhookParser;
