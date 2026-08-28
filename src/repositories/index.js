@@ -28,6 +28,7 @@ const ServiceAssignmentRepository = require(
 const PriceRepository = require('./PriceRepository');
 const BranchRepository = require('./BranchRepository');
 const NotificationRepository = require('./NotificationRepository');
+const KnowledgeBaseRepository = require('./KnowledgeBaseRepository');
 
 function createRepositories(db) {
   return {
@@ -42,6 +43,7 @@ function createRepositories(db) {
     prices: new PriceRepository(db),
     branches: new BranchRepository(db),
     notifications: new NotificationRepository(db),
+    knowledgeBase: new KnowledgeBaseRepository(db),
   };
 }
 

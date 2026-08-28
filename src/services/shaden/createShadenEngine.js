@@ -11,13 +11,18 @@ const ClinicService = require('../ClinicService');
 const ConversationService = require('../ConversationService');
 const PatientService = require('../../modules/patients/PatientService');
 const { normalizeSaudiMobile } = require('../../core/validators/saudiMobile');
+const SemanticCatalogProvider = require('./semanticCatalog/SemanticCatalogProvider');
+const SemanticCatalogSlice = require('./semanticCatalog/SemanticCatalogSlice');
 
 function createShadenEngine({
   clinicRepository, conversationRepository, patientRepository,
   clinicService = null, conversationService = null, patientService = null,
   messageRepository, catalogService, serviceAssignmentRepository = null,
   clinicConfigurationSource, bookingEngine, appointmentService = null,
-  priceService = null, logger = console, shadenEngine = null, sendMessage,
+  priceService = null, knowledgeService = null,
+  logger = console, shadenEngine = null, sendMessage,
+  semanticCatalogEnabled = false, semanticCatalogApiKey = null,
+  semanticCatalogProvider = null,
 } = {}) {
   const clinics = clinicService || new ClinicService(clinicRepository);
   const conversations = conversationService ||
@@ -33,6 +38,14 @@ function createShadenEngine({
   const contextProvider = new ShadenConversationContextProvider({
     patientService: patients,
   });
+  const semanticCatalogSlice = semanticCatalogEnabled
+    ? new SemanticCatalogSlice({
+      provider: semanticCatalogProvider || new SemanticCatalogProvider({
+        apiKey: semanticCatalogApiKey,
+      }),
+      knowledgeService,
+    })
+    : null;
 
   return {
     async processMessage(rawMessage) {
@@ -78,6 +91,23 @@ function createShadenEngine({
         identityContext, preservedData,
       }));
       const clinicData = await dataProvider.load(clinic);
+      const deterministicInquiry = policy.recognize(message.text);
+      const stateBefore = operationalStateSummary(preservedData.shaden);
+      let semanticResult = {
+        eligible: false,
+        reason: semanticCatalogSlice ? null : 'FEATURE_FLAG_DISABLED',
+        llmCalled: false,
+        ownership: 'NOT_OWNED',
+      };
+      if (semanticCatalogSlice) {
+        semanticResult = await semanticCatalogSlice.evaluate({
+          message,
+          currentState: preservedData.shaden,
+          deterministicInquiry,
+          catalog: clinicData,
+          clinicId: clinic.id,
+        });
+      }
       logger.info({
         event: 'SHADEN_RUNTIME_ROUTE', conversationId: conversation.id,
         messageId: message.externalMessageId,
@@ -88,18 +118,36 @@ function createShadenEngine({
         event: 'SHADEN_DETERMINISTIC_ENTER', conversationId: conversation.id,
         messageId: message.externalMessageId,
       });
-      const internalResult = await engine.handle({
-        message, currentState: preservedData.shaden, clinicData,
-        patientIdentity: identityContext,
-        bookingContext: {
-          clinicId: clinic.id, conversationId: conversation.id,
-          channel: message.channel, channelIdentity: message.senderId,
-          patientId: conversation.patientId || null,
-        },
-      });
+      const semanticOwned = ['OWNED', 'CLARIFICATION'].includes(semanticResult.ownership);
+      const internalResult = semanticOwned
+        ? {
+          reply: semanticResult.reply,
+          nextState: idleState(preservedData.shaden, policy),
+          undeclaredLifecycleReason: 'legacy_undeclared',
+        }
+        : await engine.handle({
+          message, currentState: preservedData.shaden, clinicData,
+          patientIdentity: identityContext,
+          bookingContext: {
+            clinicId: clinic.id, conversationId: conversation.id,
+            channel: message.channel, channelIdentity: message.senderId,
+            patientId: conversation.patientId || null,
+          },
+        });
       validateInternalLifecycleResult(internalResult);
       const { reply, nextState, interaction, notificationAttempted } =
         userFacingHandlerResult(internalResult);
+      logger.info(buildSemanticCatalogTrace({
+        conversationId: conversation.id,
+        message,
+        deterministicInquiry,
+        semanticResult,
+        stateBefore,
+        stateAfter: operationalStateSummary(nextState),
+        finalResponseClassification: semanticOwned
+          ? semanticResult.finalResponseClassification
+          : 'EXISTING_DETERMINISTIC_RUNTIME',
+      }));
       if (!reply || typeof reply !== 'string' || reply.trim() === '') {
         console.warn('⚠️ Shaden Engine returned an empty reply. Message:', message.text);
         await conversations.updateState(conversation.id, {
@@ -241,6 +289,73 @@ function lastFourDigits(value) {
   if (typeof value !== 'string') return null;
   const digits = value.replace(/\D/g, '');
   return digits ? digits.slice(-4) : null;
+}
+function idleState(value, policy) {
+  if (value && typeof value === 'object' && value.version === 1) return structuredClone(value);
+  return policy.initialState();
+}
+function operationalStateSummary(value) {
+  if (!value || typeof value !== 'object') return { activeOwner: null, step: null };
+  const activeOwner = ['booking', 'cancellation', 'reschedule', 'changeService',
+    'changeBranch', 'priceInquiry'].find((key) => Boolean(value[key])) || null;
+  return { activeOwner, step: value[activeOwner]?.step || value.step || null };
+}
+function buildSemanticCatalogTrace({
+  conversationId, message, deterministicInquiry, semanticResult,
+  stateBefore, stateAfter, finalResponseClassification,
+}) {
+  return {
+    event: 'SHADEN_SEMANTIC_CATALOG_TRACE',
+    correlationId: message.externalMessageId,
+    conversationId,
+    inbound: {
+      messageId: message.externalMessageId,
+      sanitizedMessage: sanitizeDiagnosticMessage(message.text),
+      provenance: message.inputProvenance?.trusted === true
+        ? 'TRUSTED_INTERACTIVE' : 'UNTRUSTED_FREE_TEXT',
+    },
+    deterministicOwnership: {
+      recognizedType: deterministicInquiry?.type || 'unknown',
+      stateBefore,
+    },
+    semanticEligibility: semanticResult.eligible ? 'YES' : 'NO',
+    semanticIneligibilityReason: semanticResult.eligible ? null : semanticResult.reason,
+    llmCalled: semanticResult.llmCalled ? 'YES' : 'NO',
+    semanticOutput: semanticResult.semantic || null,
+    providerTelemetry: semanticResult.provider?.telemetry || null,
+    grounding: (semanticResult.grounding || []).map((item) => ({
+      referenceIndex: item.referenceIndex,
+      kind: item.reference.kind,
+      surface: item.reference.surface,
+      interpretedMeaning: item.reference.interpretedMeaning || null,
+      concept: item.reference.concept || null,
+      qualifiers: item.reference.qualifiers || [],
+      atLocationReferenceIndex: item.reference.atLocationReferenceIndex,
+      status: item.status,
+      selection: item.selection,
+      knowledge: item.knowledge || null,
+      candidates: item.candidates.map((candidate) => ({
+        entityType: candidate.entityType,
+        id: candidate.authoritativeEntityId,
+        name: candidate.authoritativeEntityName,
+        matchedField: candidate.matchedField,
+        evidenceKind: candidate.evidenceKind,
+        evidenceStrength: candidate.evidenceStrength,
+        evidenceTier: candidate.evidenceTier,
+        matchMethod: candidate.matchMethod,
+        normalizationMethod: candidate.normalizationMethod,
+        inputSource: candidate.inputSource,
+      })),
+    })),
+    applicationOwnership: semanticResult.ownership,
+    authoritativeDomainQuery: semanticResult.authoritativeDomainQuery || null,
+    authoritativeDomainResult: semanticResult.authoritativeDomainResult || null,
+    finalResponseClassification,
+    stateAfter,
+  };
+}
+function sanitizeDiagnosticMessage(value) {
+  return String(value || '').replace(/[\u0000-\u001F\u007F]/gu, ' ').replace(/\s+/gu, ' ').trim().slice(0, 500);
 }
 module.exports = createShadenEngine;
 module.exports.validateInternalLifecycleResult = validateInternalLifecycleResult;

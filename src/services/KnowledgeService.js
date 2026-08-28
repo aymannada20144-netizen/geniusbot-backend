@@ -6,6 +6,10 @@ const {
   validatePlainObject,
   validateUuid,
 } = require('../core/validators/commonValidators');
+const {
+  NEED_CONCEPTS,
+  NEED_QUALIFIERS,
+} = require('../contracts/shaden/SemanticNeedConcepts');
 
 const KNOWLEDGE_TYPES = new Set([
   'medical_faq',
@@ -77,6 +81,77 @@ class KnowledgeService {
       references: [reference],
     });
   }
+
+  async retrieveDescribedNeed(input) {
+    const request = validateDescribedNeedRequest(input);
+    if (request.concept === 'UNKNOWN') {
+      return result('described_need', 'not_found', {
+        warnings: ['unknown_semantic_need'],
+      });
+    }
+    let candidates;
+    try {
+      candidates = await this.knowledgeBaseRepository
+        .findByConcept({
+          clinicId: request.clinicId,
+          concept: request.concept,
+          qualifiers: request.qualifiers,
+        });
+    } catch (_error) {
+      return result('described_need', 'unavailable', {
+        warnings: ['knowledge_retrieval_failed'],
+      });
+    }
+    if (!Array.isArray(candidates)) {
+      return result('described_need', 'unavailable', {
+        warnings: ['knowledge_retrieval_failed'],
+      });
+    }
+
+    const rows = candidates.filter((row) =>
+      typeof row?.service_id === 'string'
+    );
+    if (!rows.length) {
+      return result('described_need', 'not_found', {
+        warnings: ['knowledge_not_found'],
+      });
+    }
+
+    const byService = new Map();
+    for (const row of rows) {
+      if (!byService.has(row.service_id)) {
+        byService.set(row.service_id, row);
+      }
+    }
+    const supportedRows = [...byService.values()];
+    return result('described_need', 'found', {
+      facts: supportedRows.map((row) => row.content),
+      references: supportedRows.map((row) => Object.freeze({
+        id: row.id,
+        title: row.title,
+        category: row.category,
+        serviceId: row.service_id,
+      })),
+    });
+  }
+}
+
+function validateDescribedNeedRequest(input) {
+  validatePlainObject(input, 'Described need Knowledge request');
+  validateUuid(input.clinicId, 'clinicId');
+  if (!NEED_CONCEPTS.includes(input.concept)) {
+    throw new ValidationError('Described need concept is unsupported.');
+  }
+  if (!Array.isArray(input.qualifiers) ||
+      input.qualifiers.some((item) => !NEED_QUALIFIERS.includes(item)) ||
+      new Set(input.qualifiers).size !== input.qualifiers.length) {
+    throw new ValidationError('Described need qualifiers are unsupported.');
+  }
+  return Object.freeze({
+    clinicId: input.clinicId,
+    concept: input.concept,
+    qualifiers: Object.freeze([...input.qualifiers]),
+  });
 }
 
 function validateRequest(input) {

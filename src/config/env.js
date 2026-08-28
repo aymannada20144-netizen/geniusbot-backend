@@ -26,6 +26,12 @@ module.exports = {
       ? Number(process.env.WHATSAPP_MESSAGE_DEBOUNCE_MS)
       : 2750,
 
+  semanticCatalog: {
+    enabled: String(process.env.SHADEN_SEMANTIC_CATALOG_SLICE_ENABLED || '')
+      .trim().toLowerCase() === 'true',
+    groqApiKey: process.env.GROQ_API_KEY || null,
+  },
+
   whatsapp: {
     token: process.env.WHATSAPP_TOKEN,
     verifyToken: process.env.VERIFY_TOKEN,

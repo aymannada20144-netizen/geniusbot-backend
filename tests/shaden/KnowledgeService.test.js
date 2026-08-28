@@ -7,9 +7,88 @@ const KnowledgeService = require('../../src/services/KnowledgeService');
 const IDS = Object.freeze({
   clinic: '00000000-0000-4000-8000-000000000001',
   service: '00000000-0000-4000-8000-000000000002',
+  otherService: '00000000-0000-4000-8000-000000000003',
 });
 
 describe('KnowledgeService validation and routing', () => {
+  test('described need returns all equally supported service-linked evidence', async () => {
+    const service = new KnowledgeService({
+      async findEligibleCandidates() { return []; },
+      async findByConcept(input) {
+        assert.deepEqual(input, {
+          clinicId: IDS.clinic,
+          concept: 'ACNE_SCARRING',
+          qualifiers: [],
+        });
+        return [
+          candidate({
+            id: 'need-a', service_id: IDS.service,
+            title: 'آثار حب الشباب', keywords: ['آثار حب الشباب'],
+          }),
+          candidate({
+            id: 'need-b', service_id: IDS.otherService,
+            title: 'آثار حب الشباب', keywords: ['آثار حب الشباب'],
+          }),
+        ];
+      },
+    });
+    const result = await service.retrieveDescribedNeed({
+      clinicId: IDS.clinic,
+      concept: 'ACNE_SCARRING',
+      qualifiers: [],
+    });
+    assert.equal(result.status, 'found');
+    assert.deepEqual(
+      result.references.map((item) => item.serviceId),
+      [IDS.service, IDS.otherService]
+    );
+  });
+
+  test('described need fails closed when clinic Knowledge has no support', async () => {
+    const service = new KnowledgeService({
+      async findEligibleCandidates() { return []; },
+      async findByConcept() { return []; },
+    });
+    const result = await service.retrieveDescribedNeed({
+      clinicId: IDS.clinic,
+      concept: 'SKIN_TEXTURE',
+      qualifiers: [],
+    });
+    assert.equal(result.status, 'not_found');
+    assert.deepEqual(result.references, []);
+  });
+
+  test('UNKNOWN described need fails closed without repository access', async () => {
+    let calls = 0;
+    const service = new KnowledgeService({
+      async findEligibleCandidates() { return []; },
+      async findByConcept() { calls += 1; return []; },
+    });
+    const result = await service.retrieveDescribedNeed({
+      clinicId: IDS.clinic,
+      concept: 'UNKNOWN',
+      qualifiers: [],
+    });
+    assert.equal(result.status, 'not_found');
+    assert.deepEqual(result.references, []);
+    assert.equal(calls, 0);
+  });
+
+  test('described need rejects open concepts and qualifiers before lookup', async () => {
+    let calls = 0;
+    const service = new KnowledgeService({
+      async findEligibleCandidates() { return []; },
+      async findByConcept() { calls += 1; return []; },
+    });
+    await assert.rejects(service.retrieveDescribedNeed({
+      clinicId: IDS.clinic, concept: 'WRINKLES', qualifiers: [],
+    }), /concept is unsupported/u);
+    await assert.rejects(service.retrieveDescribedNeed({
+      clinicId: IDS.clinic, concept: 'PIGMENTATION', qualifiers: ['OUTDOORS'],
+    }), /qualifiers are unsupported/u);
+    assert.equal(calls, 0);
+  });
+
   test('rejects malformed requests before repository access', async () => {
     let calls = 0;
     const service = makeService([], () => { calls += 1; });

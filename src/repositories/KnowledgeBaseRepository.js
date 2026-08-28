@@ -35,6 +35,31 @@ class KnowledgeBaseRepository extends BaseRepository {
     const result = await this.query(sql, parameters);
     return result.rows;
   }
+
+  async findByConcept({ clinicId, concept, qualifiers = [] }) {
+    const tags = [
+      'knowledge_role:DISCOVERY',
+      `concept:${concept}`,
+      ...qualifiers.map((qualifier) => `qualifier:${qualifier}`),
+    ];
+    const result = await this.query(
+      `SELECT
+         id,
+         service_id,
+         title,
+         content,
+         category,
+         keywords,
+         priority
+       FROM ${this.fullTableName}
+       WHERE clinic_id = $1
+         AND is_active IS TRUE
+         AND service_id IS NOT NULL
+         AND keywords @> $2::text[]`,
+      [clinicId, tags]
+    );
+    return result.rows;
+  }
 }
 
 module.exports = KnowledgeBaseRepository;

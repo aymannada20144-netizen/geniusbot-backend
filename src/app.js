@@ -25,6 +25,7 @@ const ConversationService = require('./services/ConversationService');
 const PatientService = require('./modules/patients/PatientService');
 const WhatsAppMessageDebouncer = require('./channels/whatsapp/WhatsAppMessageDebouncer');
 const PriceService = require('./services/PriceService');
+const KnowledgeService = require('./services/KnowledgeService');
 const CommunicationService = require(
   './communication/services/CommunicationService'
 );
@@ -177,6 +178,9 @@ async function buildApp() {
   );
   const patientService = new PatientService(bookingRepositories.patients);
   const priceService = new PriceService(bookingRepositories.prices);
+  const knowledgeService = new KnowledgeService(
+    bookingRepositories.knowledgeBase
+  );
   const catalogService = new MasterDataService(
     new MasterDataRepository(db)
   );
@@ -196,6 +200,9 @@ async function buildApp() {
     bookingEngine,
     appointmentService,
     priceService,
+    knowledgeService,
+    semanticCatalogEnabled: env.semanticCatalog.enabled,
+    semanticCatalogApiKey: env.semanticCatalog.groqApiKey,
     logger: app.log,
     sendMessage: sendWhatsAppMessage,
   });
@@ -206,7 +213,10 @@ async function buildApp() {
   });
   app.log.info({
     event: 'SHADEN_WHATSAPP_COMPOSITION',
-    route: 'DETERMINISTIC',
+    route: env.semanticCatalog.enabled
+      ? 'DETERMINISTIC_WITH_BOUNDED_SEMANTIC_CATALOG_SLICE'
+      : 'DETERMINISTIC',
+    semanticCatalogSliceEnabled: env.semanticCatalog.enabled,
     debouncerConstructed: true,
     debounceMs: env.whatsappMessageDebounceMs,
   });

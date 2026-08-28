@@ -13,6 +13,30 @@ const IDS = Object.freeze({
 });
 
 describe('KnowledgeBaseRepository', () => {
+  test('described-need lookup requires exact discovery concept tags', async () => {
+    let captured;
+    const repository = new KnowledgeBaseRepository({
+      async query(sql, parameters) {
+        captured = { sql, parameters };
+        return { rows: [] };
+      },
+    });
+    await repository.findByConcept({
+      clinicId: IDS.clinic,
+      concept: 'PIGMENTATION',
+      qualifiers: ['SUN_EXPOSURE'],
+    });
+    assert.match(captured.sql, /WHERE clinic_id = \$1/u);
+    assert.match(captured.sql, /is_active IS TRUE/u);
+    assert.match(captured.sql, /service_id IS NOT NULL/u);
+    assert.match(captured.sql, /keywords @> \$2::text\[\]/u);
+    assert.deepEqual(captured.parameters, [IDS.clinic, [
+      'knowledge_role:DISCOVERY',
+      'concept:PIGMENTATION',
+      'qualifier:SUN_EXPOSURE',
+    ]]);
+  });
+
   test('enforces parameterized clinic, active, category and service eligibility', async () => {
     let captured;
     const repository = new KnowledgeBaseRepository({

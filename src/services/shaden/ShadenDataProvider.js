@@ -54,8 +54,8 @@ class ShadenDataProvider {
         gender: assistantIdentity.assistantGender,
       },
       branches: active(branches).map(branchFact),
-      specialties: active(specialties).map(named),
-      services: active(services).map(serviceFact),
+      specialties: active(specialties).map(specialtyFact),
+      services: enrichServices(active(services), active(specialties)),
       paymentMethods: active(paymentMethods).map((method) => ({
         ...named(method),
         code: method.code || null,
@@ -103,11 +103,29 @@ function serviceFact(item) {
     aliases: Array.isArray(item.aliases)
       ? item.aliases.filter((alias) => typeof alias === 'string' && alias.trim())
       : [],
+    description: item.description || null,
     specialtyId: item.specialty_id || null,
     isBookingEnabled: item.is_booking_enabled !== false,
     requiresDoctor: item.requires_doctor === true,
     requiresRoom: item.requires_room === true,
   };
+}
+
+function specialtyFact(item) {
+  return { ...named(item), description: item.description || null };
+}
+
+function enrichServices(services, specialties) {
+  const specialtyById = new Map(specialties.map((item) => [String(item.id), item]));
+  return services.map((item) => {
+    const service = serviceFact(item);
+    const specialty = specialtyById.get(String(service.specialtyId));
+    return {
+      ...service,
+      specialtyName: specialty?.display_name_ar || specialty?.name || null,
+      specialtyDescription: specialty?.description || null,
+    };
+  });
 }
 
 function branchFact(item) {
