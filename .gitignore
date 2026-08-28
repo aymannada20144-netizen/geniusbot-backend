@@ -7,3 +7,8 @@ coverage/
 dist/
 build/
 *.log
+runtime-logs/
+proofs/
+GeniusBot-Backend_tree.txt
+si01-live-gate-*.txt
+evidence/rha/
