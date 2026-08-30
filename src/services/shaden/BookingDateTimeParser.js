@@ -8,6 +8,7 @@ function parsePreferredStart(text, previousValue, policy, options = {}) {
   const normalized = policy.normalize(text);
   const previous = parsePartialPreferredStart(previousValue);
   const date = parseDatePart(normalized, now, timeZone) || previous.date;
+  const daypart = parseDaypart(normalized);
   const preference = parseAvailabilityPreference(normalized);
   if (preference) {
     return {
@@ -19,7 +20,9 @@ function parsePreferredStart(text, previousValue, policy, options = {}) {
       },
     };
   }
-  const time = parseTimePart(stripExplicitDate(normalized)) || previous.time;
+  const time = parseTimePart(stripExplicitDate(normalized), {
+    allowUnqualifiedHour: Boolean(date),
+  }) || previous.time;
 
   if (date && time) {
     return {
@@ -37,6 +40,7 @@ function parsePreferredStart(text, previousValue, policy, options = {}) {
       value: `date:${date.year}-${pad(date.month)}-${pad(date.day)}`,
       date,
       ambiguousTime: hasAmbiguousTime(normalized),
+      ...(daypart ? { daypart } : {}),
     };
   }
   if (time) {
@@ -61,7 +65,7 @@ function parseAvailabilityPreference(text) {
   return null;
 }
 
-function parseTimePart(text) {
+function parseTimePart(text, { allowUnqualifiedHour = false } = {}) {
   const match = String(text || '').match(
     /(?:^|\s)(?:الساعه|الساعة|at)?\s*(\d{1,2})(?::(\d{2}))?\s*(صباحا|صباح|ص|am|مساء|مساءا|م|pm)?(?=\s|$)/u
   );
@@ -70,7 +74,8 @@ function parseTimePart(text) {
   const minute = Number(match[2] || 0);
   const period = match[3] || null;
   if (minute > 59) return null;
-  if (!period && match[2] === undefined && hour <= 12) return null;
+  if (!period && match[2] === undefined && hour <= 12 &&
+    !(allowUnqualifiedHour && /(?:الساعه|الساعة)\s*\d/u.test(text))) return null;
   if (period) {
     if (hour < 1 || hour > 12) return null;
     if (['مساء', 'مساءا', 'م', 'pm'].includes(period) && hour < 12) hour += 12;
@@ -79,6 +84,15 @@ function parseTimePart(text) {
     return null;
   }
   return { hour, minute };
+}
+
+function parseDaypart(text) {
+  const value = String(text || '');
+  if (/(?:الصبح|صباح|صباحا)/u.test(value)) return 'morning';
+  if (/(?:الظهر|ظهر)/u.test(value)) return 'noon';
+  if (/(?:بعد\s+العصر|العصر|عصر)/u.test(value)) return 'afternoon';
+  if (/(?:المساء|مساء|مساءا)/u.test(value)) return 'evening';
+  return null;
 }
 
 function hasAmbiguousTime(text) {
@@ -106,6 +120,14 @@ function parseDatePart(text, now, timeZone) {
       ? validDateParts(Number(explicit[1]), Number(explicit[2]), Number(explicit[3]))
       : validDateParts(Number(explicit[3]), Number(explicit[2]), Number(explicit[1]));
   }
+  const dayOfMonth = text.match(/(?:^|\s)يوم\s+(\d{1,2})(?=\s|$)/u);
+  if (dayOfMonth) {
+    const requestedDay = Number(dayOfMonth[1]);
+    const currentMonth = validDateParts(today.year, today.month, requestedDay);
+    if (currentMonth && requestedDay >= today.day) return currentMonth;
+    const nextMonth = addMonths(today, 1);
+    return validDateParts(nextMonth.year, nextMonth.month, requestedDay);
+  }
   const weekdays = ['الاحد', 'الاثنين', 'الثلاثاء', 'الاربعاء', 'الخميس', 'الجمعه', 'السبت'];
   const weekday = weekdays.findIndex((name) => text.includes(name));
   if (weekday < 0) return null;
@@ -118,7 +140,8 @@ function parseDatePart(text, now, timeZone) {
 function stripExplicitDate(text) {
   return text
     .replace(/\b\d{4}-\d{1,2}-\d{1,2}\b/u, ' ')
-    .replace(/\b\d{1,2}[/-]\d{1,2}[/-]\d{4}\b/u, ' ');
+    .replace(/\b\d{1,2}[/-]\d{1,2}[/-]\d{4}\b/u, ' ')
+    .replace(/(?:^|\s)يوم\s+\d{1,2}(?=\s|$)/u, ' ');
 }
 
 function localDateParts(value, timeZone) {
@@ -152,6 +175,11 @@ function zonedParts(value, timeZone) {
 function addDays(parts, count) {
   const date = new Date(Date.UTC(parts.year, parts.month - 1, parts.day + count));
   return { year: date.getUTCFullYear(), month: date.getUTCMonth() + 1, day: date.getUTCDate() };
+}
+
+function addMonths(parts, count) {
+  const date = new Date(Date.UTC(parts.year, parts.month - 1 + count, 1));
+  return { year: date.getUTCFullYear(), month: date.getUTCMonth() + 1, day: 1 };
 }
 
 function validDateParts(year, month, day) {

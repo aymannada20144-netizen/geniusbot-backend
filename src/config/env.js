@@ -26,7 +26,7 @@ module.exports = {
       ? Number(process.env.WHATSAPP_MESSAGE_DEBOUNCE_MS)
       : 2750,
 
-  semanticCatalog: {
+  conversation: {
     enabled: String(process.env.SHADEN_SEMANTIC_CATALOG_SLICE_ENABLED || '')
       .trim().toLowerCase() === 'true',
     groqApiKey: process.env.GROQ_API_KEY || null,

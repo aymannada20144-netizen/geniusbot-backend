@@ -30,12 +30,12 @@ describe('Booking date-time parsing', () => {
     assert.equal(parsed.value, '2026-07-31T15:00:00.000Z');
   });
 
-  test('ambiguous hour requests clarification instead of guessing', () => {
+  test('date plus الساعة hour is accepted in one turn', () => {
     const parsed = parsePreferredStart('اليوم الساعة 6', null, policy, {
       now: new Date('2026-07-31T09:00:00.000Z'), timeZone: 'Asia/Riyadh',
     });
-    assert.equal(parsed.complete, false);
-    assert.equal(parsed.ambiguousTime, true);
+    assert.equal(parsed.complete, true);
+    assert.deepEqual(parsed.time, { hour: 6, minute: 0 });
   });
 });
 

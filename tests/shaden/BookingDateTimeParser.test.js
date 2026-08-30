@@ -103,10 +103,46 @@ describe('BookingDateTimeParser current behavior', () => {
     assert.equal(result.value, 'time:18:00');
   });
 
-  test('an hour without a period remains ambiguous', () => {
+  test('a time-only hour without a period remains ambiguous', () => {
     const result = parse('الساعة 6');
     assert.equal(result.complete, false);
     assert.equal(result.ambiguousTime, true);
+  });
+
+  test('combined relative date and evening daypart preserves both facts', () => {
+    const result = parse('بعد بكره المساء', {
+      now: '2026-08-05T08:00:00.000Z',
+    });
+    assert.equal(result.value, 'date:2026-08-07');
+    assert.equal(result.daypart, 'evening');
+  });
+
+  test('combined weekday and unqualified clock hour is exact', () => {
+    assertComplete(parse('الاثنين الساعة 8', {
+      now: '2026-08-05T08:00:00.000Z',
+    }), {
+      date: { year: 2026, month: 8, day: 10 },
+      time: { hour: 8, minute: 0 },
+      value: '2026-08-10T05:00:00.000Z',
+    });
+  });
+
+  test('day-of-month and evening clock time parse in one turn', () => {
+    assertComplete(parse('يوم 31 الساعة 8 مساء', {
+      now: '2026-08-05T08:00:00.000Z',
+    }), {
+      date: { year: 2026, month: 8, day: 31 },
+      time: { hour: 20, minute: 0 },
+      value: '2026-08-31T17:00:00.000Z',
+    });
+  });
+
+  test('weekday after العصر preserves the afternoon daypart', () => {
+    const result = parse('الخميس بعد العصر', {
+      now: '2026-08-05T08:00:00.000Z',
+    });
+    assert.deepEqual(result.date, { year: 2026, month: 8, day: 6 });
+    assert.equal(result.daypart, 'afternoon');
   });
 
   test('24-hour time parses correctly', () => {

@@ -770,9 +770,9 @@ describe('date interaction scope', () => {
 
     assert.equal(result.nextState.booking.date, '2026-08-06');
     assert.equal(result.nextState.booking.datePeriod, null);
-    assert.equal(result.nextState.booking.step, 'time_period');
+    assert.equal(result.nextState.booking.step, 'time');
     assert.equal(result.nextState.booking.preferredStart, null);
-    assert.equal(result.interaction.purpose, 'select_time_period');
+    assert.equal(result.interaction.purpose, 'select_time');
   });
 
   test('invalid date reply does not change session', async () => {
@@ -833,7 +833,7 @@ describe('date interaction scope', () => {
     });
 
     assert.equal(result.nextState.booking.date, '2026-08-07');
-    assert.equal(result.nextState.booking.step, 'time_period');
+    assert.equal(result.nextState.booking.step, 'time');
   });
 
   test('no available dates returns a safe text response and stays at date', async () => {

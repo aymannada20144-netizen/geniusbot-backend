@@ -73,7 +73,7 @@ describe('Shaden runtime formatter coverage', () => {
       insuranceCompanyId: null, insuranceClassId: null,
     };
     const engine = new ShadenEngine({ clock: { now: () => new Date('2026-07-31T09:00:00.000Z') } });
-    const result = engine.handle({ message: { text: 'اليوم الساعة 6' }, currentState: state(booking), clinicData: data() });
+    const result = engine.handle({ message: { text: 'الساعة 6' }, currentState: state(booking), clinicData: data() });
     assert.equal(result.reply, [
       r('🌸 *لم أتمكن من تحديد الوقت*'), '',
       r('اكتبي الوقت مع توضيح صباحًا أو مساءً، مثل:'),
@@ -85,4 +85,3 @@ describe('Shaden runtime formatter coverage', () => {
     assert.doesNotMatch(result.reply, /الخدمات|الفروع|طرق الدفع/u);
   });
 });
-

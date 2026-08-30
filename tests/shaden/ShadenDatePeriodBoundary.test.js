@@ -123,9 +123,10 @@ describe('date_period integration boundary', () => {
       }, dateState(), directDateEngine());
 
       assert.deepEqual(natural, interactive);
-      assert.equal(natural.nextState.booking.step, 'time_period');
+      assert.equal(natural.nextState.booking.step, 'time');
       assert.equal(natural.nextState.booking.date, date);
       assert.notEqual(natural.interaction?.purpose, 'select_date_period');
+      assert.equal(natural.interaction?.purpose, 'select_time');
     });
   }
 
@@ -150,6 +151,67 @@ describe('date_period integration boundary', () => {
       '2026-08-07T15:00:00.000Z'
     );
     assertPriorBookingDataPreserved(result.nextState.booking, current.booking);
+  });
+
+  test('unavailable combined exact date-time returns nearest existing alternatives', async () => {
+    const bookingEngine = new ShadenEngine({
+      bookingEngine: {
+        async getAvailableDates() {
+          return { success: true, dates: ['2026-08-07'] };
+        },
+        async checkAvailability() {
+          return { status: 'unavailable', reason: 'slot_not_available', metadata: {} };
+        },
+        async getAvailableAlternatives() {
+          return {
+            alternatives: [
+              { date: '2026-08-07', time: '19:30' },
+              { date: '2026-08-07', time: '20:00' },
+            ],
+          };
+        },
+      },
+      clock: { now: () => new Date('2026-08-05T08:00:00.000Z') },
+    });
+    const result = await turn(
+      { text: 'بعد بكره الساعة 8 مساء' },
+      datePeriodState(),
+      bookingEngine
+    );
+
+    assert.equal(result.nextState.booking.step, 'availability');
+    assert.equal(result.interaction.purpose, 'select_booking_alternative');
+    assert.deepEqual(result.interaction.options.map(({ id }) => id), [
+      'booking-alternative:2026-08-07T19:30',
+      'booking-alternative:2026-08-07T20:00',
+    ]);
+  });
+
+  test('combined date and daypart lists matching slots without another period step', async () => {
+    const bookingEngine = new ShadenEngine({
+      bookingEngine: {
+        async getAvailableDates() {
+          return { success: true, dates: ['2026-08-07'] };
+        },
+        async getAvailableTimes() {
+          return { success: true, times: ['09:00', '16:30', '19:00', '20:00'] };
+        },
+      },
+      clock: { now: () => new Date('2026-08-05T08:00:00.000Z') },
+    });
+    const result = await turn(
+      { text: 'بعد بكره المساء' },
+      datePeriodState(),
+      bookingEngine
+    );
+
+    assert.equal(result.nextState.booking.date, '2026-08-07');
+    assert.equal(result.nextState.booking.step, 'time');
+    assert.equal(result.nextState.booking.timePeriod, 'evening');
+    assert.equal(result.interaction.purpose, 'select_time');
+    assert.deepEqual(result.interaction.options.map(({ id }) => id), [
+      'time:19:00', 'time:20:00',
+    ]);
   });
 
   test('valid interactiveReplyId stores the selected period and advances unchanged', async () => {

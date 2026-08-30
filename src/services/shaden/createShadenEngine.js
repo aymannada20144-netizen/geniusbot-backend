@@ -11,8 +11,8 @@ const ClinicService = require('../ClinicService');
 const ConversationService = require('../ConversationService');
 const PatientService = require('../../modules/patients/PatientService');
 const { normalizeSaudiMobile } = require('../../core/validators/saudiMobile');
-const SemanticCatalogProvider = require('./semanticCatalog/SemanticCatalogProvider');
-const SemanticCatalogSlice = require('./semanticCatalog/SemanticCatalogSlice');
+const GroqConversationProvider = require('./conversation/GroqConversationProvider');
+const ShadenConversationLayer = require('./conversation/ShadenConversationLayer');
 
 function createShadenEngine({
   clinicRepository, conversationRepository, patientRepository,
@@ -21,8 +21,8 @@ function createShadenEngine({
   clinicConfigurationSource, bookingEngine, appointmentService = null,
   priceService = null, knowledgeService = null,
   logger = console, shadenEngine = null, sendMessage,
-  semanticCatalogEnabled = false, semanticCatalogApiKey = null,
-  semanticCatalogProvider = null,
+  conversationEnabled = false, conversationApiKey = null,
+  conversationProvider = null,
 } = {}) {
   const clinics = clinicService || new ClinicService(clinicRepository);
   const conversations = conversationService ||
@@ -38,12 +38,11 @@ function createShadenEngine({
   const contextProvider = new ShadenConversationContextProvider({
     patientService: patients,
   });
-  const semanticCatalogSlice = semanticCatalogEnabled
-    ? new SemanticCatalogSlice({
-      provider: semanticCatalogProvider || new SemanticCatalogProvider({
-        apiKey: semanticCatalogApiKey,
-      }),
-      knowledgeService,
+  const conversationLayer = conversationEnabled
+    ? new ShadenConversationLayer({
+      provider: conversationProvider ||
+        new GroqConversationProvider({ apiKey: conversationApiKey }),
+      logger,
     })
     : null;
 
@@ -78,7 +77,7 @@ function createShadenEngine({
         conversation.id, message.externalMessageId
       )) return { duplicate: true };
 
-      await messageRepository.saveIncomingMessage({
+      const persistedIncomingMessage = await messageRepository.saveIncomingMessage({
         conversationId: conversation.id,
         waMessageId: message.externalMessageId,
         messageText: message.text,
@@ -92,20 +91,22 @@ function createShadenEngine({
       }));
       const clinicData = await dataProvider.load(clinic);
       const deterministicInquiry = policy.recognize(message.text);
-      const stateBefore = operationalStateSummary(preservedData.shaden);
-      let semanticResult = {
-        eligible: false,
-        reason: semanticCatalogSlice ? null : 'FEATURE_FLAG_DISABLED',
-        llmCalled: false,
-        ownership: 'NOT_OWNED',
-      };
-      if (semanticCatalogSlice) {
-        semanticResult = await semanticCatalogSlice.evaluate({
-          message,
-          currentState: preservedData.shaden,
-          deterministicInquiry,
-          catalog: clinicData,
-          clinicId: clinic.id,
+      const operationalOwner = shouldUseOperationalCore(
+        message, preservedData.shaden, deterministicInquiry
+      );
+      let conversationalResult = null;
+      if (conversationLayer && !operationalOwner) {
+        const context = buildConversationContext(
+          await messageRepository.getRecentMessages({
+            conversationId: conversation.id,
+            limit: CONTEXT_RETRIEVAL_LIMIT,
+          }),
+          persistedIncomingMessage.id
+        );
+        conversationalResult = await conversationLayer.respond({
+          currentMessage: message.text,
+          contextTurns: context.turns,
+          clinicData,
         });
       }
       logger.info({
@@ -118,10 +119,10 @@ function createShadenEngine({
         event: 'SHADEN_DETERMINISTIC_ENTER', conversationId: conversation.id,
         messageId: message.externalMessageId,
       });
-      const semanticOwned = ['OWNED', 'CLARIFICATION'].includes(semanticResult.ownership);
-      const internalResult = semanticOwned
+      const conversationalOwned = Boolean(conversationalResult?.reply);
+      const internalResult = conversationalOwned
         ? {
-          reply: semanticResult.reply,
+          reply: conversationalResult.reply,
           nextState: idleState(preservedData.shaden, policy),
           undeclaredLifecycleReason: 'legacy_undeclared',
         }
@@ -137,31 +138,32 @@ function createShadenEngine({
       validateInternalLifecycleResult(internalResult);
       const { reply, nextState, interaction, notificationAttempted } =
         userFacingHandlerResult(internalResult);
-      logger.info(buildSemanticCatalogTrace({
+      logger.info({
+        event: 'SHADEN_CONVERSATION_ROUTE',
         conversationId: conversation.id,
-        message,
-        deterministicInquiry,
-        semanticResult,
-        stateBefore,
-        stateAfter: operationalStateSummary(nextState),
-        finalResponseClassification: semanticOwned
-          ? semanticResult.finalResponseClassification
-          : 'EXISTING_DETERMINISTIC_RUNTIME',
-      }));
+        messageId: message.externalMessageId,
+        owner: conversationalOwned ? 'LLM_CONVERSATION' : 'OPERATIONAL_CORE',
+        ownershipReason: operationalOwner ||
+          (conversationLayer ? 'FREE_FORM_CONVERSATION' : 'CONVERSATION_LAYER_DISABLED'),
+        deterministicRecognizedType: deterministicInquiry?.type || 'unknown',
+        toolCallCount: conversationalResult?.toolCallCount || 0,
+        conversationStatus: conversationalResult?.status || null,
+      });
+      const nextData = plainObject(preservedData);
       if (!reply || typeof reply !== 'string' || reply.trim() === '') {
         console.warn('⚠️ Shaden Engine returned an empty reply. Message:', message.text);
         await conversations.updateState(conversation.id, {
-          current: 'shaden', data: { ...preservedData, shaden: nextState },
+          current: 'shaden', data: { ...nextData, shaden: nextState },
         });
         return {
           replyText: null,
-          state: { data: { ...preservedData, shaden: nextState } },
+          state: { data: { ...nextData, shaden: nextState } },
           skipped: true,
           notificationAttempted: notificationAttempted === true,
         };
       }
       await conversations.updateState(conversation.id, {
-        current: 'shaden', data: { ...preservedData, shaden: nextState },
+        current: 'shaden', data: { ...nextData, shaden: nextState },
       });
       console.log(
         `📤 Sending reply to ${maskPhone(message.senderId)}: ${reply.substring(0, 50)}...`
@@ -184,7 +186,7 @@ function createShadenEngine({
       });
       return {
         replyText: reply,
-        state: { data: { ...preservedData, shaden: nextState } },
+        state: { data: { ...nextData, shaden: nextState } },
         notificationAttempted: notificationAttempted === true,
       };
     },
@@ -294,68 +296,65 @@ function idleState(value, policy) {
   if (value && typeof value === 'object' && value.version === 1) return structuredClone(value);
   return policy.initialState();
 }
-function operationalStateSummary(value) {
-  if (!value || typeof value !== 'object') return { activeOwner: null, step: null };
-  const activeOwner = ['booking', 'cancellation', 'reschedule', 'changeService',
+function shouldUseOperationalCore(message, state, inquiry) {
+  if (message?.inputProvenance?.trusted === true) return 'TRUSTED_MACHINE_INPUT';
+  if (activeOperationalOwner(state)) return 'ACTIVE_OPERATIONAL_STATE';
+  return OPERATIONAL_INQUIRY_TYPES.has(inquiry?.type)
+    ? 'EXPLICIT_OPERATIONAL_REQUEST' : null;
+}
+function activeOperationalOwner(value) {
+  if (!value || typeof value !== 'object') return null;
+  return ['booking', 'cancellation', 'reschedule', 'changeService',
     'changeBranch', 'priceInquiry'].find((key) => Boolean(value[key])) || null;
-  return { activeOwner, step: value[activeOwner]?.step || value.step || null };
 }
-function buildSemanticCatalogTrace({
-  conversationId, message, deterministicInquiry, semanticResult,
-  stateBefore, stateAfter, finalResponseClassification,
-}) {
-  return {
-    event: 'SHADEN_SEMANTIC_CATALOG_TRACE',
-    correlationId: message.externalMessageId,
-    conversationId,
-    inbound: {
-      messageId: message.externalMessageId,
-      sanitizedMessage: sanitizeDiagnosticMessage(message.text),
-      provenance: message.inputProvenance?.trusted === true
-        ? 'TRUSTED_INTERACTIVE' : 'UNTRUSTED_FREE_TEXT',
-    },
-    deterministicOwnership: {
-      recognizedType: deterministicInquiry?.type || 'unknown',
-      stateBefore,
-    },
-    semanticEligibility: semanticResult.eligible ? 'YES' : 'NO',
-    semanticIneligibilityReason: semanticResult.eligible ? null : semanticResult.reason,
-    llmCalled: semanticResult.llmCalled ? 'YES' : 'NO',
-    semanticOutput: semanticResult.semantic || null,
-    providerTelemetry: semanticResult.provider?.telemetry || null,
-    grounding: (semanticResult.grounding || []).map((item) => ({
-      referenceIndex: item.referenceIndex,
-      kind: item.reference.kind,
-      surface: item.reference.surface,
-      interpretedMeaning: item.reference.interpretedMeaning || null,
-      concept: item.reference.concept || null,
-      qualifiers: item.reference.qualifiers || [],
-      atLocationReferenceIndex: item.reference.atLocationReferenceIndex,
-      status: item.status,
-      selection: item.selection,
-      knowledge: item.knowledge || null,
-      candidates: item.candidates.map((candidate) => ({
-        entityType: candidate.entityType,
-        id: candidate.authoritativeEntityId,
-        name: candidate.authoritativeEntityName,
-        matchedField: candidate.matchedField,
-        evidenceKind: candidate.evidenceKind,
-        evidenceStrength: candidate.evidenceStrength,
-        evidenceTier: candidate.evidenceTier,
-        matchMethod: candidate.matchMethod,
-        normalizationMethod: candidate.normalizationMethod,
-        inputSource: candidate.inputSource,
-      })),
-    })),
-    applicationOwnership: semanticResult.ownership,
-    authoritativeDomainQuery: semanticResult.authoritativeDomainQuery || null,
-    authoritativeDomainResult: semanticResult.authoritativeDomainResult || null,
-    finalResponseClassification,
-    stateAfter,
-  };
-}
-function sanitizeDiagnosticMessage(value) {
-  return String(value || '').replace(/[\u0000-\u001F\u007F]/gu, ' ').replace(/\s+/gu, ' ').trim().slice(0, 500);
+const OPERATIONAL_INQUIRY_TYPES = new Set([
+  'booking', 'availability_request', 'appointment_management_clarification',
+  'booking_cancellation_request', 'booking_modification_request',
+  'change_service_request', 'change_branch_request', 'change_provider_request',
+  'booking_reference_request', 'booking_status_request',
+  'appointment_query_request', 'booking_rejection', 'bulk_cancel_request',
+  'compound_appointment_request', 'cancellation_information_request',
+]);
+
+const MAX_CONTEXT_TURNS = 4;
+const MAX_CONTEXT_MESSAGE_CHARS = 800;
+const MAX_CONTEXT_TOTAL_CHARS = 2400;
+const CONTEXT_RETRIEVAL_LIMIT = MAX_CONTEXT_TURNS + 1;
+
+function buildConversationContext(messages, currentMessageId) {
+  const eligible = (Array.isArray(messages) ? messages : [])
+    .filter((item) =>
+      item?.id !== currentMessageId &&
+      ['patient', 'bot'].includes(item?.senderType) &&
+      typeof item?.messageText === 'string' &&
+      item.messageText.trim()
+    );
+  let truncated = eligible.length > MAX_CONTEXT_TURNS;
+  const bounded = eligible.slice(-MAX_CONTEXT_TURNS).map((item) => {
+    const text = item.messageText.trim();
+    if (text.length > MAX_CONTEXT_MESSAGE_CHARS) truncated = true;
+    return {
+      role: item.senderType === 'patient' ? 'user' : 'assistant',
+      content: text.slice(0, MAX_CONTEXT_MESSAGE_CHARS),
+    };
+  });
+  let remaining = MAX_CONTEXT_TOTAL_CHARS;
+  const turns = [];
+  for (let index = bounded.length - 1; index >= 0; index -= 1) {
+    if (remaining === 0) { truncated = true; break; }
+    const turn = bounded[index];
+    const content = turn.content.slice(0, remaining);
+    if (content.length < turn.content.length) truncated = true;
+    turns.unshift(Object.freeze({ role: turn.role, content }));
+    remaining -= content.length;
+  }
+  return Object.freeze({
+    turns: Object.freeze(turns),
+    truncated,
+  });
 }
 module.exports = createShadenEngine;
 module.exports.validateInternalLifecycleResult = validateInternalLifecycleResult;
+module.exports.buildConversationContext = buildConversationContext;
+module.exports.MAX_CONTEXT_TURNS = MAX_CONTEXT_TURNS;
+module.exports.shouldUseOperationalCore = shouldUseOperationalCore;

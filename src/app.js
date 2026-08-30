@@ -201,8 +201,8 @@ async function buildApp() {
     appointmentService,
     priceService,
     knowledgeService,
-    semanticCatalogEnabled: env.semanticCatalog.enabled,
-    semanticCatalogApiKey: env.semanticCatalog.groqApiKey,
+    conversationEnabled: env.conversation.enabled,
+    conversationApiKey: env.conversation.groqApiKey,
     logger: app.log,
     sendMessage: sendWhatsAppMessage,
   });
@@ -213,10 +213,10 @@ async function buildApp() {
   });
   app.log.info({
     event: 'SHADEN_WHATSAPP_COMPOSITION',
-    route: env.semanticCatalog.enabled
-      ? 'DETERMINISTIC_WITH_BOUNDED_SEMANTIC_CATALOG_SLICE'
+    route: env.conversation.enabled
+      ? 'LLM_CONVERSATION_WITH_OPERATIONAL_CORE'
       : 'DETERMINISTIC',
-    semanticCatalogSliceEnabled: env.semanticCatalog.enabled,
+    conversationLayerEnabled: env.conversation.enabled,
     debouncerConstructed: true,
     debounceMs: env.whatsappMessageDebounceMs,
   });

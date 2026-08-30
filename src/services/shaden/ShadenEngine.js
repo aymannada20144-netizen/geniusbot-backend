@@ -3341,13 +3341,12 @@ async function handleBookingDateStep({
     });
   }
   booking.preferredStart = null;
-  booking.step = 'time_period';
-  return bookingTimePeriodListReply({
+  return bookingTimeSelectionReply({
     booking,
     data,
     bookingEngine,
     bookingContext,
-  });
+  }, parsed.daypart || null);
 }
 
 async function loadAvailableBookingDates({
@@ -3391,6 +3390,21 @@ async function loadAvailableBookingDates({
 async function bookingTimePeriodListReply(context) {
   const times = await loadAvailableBookingTimes(context);
   return timePeriodListReply(availableTimePeriods(times));
+}
+
+async function bookingTimeSelectionReply(context, daypart = null) {
+  const times = await loadAvailableBookingTimes(context);
+  const matchingTimes = daypart
+    ? times.filter((time) => timeInNamedPeriod(time, daypart))
+    : times;
+  if (matchingTimes.length <= 10) {
+    context.booking.timePeriod = daypart;
+    context.booking.step = 'time';
+    return timeListReply(matchingTimes);
+  }
+  context.booking.timePeriod = null;
+  context.booking.step = 'time_period';
+  return timePeriodListReply(availableTimePeriods(matchingTimes));
 }
 
 async function handleBookingTimePeriodStep({
@@ -3724,6 +3738,11 @@ function availableTimePeriods(times) {
 
 function timeInBasePeriod(time, period) {
   return time >= period.start && time <= period.end;
+}
+
+function timeInNamedPeriod(time, periodId) {
+  const period = TIME_PERIODS.find(({ id }) => id === periodId);
+  return Boolean(period && timeInBasePeriod(time, period));
 }
 
 function timePeriodSlots(times, periodId) {
