@@ -34,9 +34,11 @@ class ShadenConversationLayer {
           messages, domainTools.definitions()
         );
         if (!completion.toolCalls.length) {
+          const reply = sanitizeReply(completion.content);
+          if (!reply) return technicalFailure('EMPTY_RESPONSE');
           return {
             status: 'ANSWERED',
-            reply: sanitizeReply(completion.content) || TECHNICAL_FALLBACK,
+            reply,
             model: completion.model,
             toolCallCount: executedCalls,
           };

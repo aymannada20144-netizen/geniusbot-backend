@@ -33,6 +33,9 @@ async function sendWhatsAppMessage(input, runtime = {}) {
     ? requiredString(input, 'templateName')
     : null;
   const language = isTemplateMessage ? requiredString(input, 'language') : null;
+  const templateComponents = isTemplateMessage
+    ? optionalTemplateComponents(input)
+    : null;
   const interaction = isTextMessage
     ? ownDataValue(input, 'interaction')
     : undefined;
@@ -42,6 +45,17 @@ async function sendWhatsAppMessage(input, runtime = {}) {
   const interactivePayload = interaction === undefined
     ? null
     : buildInteractivePayload({ to, body, interaction });
+  const render = describeOutboundRender({ interaction, interactivePayload, body });
+  logInfo(runtime.logger || console, {
+    event: 'WHATSAPP_OUTBOUND_RENDER',
+    OUTBOUND_RENDER_MODE: render.mode,
+    fallbackReason: render.fallbackReason,
+    interactionType: interaction?.mode || null,
+    purpose: interaction?.purpose || null,
+    optionCount: Array.isArray(interaction?.options) ? interaction.options.length : 0,
+    firstOptionId: optionIdAt(interaction, 0),
+    lastOptionId: optionIdAt(interaction, -1),
+  });
   if (isTextMessage && interactivePayload === null && body === null) {
     throw new TypeError(
       'sendWhatsAppMessage: body must be a non-empty string.'
@@ -73,6 +87,7 @@ async function sendWhatsAppMessage(input, runtime = {}) {
           language: {
             code: language,
           },
+          ...(templateComponents ? { components: templateComponents } : {}),
         },
       }),
       {
@@ -100,6 +115,7 @@ async function sendWhatsAppMessage(input, runtime = {}) {
       diagnostics,
     });
     logFailure(runtime.logger || console, failure);
+    logOutboundResult(runtime.logger || console, render.mode, false, status, null);
     throw failure;
   }
 
@@ -113,6 +129,7 @@ async function sendWhatsAppMessage(input, runtime = {}) {
       diagnostics,
     });
     logFailure(runtime.logger || console, failure);
+    logOutboundResult(runtime.logger || console, render.mode, false, status, null);
     throw failure;
   }
 
@@ -126,12 +143,31 @@ async function sendWhatsAppMessage(input, runtime = {}) {
       diagnostics,
     });
     logFailure(runtime.logger || console, failure);
+    logOutboundResult(runtime.logger || console, render.mode, false, status, null);
     throw failure;
   }
 
+  logOutboundResult(runtime.logger || console, render.mode, true, status, messageId);
   return Object.freeze({
     messageId,
   });
+}
+
+function optionalTemplateComponents(input) {
+  const descriptor = Object.getOwnPropertyDescriptor(input, 'components');
+  if (!descriptor) return null;
+  if (!Array.isArray(descriptor.value) || descriptor.value.length === 0) {
+    throw new TypeError('sendWhatsAppMessage: components must be a non-empty array when supplied.');
+  }
+  for (const component of descriptor.value) {
+    if (!isPlainObject(component) || !nonEmptyString(component.type)) {
+      throw new TypeError('sendWhatsAppMessage: each template component must have a type.');
+    }
+    if (component.parameters !== undefined && !Array.isArray(component.parameters)) {
+      throw new TypeError('sendWhatsAppMessage: component.parameters must be an array when supplied.');
+    }
+  }
+  return descriptor.value;
 }
 
 function buildInteractivePayload({ to, body, interaction }) {
@@ -233,6 +269,69 @@ function validInteraction(interaction) {
     ids.add(option.id);
   }
   return true;
+}
+
+function describeOutboundRender({ interaction, interactivePayload, body }) {
+  if (interaction === undefined) return { mode: 'text_or_template', fallbackReason: null };
+  if (interactivePayload) return { mode: interaction.mode === 'list' ? 'interactive_list' : 'interactive_buttons', fallbackReason: null };
+  return { mode: 'text_fallback', fallbackReason: interactionFallbackReason(interaction, body) };
+}
+
+function interactionFallbackReason(interaction, body) {
+  if (!isPlainObject(interaction)) return 'invalid_interaction_object';
+  if (interaction.version !== 1) return 'invalid_interaction_version';
+  if (!['reply_buttons', 'list'].includes(interaction.mode)) return 'invalid_interaction_type';
+  if (!nonEmptyString(interaction.purpose)) return 'invalid_purpose';
+  if (!nonEmptyString(interaction.displayText)) return 'invalid_display_text';
+  if (!Array.isArray(interaction.options) || interaction.options.length === 0) return 'empty_options';
+  if (interaction.mode === 'list' && !nonEmptyString(interaction.listPrompt)) return 'invalid_list_prompt';
+  if (interaction.mode === 'reply_buttons' && interaction.listPrompt !== undefined) return 'invalid_button_section';
+  const ids = new Set();
+  for (const option of interaction.options) {
+    if (!isPlainObject(option)) return 'invalid_option';
+    if (!nonEmptyString(option.id)) return 'invalid_id';
+    if (!nonEmptyString(option.label)) return 'invalid_label';
+    if (option.description !== undefined && !nonEmptyString(option.description)) return 'invalid_description';
+    if (ids.has(option.id)) return 'duplicate_id';
+    ids.add(option.id);
+  }
+  if (interaction.mode === 'reply_buttons') {
+    const bodyText = nonEmptyString(body) ? body : interaction.displayText;
+    if (interaction.displayText.length > 1024) return 'display_text_over_meta_limit';
+    if (bodyText.length > 1024) return 'body_over_meta_limit';
+    if (interaction.options.length > 3) return 'options_over_meta_limit';
+    if (interaction.options.some((option) => option.label.length > 20)) return 'label_over_meta_limit';
+    if (interaction.options.some((option) => option.id.length > 256)) return 'id_over_meta_limit';
+    if (interaction.options.some((option) => option.description !== undefined)) return 'invalid_button_description';
+    return 'interactive_render_unavailable';
+  }
+  if (interaction.displayText.length > 4096) return 'display_text_over_meta_limit';
+  if (interaction.listPrompt.length > 20) return 'list_prompt_over_meta_limit';
+  if (interaction.options.length > 10) return 'options_over_meta_limit';
+  if (interaction.options.some((option) => option.label.length > 24)) return 'label_over_meta_limit';
+  if (interaction.options.some((option) => option.id.length > 200)) return 'id_over_meta_limit';
+  if (interaction.options.some((option) => option.description !== undefined && option.description.length > 72)) return 'description_over_meta_limit';
+  return 'interactive_render_unavailable';
+}
+
+function optionIdAt(interaction, index) {
+  if (!Array.isArray(interaction?.options) || interaction.options.length === 0) return null;
+  const option = interaction.options[index < 0 ? interaction.options.length + index : index];
+  return typeof option?.id === 'string' ? option.id : null;
+}
+
+function logInfo(logger, entry) {
+  if (typeof logger?.info === 'function') logger.info(entry);
+}
+
+function logOutboundResult(logger, renderMode, success, status, messageId) {
+  logInfo(logger, {
+    event: 'WHATSAPP_OUTBOUND_RESULT',
+    OUTBOUND_RENDER_MODE: renderMode,
+    httpSuccess: success,
+    httpStatus: Number.isFinite(status) ? status : null,
+    metaMessageId: messageId,
+  });
 }
 
 function ownDataValue(object, propertyName) {

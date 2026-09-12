@@ -167,6 +167,23 @@ describe('Shaden validated appointment reschedule flow', () => {
     assert.equal('description' in result.interaction.options[0], false);
   });
 
+  test('available-date diagnostics preserve the interaction and awaiting-date state', async () => {
+    const events = [];
+    const engine = new ShadenEngine({
+      appointmentService: { getFutureManagementCandidates: async () => [candidate] },
+      bookingEngine: { getAvailableDates: async () => ({ success: true, dates: ['2026-08-25'] }) },
+      logger: { info: (entry) => events.push(entry) },
+      clock: { now: () => new Date('2026-08-12T09:00:00.000Z') },
+    });
+    const result = await engine.handle({ message: 'اريد تغيير موعدي', currentState: null,
+      clinicData: {}, bookingContext: context, patientIdentity: identity });
+    assert.equal(result.nextState.reschedule.step, 'awaiting_date');
+    assert.equal(result.interaction.purpose, 'select_reschedule_date');
+    assert.deepEqual(events, [{
+      event: 'RESCHEDULE_AVAILABLE_DATES_LOADED', availableDateCount: 1, rescheduleStep: 'awaiting_date',
+    }]);
+  });
+
   test('RTL date isolation keeps 18 and 20 before August in appointment rows', async () => {
     const rows = [18, 20].map((day, index) => ({
       ...candidate,

@@ -1,69 +1,88 @@
 :root {
-  /* Colors */
-  --color-primary-50: #eff6ff;
-  --color-primary-100: #dbeafe;
-  --color-primary-200: #bfdbfe;
-  --color-primary-300: #93c5fd;
-  --color-primary-400: #60a5fa;
-  --color-primary-500: #3b82f6;
-  --color-primary-600: #2563eb;
-  --color-primary-700: #1d4ed8;
-  --color-primary-800: #1e40af;
-  --color-primary-900: #1e3a8a;
+  /* GeniusBot / Shaden Premium Dark System */
+  --color-primary-50: #eafcff;
+  --color-primary-100: #ccf8ff;
+  --color-primary-200: #94effb;
+  --color-primary-300: #59e2f4;
+  --color-primary-400: #25d4eb;
+  --color-primary-500: #11bfd8;
+  --color-primary-600: #079cb9;
+  --color-primary-700: #087c97;
+  --color-primary-800: #0b6278;
+  --color-primary-900: #0d5063;
 
   --color-neutral-0: #ffffff;
-  --color-neutral-50: #f8fafc;
-  --color-neutral-100: #f1f5f9;
-  --color-neutral-200: #e2e8f0;
-  --color-neutral-300: #cbd5e1;
-  --color-neutral-400: #94a3b8;
-  --color-neutral-500: #64748b;
-  --color-neutral-600: #475569;
-  --color-neutral-700: #334155;
-  --color-neutral-800: #1e293b;
-  --color-neutral-900: #0f172a;
+  --color-neutral-50: #f6fbff;
+  --color-neutral-100: #e9f2fb;
+  --color-neutral-200: #cfdeec;
+  --color-neutral-300: #adc1d4;
+  --color-neutral-400: #7f96ad;
+  --color-neutral-500: #61768d;
+  --color-neutral-600: #43566b;
+  --color-neutral-700: #26394f;
+  --color-neutral-800: #122338;
+  --color-neutral-900: #071321;
 
-  --color-success-50: #ecfdf5;
-  --color-success-600: #059669;
-  --color-warning-50: #fffbeb;
-  --color-warning-600: #d97706;
-  --color-danger-50: #fef2f2;
-  --color-danger-600: #dc2626;
+  --color-success-50: #e8fff7;
+  --color-success-600: #1cc98a;
+  --color-warning-50: #fff8e9;
+  --color-warning-600: #ffb84d;
+  --color-danger-50: #fff0f3;
+  --color-danger-600: #ff617d;
 
-  /* Semantic colors */
-  --color-background: var(--color-neutral-50);
-  --color-surface: var(--color-neutral-0);
-  --color-surface-muted: var(--color-neutral-100);
-  --color-surface-hover: #f6f7f9;
+  /* Semantic surfaces */
+  --color-background: #020812;
+  --color-background-elevated: #04101d;
+  --color-surface: #071524;
+  --color-surface-2: #0a1a2d;
+  --color-surface-3: #0d2036;
+  --color-surface-muted: #0b1b2e;
+  --color-surface-hover: #102844;
+  --color-surface-glass: rgb(7 21 36 / 82%);
 
-  --color-text-primary: var(--color-neutral-900);
-  --color-text-secondary: var(--color-neutral-600);
-  --color-text-muted: var(--color-neutral-500);
-  --color-text-inverse: var(--color-neutral-0);
+  --color-text-primary: #ffffff;
+  --color-text-secondary: #f8fafc;
+  --color-text-muted: #f1f5f9;
+  --color-text-placeholder: #f1f5f9;
+  /* Compatibility aliases for dashboard-home typography. */
+  --color-text: var(--color-text-primary);
+  --color-text-subtle: var(--color-text-muted);
+  --color-text-inverse: #03111d;
 
-  --color-border: var(--color-neutral-200);
-  --color-border-strong: var(--color-neutral-300);
+  --color-border: rgb(104 198 235 / 16%);
+  --color-border-strong: rgb(68 221 244 / 38%);
+  --color-border-violet: rgb(119 101 255 / 28%);
 
-  --color-primary: var(--color-primary-600);
-  --color-primary-subtle: var(--color-primary-50);
-  --color-primary-foreground: var(--color-neutral-0);
+  --color-primary: #49def1;
+  --color-primary-strong: #17c8e5;
+  --color-primary-subtle: rgb(73 222 241 / 10%);
+  --color-primary-foreground: #03111d;
+  --color-violet: #7569ff;
+  --color-violet-subtle: rgb(117 105 255 / 12%);
 
-  --color-success: #16835d;
-  --color-success-text: #126747;
-  --color-success-border: #b9e4d2;
-  --color-success-subtle: #edf9f4;
+  --color-success: #25d390;
+  --color-success-text: #71efbd;
+  --color-success-border: rgb(37 211 144 / 30%);
+  --color-success-subtle: rgb(37 211 144 / 10%);
+  --color-warning: #ffb84d;
+  --color-warning-text: #ffd28d;
+  --color-warning-border: rgb(255 184 77 / 30%);
+  --color-warning-subtle: rgb(255 184 77 / 10%);
+  --color-danger: #ff617d;
+  --color-danger-text: #ff9bae;
+  --color-danger-border: rgb(255 97 125 / 30%);
+  --color-danger-subtle: rgb(255 97 125 / 10%);
 
-  --color-focus-ring: rgb(37 99 235 / 0.25);
+  --gradient-primary: linear-gradient(135deg, #55e6f5 0%, #16b8e7 48%, #6c63ff 100%);
+  --gradient-primary-soft: linear-gradient(135deg, rgb(85 230 245 / 13%), rgb(108 99 255 / 10%));
+  --gradient-panel: linear-gradient(145deg, rgb(10 29 49 / 96%), rgb(5 17 30 / 96%));
+  --gradient-hero: radial-gradient(circle at 16% 0%, rgb(61 222 246 / 18%), transparent 36%), radial-gradient(circle at 88% 12%, rgb(111 96 255 / 15%), transparent 34%), linear-gradient(135deg, #081b2f 0%, #061321 55%, #09132b 100%);
+  --gradient-sidebar: linear-gradient(180deg, #04101d 0%, #020913 56%, #030a16 100%);
+
+  --color-focus-ring: rgb(73 222 241 / 36%);
 
   /* Typography */
-  --font-family-base:
-    Inter,
-    system-ui,
-    -apple-system,
-    BlinkMacSystemFont,
-    "Segoe UI",
-    sans-serif;
-
+  --font-family-base: "Tajawal", "IBM Plex Sans Arabic", Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --font-size-xs: 0.75rem;
   --font-size-sm: 0.875rem;
   --font-size-base: 1rem;
@@ -71,16 +90,15 @@
   --font-size-xl: 1.25rem;
   --font-size-2xl: 1.5rem;
   --font-size-3xl: 1.875rem;
-
+  --font-size-4xl: 2.25rem;
   --font-weight-regular: 400;
   --font-weight-medium: 500;
   --font-weight-semibold: 600;
   --font-weight-bold: 700;
-
+  --font-weight-extrabold: 800;
   --line-height-tight: 1.25;
   --line-height-normal: 1.5;
   --line-height-relaxed: 1.75;
-
   --letter-spacing-wide: 0.06em;
 
   /* Spacing */
@@ -99,44 +117,40 @@
   --space-16: 4rem;
 
   /* Radius */
-  --radius-sm: 0.375rem;
-  --radius-md: 0.5rem;
-  --radius-lg: 0.75rem;
-  --radius-xl: 1rem;
+  --radius-sm: 0.5rem;
+  --radius-md: 0.72rem;
+  --radius-lg: 0.95rem;
+  --radius-xl: 1.25rem;
+  --radius-2xl: 1.6rem;
   --radius-full: 9999px;
 
   /* Shadows */
-  --shadow-sm:
-    0 1px 2px rgb(15 23 42 / 0.04);
-
-  --shadow-md:
-    0 8px 24px rgb(15 23 42 / 0.08);
-
-  --shadow-lg:
-    0 12px 30px rgb(15 23 42 / 0.12);
+  --shadow-sm: 0 6px 18px rgb(0 0 0 / 16%);
+  --shadow-md: 0 16px 40px rgb(0 0 0 / 25%), 0 0 0 1px rgb(72 216 241 / 3%);
+  --shadow-lg: 0 28px 70px rgb(0 0 0 / 42%);
+  --shadow-glow: 0 0 34px rgb(49 213 239 / 12%);
+  --shadow-button: 0 10px 28px rgb(34 196 225 / 18%), inset 0 1px 0 rgb(255 255 255 / 20%);
 
   /* Layout */
-  --sidebar-width: 17rem;
-  --sidebar-width-compact: 5rem;
-  --header-height: 4.5rem;
-  --content-max-width: 90rem;
-  --text-content-max-width: 44rem;
+  --sidebar-width: 18rem;
+  --sidebar-width-compact: 5.25rem;
+  --header-height: 5.25rem;
+  --content-max-width: 100rem;
+  --text-content-max-width: 48rem;
   --header-clinic-name-max-width: 14rem;
   --header-user-name-max-width: 10rem;
-  --dashboard-panel-min-height: 15rem;
+  --dashboard-panel-min-height: 12rem;
 
   /* Controls */
-  --control-height-sm: 2rem;
+  --control-height-sm: 2.25rem;
   --control-height-md: 2.75rem;
-  --control-height-lg: 3rem;
-
-  /* Focus */
+  --control-height-lg: 3.15rem;
   --focus-ring-width: 0.125rem;
   --focus-ring-offset: 0.125rem;
 
   /* Transitions */
-  --transition-fast: 160ms ease;
-  --transition-normal: 250ms ease;
+  --transition-fast: 160ms cubic-bezier(.2,.8,.2,1);
+  --transition-normal: 260ms cubic-bezier(.2,.8,.2,1);
 
   /* Z-index */
   --z-index-sticky: 20;

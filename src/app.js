@@ -32,8 +32,8 @@ const CommunicationService = require(
 const CommunicationJob = require(
   './communication/jobs/CommunicationJob'
 );
-const WhatsAppTransport = require(
-  './communication/transports/WhatsAppTransport'
+const ProductionWhatsAppTransport = require(
+  './channels/whatsapp/ProductionWhatsAppTransport'
 );
 const AppointmentRepository = require(
   './modules/appointments/AppointmentRepository'
@@ -47,6 +47,9 @@ const LocalEventBus = require('./core/events/LocalEventBus');
 const OutboxRepository = require('./core/events/OutboxRepository');
 const OutboxPublisher = require('./core/events/OutboxPublisher');
 const OutboxScheduler = require('./core/events/OutboxScheduler');
+const AppointmentEvents = require('./modules/appointments/AppointmentEvents');
+const AppointmentChangeDeliveryRepository = require('./repositories/AppointmentChangeDeliveryRepository');
+const AppointmentChangeNotificationProcessor = require('./services/AppointmentChangeNotificationProcessor');
 
 const appointmentsModule = require('./modules/appointments');
 const dashboardModule = require('./modules/dashboard');
@@ -57,6 +60,7 @@ const masterDataModule = require('./modules/master-data');
 const reportsModule = require('./modules/reports');
 const assistantIdentityModule = require('./modules/assistant-identity');
 const pricesModule = require('./modules/prices');
+const campaignsModule = require('./modules/campaigns');
 
 const ALLOWED_FRONTEND_ORIGINS = new Set([
   'http://localhost:5173',
@@ -94,7 +98,7 @@ async function buildApp() {
 
   const communicationService = new CommunicationService({
     job: new CommunicationJob({
-      transport: new WhatsAppTransport(),
+      transport: new ProductionWhatsAppTransport(),
     }),
   });
   const bookingRepositories = createRepositories(db);
@@ -114,6 +118,16 @@ async function buildApp() {
     }
   );
   const eventBus = new LocalEventBus({ logger: app.log });
+  const changeNotificationProcessor = new AppointmentChangeNotificationProcessor({
+    deliveryRepository: new AppointmentChangeDeliveryRepository(db),
+    notificationService: new NotificationService(bookingRepositories.notifications,
+      new CommunicationService({ job: new CommunicationJob({
+        transport: new ProductionWhatsAppTransport(), maxAttempts: 1,
+      }) })),
+    logger: app.log,
+  });
+  eventBus.subscribe(AppointmentEvents.CHANGED,
+    (payload, metadata) => changeNotificationProcessor.process(payload, metadata));
   const outboxScheduler = new OutboxScheduler(
     new OutboxPublisher(new OutboxRepository(db), eventBus),
     { logger: app.log }
@@ -164,6 +178,7 @@ async function buildApp() {
   reportsModule.register({ app, db });
   const assistantIdentity = assistantIdentityModule.register({ app, db });
   pricesModule.register({ app, db });
+  const campaigns = campaignsModule.register({ app, db, communicationService });
 
   const bookingEngine = new BookingEngine({ bookingService });
   const clinicRepository = bookingRepositories.clinics;
@@ -201,8 +216,11 @@ async function buildApp() {
     appointmentService,
     priceService,
     knowledgeService,
+    knowledgeBaseRepository: bookingRepositories.knowledgeBase,
     conversationEnabled: env.conversation.enabled,
-    conversationApiKey: env.conversation.groqApiKey,
+    conversationApiKey: env.conversation.openRouterApiKey,
+    conversationBaseUrl: env.conversation.openRouterBaseUrl,
+    conversationModel: env.conversation.model,
     logger: app.log,
     sendMessage: sendWhatsAppMessage,
   });
@@ -220,7 +238,11 @@ async function buildApp() {
     debouncerConstructed: true,
     debounceMs: env.whatsappMessageDebounceMs,
   });
-  const whatsappController = new WhatsAppController(inboundConversationService);
+  const whatsappController = new WhatsAppController(inboundConversationService, {
+    verifyToken: env.whatsapp.verifyToken,
+    statusHandler: (body) => campaigns.service.handleStatusWebhook(body),
+    logger: app.log,
+  });
   app.get('/api/whatsapp/webhook', whatsappController.verifyWebhook.bind(whatsappController));
   app.post('/api/whatsapp/webhook', whatsappController.receiveWebhook.bind(whatsappController));
 
@@ -237,9 +259,11 @@ async function buildApp() {
 
   notificationScheduler.start();
   outboxScheduler.start();
+  campaigns.scheduler.start();
   app.addHook('onClose', async () => {
     notificationScheduler.stop();
     outboxScheduler.stop();
+    campaigns.scheduler.stop();
   });
 
   return app;

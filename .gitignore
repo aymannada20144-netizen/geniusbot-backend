@@ -12,3 +12,30 @@ proofs/
 GeniusBot-Backend_tree.txt
 si01-live-gate-*.txt
 evidence/rha/
+
+# Local backup snapshots and generated dashboard archive (retain on disk)
+/campaign-composer-visibility-fix-v1-backup-20260910-172428/
+/campaign-edit-ux-fix-v1-backup-20260910-170757/
+/campaigns-v1-current-backup-20260910-161712/
+/patient-edit-contract-fix-v1-backup-20260910-164748/
+/geniusbot-dashboard-backup/
+/geniusbot-dashboard/.premium-foundation-backup-20260907-195602/
+/geniusbot-dashboard/.premium-home-v3-backup-20260907-205532/
+/geniusbot-dashboard/.ui-stabilization-v2-backup-20260907-203442/
+/geniusbot-dashboard.zip
+
+# Generated semantic evaluation reports; keep test scripts and corpora tracked
+/tests/shaden/semanticCatalog/CandidateGrounder-*-run.json
+/tests/shaden/semanticV1/SemanticV1-*.json
+
+# Local caches and temporary files
+/.cache/
+/.tmp/
+/tmp/
+/temp/
+*.tsbuildinfo
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~

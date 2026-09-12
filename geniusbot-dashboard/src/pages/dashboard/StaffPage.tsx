@@ -134,7 +134,7 @@ export function StaffPage() {
     save.mutate(normalizedForm)
   }
 
-  return <section className="operational-page">
+  return <section className="operational-page operational-page--staff">
     <header>
       <div>
         <p>Clinic team</p>
@@ -154,10 +154,10 @@ export function StaffPage() {
       <tbody>{records.map((staff) => <tr key={staff.id}>
         <td>{staff.full_name}</td><td>{staff.username}</td><td>{staff.email}</td><td>{staff.role.replaceAll('_', ' ')}</td>
         <td>{staff.is_active ? 'Active' : 'Inactive'}</td>
-        <td><button type="button" onClick={() => open(staff)}>View / edit</button>{' '}
-          {canManageStatusAndRole && <button type="button" disabled={status.isPending || staff.id === user!.id} onClick={() => status.mutate({ id: staff.id, active: !staff.is_active })}>{staff.is_active ? 'Deactivate' : 'Reactivate'}</button>}{' '}
-          {canManageStatusAndRole && <button type="button" disabled={remove.isPending || staff.id === user!.id || staff.role === 'owner' || staff.role === 'platform_admin'} onClick={() => window.confirm(`Delete ${staff.full_name}? This cannot be undone.`) && remove.mutate(staff)}>Delete</button>}
-          {canResetPasswords && staff.id !== user!.id && staff.role !== 'owner' && staff.role !== 'platform_admin' && <button type="button" onClick={() => { setResetting(staff); setResetForm({ newPassword: '', confirmPassword: '' }) }}>Reset password</button>}
+        <td className="staff-actions"><button className="action-button action-button--edit" type="button" onClick={() => open(staff)}>View / edit</button>{' '}
+          {canManageStatusAndRole && <button className="action-button action-button--status" type="button" disabled={status.isPending || staff.id === user!.id} onClick={() => status.mutate({ id: staff.id, active: !staff.is_active })}>{staff.is_active ? 'Deactivate' : 'Reactivate'}</button>}{' '}
+          {canManageStatusAndRole && <button className="action-button action-button--delete" type="button" disabled={remove.isPending || staff.id === user!.id || staff.role === 'owner' || staff.role === 'platform_admin'} onClick={() => window.confirm(`Delete ${staff.full_name}? This cannot be undone.`) && remove.mutate(staff)}>Delete</button>}
+          {canResetPasswords && staff.id !== user!.id && staff.role !== 'owner' && staff.role !== 'platform_admin' && <button className="action-button action-button--neutral" type="button" onClick={() => { setResetting(staff); setResetForm({ newPassword: '', confirmPassword: '' }) }}>Reset password</button>}
         </td>
       </tr>)}</tbody>
     </table></div>}

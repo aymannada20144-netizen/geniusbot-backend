@@ -5,6 +5,21 @@ const {
 } = require('./FlowLifecycleOutcome');
 
 const UNDECLARED_LIFECYCLE_REASONS = Object.freeze(['legacy_undeclared']);
+const OPERATIONAL_DISPOSITIONS = Object.freeze([
+  'CONSUMED',
+  'KNOWLEDGE_INTERRUPTION',
+  'UNCONSUMED',
+  'OPERATIONAL_ONLY',
+]);
+
+function operationalDispositionFrom(input) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return null;
+  const descriptor = Object.getOwnPropertyDescriptor(input, 'operationalDisposition');
+  if (!descriptor || descriptor.get || descriptor.set) return null;
+  return OPERATIONAL_DISPOSITIONS.includes(descriptor.value)
+    ? descriptor.value
+    : null;
+}
 
 function lifecycleMetadataFrom(input) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) return {};
@@ -47,6 +62,8 @@ function userFacingHandlerResult(input) {
 
 module.exports = Object.freeze({
   lifecycleMetadataFrom,
+  operationalDispositionFrom,
   userFacingHandlerResult,
   UNDECLARED_LIFECYCLE_REASONS,
+  OPERATIONAL_DISPOSITIONS,
 });

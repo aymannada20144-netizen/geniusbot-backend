@@ -340,6 +340,8 @@ class ShadenPolicy {
   bookingCustomerName() { return 'يسعدني مساعدتك في حجز موعد 🌸\nممكن أعرف اسمكِ؟'; }
   bookingNameCaptured(name, services, clinic) { return `${this.nameCaptured(name)}\n\n${this.bookingChooseService(services, clinic)}`; }
   bookingChooseService(services, clinic) { return this.services(services, clinic, true); }
+  bookingServiceUnavailable() { return 'الخدمة المطلوبة غير متاحة حاليًا. اختاري من الخدمات المتاحة. 🌸'; }
+  bookingDraftAbandoned() { return 'تم إيقاف عملية الحجز الحالية. وإذا حبيتي تبدأين حجز جديد أنا معك 🌸'; }
   bookingChooseCity(cities) { return messageFormatter.formatCities({ items: cities.map(city => this.display(city)), selection: true }); }
   bookingChooseBranch(branches) { return messageFormatter.formatBranches({ items: branches.map(b => ({ ...b, name: this.cleanBranchName(b.name), city: this.display(b.city) })), city: branches[0]?.city, selection: true }); }
   bookingServiceNotOffered() { return 'الخدمة المختارة غير متاحة في هذا الفرع أو المدينة. اختاري موقعًا متاحًا للخدمة أو غيّري الخدمة. 🌸'; }

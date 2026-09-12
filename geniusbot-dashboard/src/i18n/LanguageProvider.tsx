@@ -24,6 +24,12 @@ function translateStatic(value: string, language: Language): string {
   if (match) return `${match[1]} مواعيد`
   match = value.match(/^(\d+) new bookings$/)
   if (match) return `${match[1]} حجوزات جديدة`
+  match = value.match(/^Page (\d+) of (\d+)$/)
+  if (match) return `صفحة ${match[1]} من ${match[2]}`
+  match = value.match(/^Showing\s+(\d+)\s+of\s+(\d+)$/)
+  if (match) return `عرض ${match[1]} من ${match[2]}`
+  match = value.match(/^Welcome,\s*(.+)\.?$/)
+  if (match) return `مرحبًا، ${match[1]}.`
   return value
 }
 
@@ -44,12 +50,15 @@ function localizedConfirmMessage(message: string, language: Language): string {
   if (match) return `هل تريد حذف ${match[1]}؟ لا يمكن التراجع عن هذا الإجراء.`
   match = message.match(/^Delete this (.+)\?$/)
   if (match) return `هل تريد حذف ${match[1]}؟`
+  match = message.match(/^(Activate|Deactivate) this price\?$/)
+  if (match) return match[1] === 'Activate' ? 'هل تريد تفعيل هذا السعر؟' : 'هل تريد تعطيل هذا السعر؟'
+  match = message.match(/^(Activate|Deactivate) (.+)\?$/)
+  if (match) return `${match[1] === 'Activate' ? 'هل تريد تفعيل' : 'هل تريد تعطيل'} ${match[2]}؟`
   return message
 }
 
 function localizeTextNode(node: Text, language: Language) {
   if (node.parentElement?.closest('[data-i18n-ignore]')) return
-  if (node.parentElement?.matches('td')) return
   if (node.parentElement?.matches('option') && /^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(node.parentElement.getAttribute('value') ?? '')) return
   const canonical = originalText.get(node) ?? node.data
   originalText.set(node, canonical)

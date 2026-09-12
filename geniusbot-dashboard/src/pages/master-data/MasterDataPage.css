@@ -42,3 +42,127 @@
 .master-data__form-error { padding: 0 1.25rem; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); }
 @media (max-width: 700px) { .master-data__header, .master-data__toolbar { flex-direction: column; } .master-data__toolbar label, .master-data__toolbar select { width: 100%; } .master-data__form { grid-template-columns: 1fr; } }
+
+/* =========================================================
+   Shaden Premium v2 — unmistakable semantic action buttons
+   Direct component-level rules so page CSS cannot flatten them.
+   ========================================================= */
+.master-data .master-data__actions {
+  align-items: center;
+  gap: .55rem;
+}
+
+.master-data .master-data__actions button,
+.master-data .master-data__refresh {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: .48rem;
+  min-height: 2.5rem;
+  padding: .52rem .9rem;
+  border-radius: .72rem;
+  font-weight: 800;
+  letter-spacing: 0;
+  white-space: nowrap;
+  transition:
+    transform 150ms ease,
+    box-shadow 150ms ease,
+    border-color 150ms ease,
+    color 150ms ease,
+    filter 150ms ease !important;
+}
+
+.master-data .master-data__button-icon {
+  width: 1.05rem;
+  height: 1.05rem;
+  flex: 0 0 1.05rem;
+}
+
+/* View / Edit — electric blue */
+.master-data .master-data__actions .master-data__action--edit {
+  border: 1px solid rgb(67 202 255 / 72%) !important;
+  color: #effaff !important;
+  background: linear-gradient(135deg, #0d6fa6 0%, #128fc7 52%, #1aa9db 100%) !important;
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 16%),
+    0 5px 14px rgb(9 126 183 / 18%) !important;
+}
+.master-data .master-data__actions .master-data__action--edit:hover:not(:disabled) {
+  transform: translateY(-2px) scale(1.015);
+  border-color: #79dcff !important;
+  color: #fff !important;
+  background: linear-gradient(135deg, #0f82bd 0%, #19a5dc 52%, #27c2ed 100%) !important;
+  box-shadow: 0 9px 24px rgb(18 170 222 / 28%), inset 0 1px 0 rgb(255 255 255 / 22%) !important;
+}
+
+/* Activate / Disable — amber */
+.master-data .master-data__actions .master-data__action--status {
+  border: 1px solid rgb(255 195 75 / 68%) !important;
+  color: #fff8e6 !important;
+  background: linear-gradient(135deg, #7d5109 0%, #a56b0d 54%, #c88a1a 100%) !important;
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 14%),
+    0 5px 14px rgb(158 105 15 / 16%) !important;
+}
+.master-data .master-data__actions .master-data__action--status:hover:not(:disabled) {
+  transform: translateY(-2px) scale(1.015);
+  border-color: #ffd17a !important;
+  color: #fff !important;
+  background: linear-gradient(135deg, #97620b 0%, #c68416 54%, #e8a72a 100%) !important;
+  box-shadow: 0 9px 24px rgb(219 151 29 / 24%), inset 0 1px 0 rgb(255 255 255 / 20%) !important;
+}
+
+/* Delete — ruby red */
+.master-data .master-data__actions .master-data__danger {
+  border: 1px solid rgb(255 104 128 / 72%) !important;
+  color: #fff3f5 !important;
+  background: linear-gradient(135deg, #78182d 0%, #a5223e 54%, #c63250 100%) !important;
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 13%),
+    0 5px 14px rgb(139 27 50 / 17%) !important;
+}
+.master-data .master-data__actions .master-data__danger:hover:not(:disabled) {
+  transform: translateY(-2px) scale(1.015);
+  border-color: #ff8ba0 !important;
+  color: #fff !important;
+  background: linear-gradient(135deg, #951d36 0%, #c72c4a 54%, #e54362 100%) !important;
+  box-shadow: 0 9px 24px rgb(218 50 82 / 26%), inset 0 1px 0 rgb(255 255 255 / 20%) !important;
+}
+
+/* Refresh — emerald */
+.master-data .master-data__toolbar .master-data__refresh {
+  flex: 0 0 auto;
+  border: 1px solid rgb(58 225 171 / 68%) !important;
+  color: #effff9 !important;
+  background: linear-gradient(135deg, #076346 0%, #0a8860 54%, #0dae7b 100%) !important;
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 14%),
+    0 5px 14px rgb(15 142 101 / 17%) !important;
+}
+.master-data .master-data__toolbar .master-data__refresh:hover:not(:disabled) {
+  transform: translateY(-2px) scale(1.015);
+  border-color: #71f0c5 !important;
+  color: #fff !important;
+  background: linear-gradient(135deg, #087958 0%, #0ba776 54%, #14cb91 100%) !important;
+  box-shadow: 0 9px 24px rgb(23 190 137 / 24%), inset 0 1px 0 rgb(255 255 255 / 20%) !important;
+}
+.master-data .master-data__toolbar .master-data__refresh:disabled {
+  filter: saturate(.55);
+  opacity: .68;
+}
+
+.master-data .master-data__actions button:focus-visible,
+.master-data .master-data__refresh:focus-visible {
+  outline: 2px solid #77e8f5;
+  outline-offset: 2px;
+}
+
+@media (max-width: 760px) {
+  .master-data .master-data__actions {
+    flex-wrap: wrap;
+  }
+  .master-data .master-data__actions button {
+    min-height: 2.35rem;
+    padding-inline: .72rem;
+  }
+}

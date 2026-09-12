@@ -558,6 +558,7 @@ export function ServiceAssignmentsPage() {
 
           <button
             type="button"
+            className="action-button action-button--refresh"
             onClick={() =>
               assignments.refetch()
             }
@@ -734,6 +735,7 @@ export function ServiceAssignmentsPage() {
                         <td className="service-assignments__actions">
                           <button
                             type="button"
+                            className="action-button action-button--edit"
                             onClick={() =>
                               open(item)
                             }
@@ -746,6 +748,7 @@ export function ServiceAssignmentsPage() {
                           {canManage && (
                             <button
                               type="button"
+                              className="action-button action-button--status"
                               disabled={
                                 status.isPending
                               }
@@ -768,7 +771,7 @@ export function ServiceAssignmentsPage() {
                           {canManage && (
                             <button
                               type="button"
-                              className="service-assignments__danger"
+                              className="service-assignments__danger action-button action-button--delete"
                               disabled={
                                 remove.isPending
                               }

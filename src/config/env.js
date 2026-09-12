@@ -1,4 +1,4 @@
-require('dotenv').config();
+﻿require('dotenv').config();
 
 const requiredEnv = [
   'DATABASE_URL',
@@ -10,7 +10,7 @@ const requiredEnv = [
 
 for (const key of requiredEnv) {
   if (!process.env[key]) {
-    console.error(`❌ Missing environment variable: ${key}`);
+    console.error(`âŒ Missing environment variable: ${key}`);
     process.exit(1);
   }
 }
@@ -29,7 +29,9 @@ module.exports = {
   conversation: {
     enabled: String(process.env.SHADEN_SEMANTIC_CATALOG_SLICE_ENABLED || '')
       .trim().toLowerCase() === 'true',
-    groqApiKey: process.env.GROQ_API_KEY || null,
+    openRouterApiKey: process.env.OPENROUTER_API_KEY || null,
+    openRouterBaseUrl: process.env.OPENROUTER_BASE_URL || 'https://openrouter.ai/api/v1',
+    model: process.env.SHADEN_LLM_MODEL || null,
   },
 
   whatsapp: {
@@ -44,3 +46,4 @@ module.exports = {
       Number(process.env.GOOGLE_REVIEW_DELAY_MINUTES) || 60
   }
 };
+

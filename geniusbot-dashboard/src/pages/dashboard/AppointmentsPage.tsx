@@ -424,15 +424,15 @@ export function AppointmentsPage() {
                     <td data-label="Room" title={appointment.roomName ?? '—'} data-i18n-ignore>{appointment.roomName ?? '—'}</td>
                     <td data-label="Date">{formatDate(appointment.appointmentStart)}</td>
                     <td data-label="Time">{formatTime(appointment.appointmentStart, appointment.appointmentEnd)}</td>
-                    <td data-label="Payment" title={appointment.paymentMethod ?? '—'} data-i18n-ignore>{appointment.paymentMethod ?? '—'}</td>
+                    <td className="appointments-table__payment" data-label="Payment" title={appointment.paymentMethod ?? '—'} data-i18n-ignore>{appointment.paymentMethod ?? '—'}</td>
                     <td data-label="Status"><span className={`appointment-status appointment-status--${appointment.status}`}>{STATUS_LABELS[appointment.status]}</span></td>
-                    <td data-label="Actions">
+                    <td className="appointments-table__actions" data-label="Actions">
                       <div className="appointment-actions">
-                        {canConfirm && <Button size="sm" isLoading={updating} disabled={updating} onClick={() => changeStatus(appointment.id, 'confirmed')}>Confirm</Button>}
-                        {canCheckIn && <Button size="sm" isLoading={updating} disabled={updating} onClick={() => changeStatus(appointment.id, 'checked_in')}>Check In</Button>}
-                        {canComplete && <Button size="sm" isLoading={updating} disabled={updating} onClick={() => changeStatus(appointment.id, 'completed')}>Complete</Button>}
-                        {canReschedule && <Button size="sm" variant="secondary" disabled={updating} onClick={() => openRescheduleDialog(appointment)}>تغيير الموعد</Button>}
-                        {canCancel && <Button size="sm" variant="danger" disabled={updating} onClick={() => openCancellationDialog(appointment)}>Cancel</Button>}
+                        {canConfirm && <Button className="appointment-action appointment-action--confirm" size="sm" isLoading={updating} disabled={updating} onClick={() => changeStatus(appointment.id, 'confirmed')}>Confirm</Button>}
+                        {canCheckIn && <Button className="appointment-action appointment-action--checkin" size="sm" isLoading={updating} disabled={updating} onClick={() => changeStatus(appointment.id, 'checked_in')}>Check In</Button>}
+                        {canComplete && <Button className="appointment-action appointment-action--complete" size="sm" isLoading={updating} disabled={updating} onClick={() => changeStatus(appointment.id, 'completed')}>Complete</Button>}
+                        {canReschedule && <Button className="appointment-action appointment-action--reschedule" size="sm" variant="secondary" disabled={updating} onClick={() => openRescheduleDialog(appointment)}>تغيير الموعد</Button>}
+                        {canCancel && <Button className="appointment-action appointment-action--cancel" size="sm" variant="danger" disabled={updating} onClick={() => openCancellationDialog(appointment)}>Cancel</Button>}
                       </div>
                       {rowErrors[appointment.id] && <p className="appointment-row-error" role="alert">{rowErrors[appointment.id]}</p>}
                     </td>

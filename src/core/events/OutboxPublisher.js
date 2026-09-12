@@ -23,7 +23,8 @@ class OutboxPublisher {
       try {
         const publication = await this.eventBus.publish(
           event.event_name,
-          event.payload
+          event.payload,
+          { outboxEventId: event.id }
         );
         if (publication.failed === 0) {
           await this.outboxRepository.markPublished(event.id);

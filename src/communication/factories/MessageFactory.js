@@ -50,6 +50,10 @@ const buildGoogleReview = require(
     '../templates/googleReview'
 );
 
+const buildCampaignMarketing = require(
+    '../templates/campaignMarketing'
+);
+
 const UnknownMessageTypeError = require(
     '../../shared/errors/UnknownMessageTypeError'
 );
@@ -117,6 +121,22 @@ const THANK_YOU_REQUIRED_FIELDS = Object.freeze([
     'clinicId'
 ]);
 
+const CAMPAIGN_OCCASION_REQUIRED_FIELDS = Object.freeze([
+    'phone',
+    'patientName',
+    'clinicId',
+    'patientId',
+    'campaignId',
+    'messageType'
+]);
+
+const CAMPAIGN_OFFER_REQUIRED_FIELDS = Object.freeze([
+    ...CAMPAIGN_OCCASION_REQUIRED_FIELDS,
+    'offerTitle',
+    'priceOrDiscount',
+    'validUntil'
+]);
+
 const GOOGLE_REVIEW_REQUIRED_FIELDS = Object.freeze([
     'phone',
     'patientName',
@@ -146,6 +166,27 @@ const MESSAGE_REGISTRY = Object.freeze({
     [MessageTypes.APPOINTMENT_CANCELLED]: Object.freeze({
         requiredFields: APPOINTMENT_CANCELLED_REQUIRED_FIELDS,
         build: buildAppointmentCancelled
+    }),
+
+    [MessageTypes.SAUDI_NATIONAL_DAY]: Object.freeze({
+        requiredFields: CAMPAIGN_OCCASION_REQUIRED_FIELDS,
+        build: buildCampaignMarketing
+    }),
+    [MessageTypes.SAUDI_FOUNDATION_DAY]: Object.freeze({
+        requiredFields: CAMPAIGN_OCCASION_REQUIRED_FIELDS,
+        build: buildCampaignMarketing
+    }),
+    [MessageTypes.EID_AL_FITR]: Object.freeze({
+        requiredFields: CAMPAIGN_OCCASION_REQUIRED_FIELDS,
+        build: buildCampaignMarketing
+    }),
+    [MessageTypes.EID_AL_ADHA]: Object.freeze({
+        requiredFields: CAMPAIGN_OCCASION_REQUIRED_FIELDS,
+        build: buildCampaignMarketing
+    }),
+    [MessageTypes.SPECIAL_OFFER]: Object.freeze({
+        requiredFields: CAMPAIGN_OFFER_REQUIRED_FIELDS,
+        build: buildCampaignMarketing
     }),
 
     [MessageTypes.THANK_YOU]: Object.freeze({

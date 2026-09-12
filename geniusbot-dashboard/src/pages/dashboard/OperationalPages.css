@@ -1,1 +1,109 @@
 .operational-page{display:grid;gap:1.25rem}.operational-page>header{display:flex;justify-content:space-between;gap:1rem;padding:1.5rem;border:1px solid var(--color-border);border-radius:var(--radius-xl);background:var(--color-surface)}.operational-page header p,.operational-page header h2{margin:0}.operational-page header p{color:var(--color-primary);font-size:.75rem;text-transform:uppercase}.operational-page header span{color:var(--color-text-secondary)}.operational-primary{border:0;border-radius:var(--radius-md);padding:.7rem 1rem;background:var(--color-primary);color:#fff;font-weight:700}.operational-primary:disabled{cursor:not-allowed;opacity:.65}.operational-toolbar,.settings-card{min-width:0;padding:1rem;border:1px solid var(--color-border);border-radius:var(--radius-lg);background:var(--color-surface)}.operational-toolbar input{box-sizing:border-box;width:100%;padding:.7rem;border:1px solid var(--color-border);border-radius:var(--radius-md)}.operational-state{padding:2rem;border:1px solid var(--color-border);border-radius:var(--radius-lg);background:var(--color-surface);text-align:center}.operational-error{color:var(--color-danger-600)}.operational-success{margin:1rem 1.25rem;color:#027a48}.operational-table{overflow:auto;border:1px solid var(--color-border);border-radius:var(--radius-lg)}.operational-table table{width:100%;border-collapse:collapse;background:var(--color-surface)}.operational-table th,.operational-table td{padding:.8rem;border-bottom:1px solid var(--color-border);text-align:left}.operational-table th{background:var(--color-surface-muted);color:var(--color-text-muted)}.operational-table button{padding:.4rem .6rem;border:1px solid var(--color-border);border-radius:var(--radius-md);background:#fff}.operational-modal{position:fixed;inset:0;z-index:30;display:grid;place-items:center;padding:1rem;background:rgb(15 23 42/.55)}.operational-dialog{width:min(650px,100%);border-radius:var(--radius-xl);background:#fff}.operational-dialog>header{display:flex;justify-content:space-between;padding:1rem 1.25rem;border-bottom:1px solid var(--color-border)}.operational-dialog>header button{border:0;background:none;font-size:1.4rem}.operational-form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1rem;padding:1.25rem}.operational-form label{display:grid;min-width:0;gap:.35rem}.operational-form input,.operational-form select{box-sizing:border-box;width:100%;max-width:100%;padding:.7rem;border:1px solid var(--color-border);border-radius:var(--radius-md)}.operational-dialog footer,.settings-card footer{display:flex;justify-content:flex-end;align-items:center;gap:.7rem;padding:1rem 1.25rem;border-top:1px solid var(--color-border)}.settings-card h3{margin:0;padding:1rem 1.25rem 0}.settings-card__description,.settings-card__hint{margin:.5rem 1.25rem;color:var(--color-text-secondary)}.assistant-identity-preview{display:grid;gap:.35rem;margin:1rem 1.25rem;padding:1rem;border:1px solid var(--color-border);border-radius:var(--radius-md);background:var(--color-surface-muted)}.settings-card>.operational-state{margin:1rem 1.25rem}.settings-card>.operational-error,.settings-card form>.operational-error{margin:1rem 1.25rem}@media(max-width:48rem){.operational-page>header{flex-direction:column}.operational-form{grid-template-columns:1fr}.settings-card footer{align-items:stretch;flex-direction:column}.operational-primary{width:100%}}
+
+/* ==========================================================
+   Shaden Premium — Staff page action semantics
+   Kept here (page-local) so later component CSS cannot wash
+   out the semantic colors defined by the global theme.
+   ========================================================== */
+.operational-page--staff .operational-table table {
+  table-layout: fixed;
+  min-width: 76rem;
+}
+
+.operational-page--staff .operational-table th:last-child,
+.operational-page--staff .operational-table td.staff-actions {
+  width: 25rem;
+  min-width: 25rem;
+}
+
+.operational-page--staff .staff-actions {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  flex-wrap: wrap;
+}
+
+.operational-page--staff .staff-actions .action-button {
+  min-height: 2.45rem !important;
+  padding: .48rem .86rem !important;
+  border: 1px solid transparent !important;
+  border-radius: .72rem !important;
+  font-weight: 800 !important;
+  line-height: 1 !important;
+  white-space: nowrap !important;
+  cursor: pointer;
+  transition: transform 150ms ease, background 150ms ease,
+    border-color 150ms ease, box-shadow 150ms ease, filter 150ms ease !important;
+}
+
+/* View / edit */
+.operational-page--staff .staff-actions .action-button--edit {
+  color: #fff !important;
+  border-color: rgb(73 203 255 / 82%) !important;
+  background: linear-gradient(135deg, #0b6c9e, #118fca 52%, #19b4e6) !important;
+  box-shadow: 0 7px 20px rgb(17 143 202 / 20%), inset 0 1px 0 rgb(255 255 255 / 14%) !important;
+}
+.operational-page--staff .staff-actions .action-button--edit:hover:not(:disabled) {
+  transform: translateY(-2px) !important;
+  border-color: #98eaff !important;
+  background: linear-gradient(135deg, #0e82ba, #18ace1 52%, #2ac9f1) !important;
+  box-shadow: 0 10px 28px rgb(19 172 224 / 30%) !important;
+}
+
+/* Activate / deactivate */
+.operational-page--staff .staff-actions .action-button--status {
+  color: #fff8e9 !important;
+  border-color: rgb(255 193 75 / 80%) !important;
+  background: linear-gradient(135deg, #765008, #a06a0d 52%, #c88b19) !important;
+  box-shadow: 0 7px 20px rgb(200 139 25 / 18%), inset 0 1px 0 rgb(255 255 255 / 12%) !important;
+}
+.operational-page--staff .staff-actions .action-button--status:hover:not(:disabled) {
+  transform: translateY(-2px) !important;
+  border-color: #ffdc91 !important;
+  background: linear-gradient(135deg, #96650b, #c48617 52%, #eba62a) !important;
+  box-shadow: 0 10px 28px rgb(217 150 31 / 27%) !important;
+}
+
+/* Delete */
+.operational-page--staff .staff-actions .action-button--delete {
+  color: #fff4f6 !important;
+  border-color: rgb(255 101 126 / 82%) !important;
+  background: linear-gradient(135deg, #76172b, #a52340 52%, #cb3553) !important;
+  box-shadow: 0 7px 20px rgb(203 53 83 / 18%), inset 0 1px 0 rgb(255 255 255 / 12%) !important;
+}
+.operational-page--staff .staff-actions .action-button--delete:hover:not(:disabled) {
+  transform: translateY(-2px) !important;
+  border-color: #ffa1b2 !important;
+  background: linear-gradient(135deg, #941c35, #c62d4c 52%, #e64a68) !important;
+  box-shadow: 0 10px 28px rgb(220 51 84 / 28%) !important;
+}
+
+/* Password reset / secondary utility */
+.operational-page--staff .staff-actions .action-button--neutral {
+  color: #f4f1ff !important;
+  border-color: rgb(146 125 255 / 76%) !important;
+  background: linear-gradient(135deg, #46349a, #6550c8 52%, #806cf2) !important;
+  box-shadow: 0 7px 20px rgb(101 80 200 / 18%), inset 0 1px 0 rgb(255 255 255 / 12%) !important;
+}
+.operational-page--staff .staff-actions .action-button--neutral:hover:not(:disabled) {
+  transform: translateY(-2px) !important;
+  border-color: #bcaeff !important;
+  background: linear-gradient(135deg, #5742b6, #7963e1 52%, #947fff) !important;
+  box-shadow: 0 10px 28px rgb(108 88 220 / 27%) !important;
+}
+
+.operational-page--staff .staff-actions .action-button:disabled {
+  opacity: .48 !important;
+  filter: saturate(.55) !important;
+  cursor: not-allowed !important;
+  transform: none !important;
+  box-shadow: none !important;
+}
+
+@media (max-width: 70rem) {
+  .operational-page--staff .operational-table th:last-child,
+  .operational-page--staff .operational-table td.staff-actions {
+    width: 22rem;
+    min-width: 22rem;
+  }
+}

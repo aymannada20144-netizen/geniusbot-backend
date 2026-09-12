@@ -113,6 +113,7 @@ class NotificationService {
       return { attempted: false, success: false, status: 'not_configured' };
     }
 
+    let sendStarted = false;
     try {
       const context = await this.notificationRepository
         .loadAppointmentDeliveryContext(appointmentId);
@@ -155,6 +156,7 @@ class NotificationService {
       };
       this.#validateReschedulePayload(payload);
 
+      sendStarted = true;
       const result = await this.communicationService.send(
         MessageTypes.APPOINTMENT_RESCHEDULED,
         payload
@@ -166,6 +168,7 @@ class NotificationService {
           status: 'failed',
           errorCode: result?.error?.code || 'RESCHEDULE_NOTIFICATION_FAILED',
           retryable: result?.error?.retryable !== false,
+          deliveryUncertain: result?.error?.statusCode == null || result.error.statusCode >= 500,
         };
       }
 
@@ -182,6 +185,7 @@ class NotificationService {
         status: 'failed',
         errorCode: error?.code || 'RESCHEDULE_NOTIFICATION_FAILED',
         retryable: error?.retryable !== false,
+        deliveryUncertain: sendStarted,
       };
     }
   }

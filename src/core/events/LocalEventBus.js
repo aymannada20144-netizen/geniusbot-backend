@@ -54,7 +54,7 @@ class LocalEventBus {
     return wasRemoved;
   }
 
-  async publish(eventName, payload = null) {
+  async publish(eventName, payload = null, metadata = {}) {
     this.#validateEventName(eventName);
 
     const eventListeners = [
@@ -76,6 +76,7 @@ class LocalEventBus {
       async (listener, listenerIndex) => {
         try {
           const value = await listener(payload, {
+            ...metadata,
             eventName,
             listenerIndex,
           });

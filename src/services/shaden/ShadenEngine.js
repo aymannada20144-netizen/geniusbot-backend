@@ -11,6 +11,7 @@ const {
 } = require('./BookingDateTimeParser');
 const {
   lifecycleMetadataFrom,
+  operationalDispositionFrom,
 } = require('../../contracts/shaden/InternalHandlerResult');
 
 class ShadenEngine {
@@ -20,11 +21,13 @@ class ShadenEngine {
     appointmentService = null,
     priceService = null,
     clock = null,
+    logger = console,
   } = {}) {
     this.policy = policy;
     this.bookingEngine = bookingEngine;
     this.appointmentService = appointmentService;
     this.priceService = priceService;
+    this.logger = logger;
     this.clock = clock && typeof clock.now === 'function'
       ? clock
       : { now: () => new Date() };
@@ -36,6 +39,11 @@ class ShadenEngine {
     clinicData,
     bookingContext = null,
     patientIdentity = null,
+    semanticMeaning = null,
+    operationalInquiry = null,
+    resolveChangeServiceTarget = null,
+    operationalServiceConstraint = null,
+    operationalBookingConstraint = null,
   }) {
     const nextState = normalizeState(currentState, this.policy);
     const canonicalCustomerName = patientIdentity?.patient
@@ -47,6 +55,13 @@ class ShadenEngine {
       ? message.rawPayload?.value
       : null;
     let inquiry = this.policy.recognize(text);
+    if (semanticMeaning?.status === 'UNDERSTOOD' && semanticMeaning.goal === 'ACT' &&
+        message?.inputProvenance?.trusted !== true &&
+        !EXPLICIT_APPOINTMENT_INTERRUPTS.has(inquiry.type) && operationalInquiry &&
+        ['booking', 'booking_modification_request', 'change_service_request',
+          'change_branch_request', 'booking_cancellation_request'].includes(operationalInquiry.type)) {
+      inquiry = { type: operationalInquiry.type };
+    }
 
     if (isCurrentChangeServiceInteractiveReply(nextState.changeService, interactiveReplyId)) {
       inquiry = { type: 'unknown' };
@@ -79,6 +94,18 @@ class ShadenEngine {
     ) {
       inquiry = { type: 'booking_cancellation_request' };
       nextState.context = null;
+    }
+
+    if (
+      nextState.booking &&
+      isAbandonActiveBookingDraft(operationalBookingConstraint)
+    ) {
+      clearBookingDraft(nextState);
+      return normalizeFlowReply({
+        reply: this.policy.bookingDraftAbandoned(),
+        operationalDisposition: 'CONSUMED',
+        lifecycleTerminalReason: 'aborted',
+      }, nextState, 'booking');
     }
 
     interruptAppointmentManagementFlow(nextState, inquiry, interactiveReplyId);
@@ -184,6 +211,7 @@ class ShadenEngine {
         bookingEngine: this.bookingEngine, clinicId: bookingContext?.clinicId,
         patientId: knownPatientId, conversationId: bookingContext?.conversationId,
         services: safeData.services, now: this.clock.now(),
+        resolveChangeServiceTarget,
       }).then((result) => normalizeFlowReply(result, nextState, 'changeService'));
     }
     if (
@@ -202,6 +230,7 @@ class ShadenEngine {
         patientId: knownPatientId,
         conversationId: bookingContext?.conversationId,
         now: this.clock.now(),
+        logger: this.logger,
       }).then((result) => normalizeFlowReply(result, nextState, 'reschedule'));
     }
     if (
@@ -280,6 +309,29 @@ class ShadenEngine {
       }
     }
 
+    if (
+      !nextState.booking &&
+      ['booking', 'booking_rejection'].includes(inquiry.type) &&
+      isAbandonActiveBookingDraft(operationalBookingConstraint)
+    ) {
+      return legacyEngineResult({
+        reply: this.policy.bookingDraftAbandoned(),
+        nextState,
+        operationalDisposition: 'OPERATIONAL_ONLY',
+      });
+    }
+
+    if (
+      inquiry.type === 'booking' &&
+      !nextState.booking &&
+      isExplicitServiceOutOfCatalog(operationalServiceConstraint)
+    ) {
+      return legacyEngineResult({
+        reply: this.policy.bookingServiceUnavailable(),
+        nextState,
+      });
+    }
+
     if (inquiry.type === 'booking' && !nextState.booking) {
       nextState.booking = emptyBookingState();
       try {
@@ -310,6 +362,7 @@ class ShadenEngine {
     }
 
     if (nextState.booking) {
+      const bookingBeforeTurn = structuredClone(nextState.booking);
       const bookingReply = handleBookingStep({
         text,
         interactiveReplyId,
@@ -322,14 +375,19 @@ class ShadenEngine {
         bookingContext,
         customerName,
         now: this.clock.now(),
+        semanticMeaning,
+        operationalServiceConstraint,
+        trustedInput: message?.inputProvenance?.trusted === true,
       });
       if (bookingReply) {
         if (typeof bookingReply.then === 'function') {
           return bookingReply.then((result) =>
-            normalizeFlowReply(result, nextState, 'booking')
+            normalizeBookingFlowReply(result, nextState, bookingBeforeTurn)
           );
         }
-        return normalizeFlowReply(bookingReply, nextState, 'booking');
+        return normalizeBookingFlowReply(
+          bookingReply, nextState, bookingBeforeTurn
+        );
       }
     }
 
@@ -468,7 +526,7 @@ class ShadenEngine {
 
 async function handleAppointmentReschedule({
   text, interactiveReplyId, inquiry, state, policy, appointmentService,
-  bookingEngine, clinicId, patientId, conversationId, now,
+  bookingEngine, clinicId, patientId, conversationId, now, logger,
 }) {
   if (!appointmentService || !bookingEngine || !clinicId) {
     clearRescheduleState(state);
@@ -502,6 +560,7 @@ async function handleAppointmentReschedule({
       state.reschedule.ownershipVerified = true;
       return loadRescheduleDates({
         selected: candidates[0], state, policy, bookingEngine, clinicId, now,
+        logger,
       });
     }
     return beginRescheduleSelection(candidates, state, policy);
@@ -543,7 +602,7 @@ async function handleAppointmentReschedule({
     flow.candidateAppointmentIds = [selected.id];
     flow.selectedAppointmentId = selected.id;
     flow.bookingReference = selected.booking_reference || flow.bookingReference;
-    return loadRescheduleDates({ selected, state, policy, bookingEngine, clinicId, now });
+    return loadRescheduleDates({ selected, state, policy, bookingEngine, clinicId, now, logger });
   }
   if (flow.step === 'awaiting_selection') {
     const index = parseManagementSelection(
@@ -560,7 +619,7 @@ async function handleAppointmentReschedule({
     flow.selectedAppointmentId = selected.id;
     flow.bookingReference = selected.booking_reference || null;
     flow.ownershipVerified = true;
-    return loadRescheduleDates({ selected, state, policy, bookingEngine, clinicId, now });
+    return loadRescheduleDates({ selected, state, policy, bookingEngine, clinicId, now, logger });
   }
   if (flow.step === 'awaiting_date') {
     const date = parseOptionChoice(text, interactiveReplyId, flow.availableDates, 'reschedule-date:', policy);
@@ -1000,6 +1059,7 @@ function terminalChangeBranchNoCandidates(state, policy) {
 async function handleChangeService({
   text, interactiveReplyId, inquiry, state, policy, appointmentService,
   bookingEngine, clinicId, patientId, conversationId, services, now,
+  resolveChangeServiceTarget,
 }) {
   if (!appointmentService || !bookingEngine || !clinicId) {
     clearChangeServiceState(state);
@@ -1075,8 +1135,19 @@ async function handleChangeService({
     );
   }
   if (flow.step === 'awaiting_service') {
-    const service = selectChangeService(text, interactiveReplyId, services, flow, policy);
-    if (!service) return policy.changeServiceInvalidSelection();
+    const candidate = await changeServiceCandidate(appointmentService, clinicId, patientId, flow);
+    if (!candidate) return terminalChangeServiceFailure(state, policy);
+    const eligible = appointmentService.listEligibleServiceChanges
+      ? await appointmentService.listEligibleServiceChanges(clinicId, candidate.id, patientId || candidate.patient_id)
+      : services.filter(({ id }) => id !== candidate.service_id);
+    let service = selectChangeService(text, interactiveReplyId, eligible, flow, policy);
+    if (!service && !interactiveReplyId && resolveChangeServiceTarget) {
+      try { service = await resolveChangeServiceTarget({ text, services: eligible }); } catch {}
+      service = eligible.find(({ id }) => id === service?.id) || null;
+    }
+    if (!service) return showChangeServiceChoices(
+      flow, state, policy, services, candidate, appointmentService, clinicId, patientId || candidate.patient_id
+    );
     const ownerId = patientId || (await appointmentService
       .resolveAppointmentForManagementByBookingReference(clinicId, flow.bookingReference))?.patientId;
     return advanceChangeServiceTarget({
@@ -1123,6 +1194,11 @@ async function handleChangeService({
     }
   }
   if (flow.step === 'awaiting_confirmation') {
+    if (flow.confirmationPending !== true || !flow.ownershipVerified ||
+        !flow.selectedAppointmentId || !flow.targetServiceId ||
+        !flow.proposedStart || !flow.reviewedUpdatedAt) {
+      return terminalChangeServiceFailure(state, policy);
+    }
     const answer = interactiveReplyId === 'change-service-confirm:yes' ? 'نعم'
       : interactiveReplyId === 'change-service-confirm:keep' ? 'لا' : policy.normalize(text);
     if (answer === 'لا') {
@@ -1368,7 +1444,7 @@ function beginRescheduleSelection(candidates, state, policy) {
   };
 }
 
-async function loadRescheduleDates({ selected, state, policy, bookingEngine, clinicId, now }) {
+async function loadRescheduleDates({ selected, state, policy, bookingEngine, clinicId, now, logger }) {
   const result = await bookingEngine.getAvailableDates({
     clinicId, service: { id: selected.service_id }, branch: { id: selected.branch_id },
     doctor: selected.doctor_id ? { id: selected.doctor_id } : null,
@@ -1378,6 +1454,13 @@ async function loadRescheduleDates({ selected, state, policy, bookingEngine, cli
   });
   state.reschedule.availableDates = result.dates || [];
   state.reschedule.step = 'awaiting_date';
+  if (typeof logger?.info === 'function') {
+    logger.info({
+      event: 'RESCHEDULE_AVAILABLE_DATES_LOADED',
+      availableDateCount: state.reschedule.availableDates.length,
+      rescheduleStep: state.reschedule.step,
+    });
+  }
   return interactionOptions(policy.rescheduleChooseDate(), 'select_reschedule_date',
     state.reschedule.availableDates, 'reschedule-date:', formatArabicRescheduleDate);
 }
@@ -2133,6 +2216,8 @@ function handleBookingUpstreamChange({
   bookingEngine,
   bookingContext,
   now,
+  semanticMeaning,
+  trustedInput,
 }) {
   if (['specialty', 'service'].includes(booking.step)) {
     return null;
@@ -2156,12 +2241,16 @@ function handleBookingUpstreamChange({
       policy
     );
   }
-  const service = findServiceSelection(
-    interactiveReplyId,
-    text,
-    compatibleBookableServices(data),
-    policy
-  );
+  const service = semanticAskRestrictsServiceSelection({
+    semanticMeaning, trustedInput, interactiveReplyId,
+  })
+    ? null
+    : findServiceSelection(
+      interactiveReplyId,
+      text,
+      compatibleBookableServices(data),
+      policy
+    );
   if (service && service.id !== booking.serviceId) {
     return advanceFromServiceSelection(booking, service, data, policy, text);
   }
@@ -2235,8 +2324,23 @@ function handleBookingStep({
   bookingContext,
   customerName,
   now,
+  semanticMeaning,
+  trustedInput,
+  operationalServiceConstraint,
 }) {
   const booking = state.booking;
+
+  if (isExplicitServiceOutOfCatalog(operationalServiceConstraint)) {
+    const services = booking.specialtyId == null
+      ? null
+      : servicesForSpecialty(compatibleBookableServices(data), booking.specialtyId);
+    return serviceListReply(
+      policy.bookingServiceUnavailable(),
+      services,
+      policy,
+      'OPERATIONAL_ONLY'
+    );
+  }
 
   const upstreamChange = handleBookingUpstreamChange({
     text,
@@ -2247,6 +2351,8 @@ function handleBookingStep({
     bookingEngine,
     bookingContext,
     now,
+    semanticMeaning,
+    trustedInput,
   });
   if (upstreamChange) return upstreamChange;
   if (
@@ -2263,7 +2369,8 @@ function handleBookingStep({
     return branchListReply(
       policy.bookingServiceNotOffered(),
       branches,
-      policy
+      policy,
+      'OPERATIONAL_ONLY'
     );
   }
 
@@ -2342,16 +2449,20 @@ function handleBookingStep({
         compatibleBookableServices(data),
         booking.specialtyId
       );
-      const service = findServiceSelection(
-        interactiveReplyId,
-        text,
-        availableServices,
-        policy
-      );
+      const service = semanticAskRestrictsServiceSelection({
+        semanticMeaning, trustedInput, interactiveReplyId,
+      })
+        ? null
+        : findServiceSelection(
+          interactiveReplyId,
+          text,
+          availableServices,
+          policy
+        );
       if (service) {
         return advanceFromServiceSelection(booking, service, data, policy, text);
       }
-      const reply = bookingKnowledgeOrReminder({
+      const interruption = bookingKnowledgeOrReminder({
         inquiry,
         data,
         state,
@@ -2360,7 +2471,12 @@ function handleBookingStep({
         customerName,
         reminder: policy.bookingChooseService(availableServices, data.clinic),
       });
-      return serviceListReply(reply, availableServices, policy);
+      return serviceListReply(
+        interruption.reply,
+        availableServices,
+        policy,
+        interruption.operationalDisposition
+      );
     }
 
     case 'city': {
@@ -2431,7 +2547,7 @@ function handleBookingStep({
           now,
         });
       }
-      return branchListReply(bookingKnowledgeOrReminder({
+      const interruption = bookingKnowledgeOrReminder({
         inquiry,
         data,
         state,
@@ -2439,7 +2555,13 @@ function handleBookingStep({
         replyFor,
         customerName,
         reminder: policy.bookingChooseBranch(candidates),
-      }), candidates, policy);
+      });
+      return branchListReply(
+        interruption.reply,
+        candidates,
+        policy,
+        interruption.operationalDisposition
+      );
     }
 
     case 'doctor':
@@ -2576,7 +2698,7 @@ function handleBookingStep({
         booking.step = 'confirmation';
         return bookingSummary(policy, data, booking);
       }
-      return paymentMethodReply(bookingKnowledgeOrReminder({
+      const interruption = bookingKnowledgeOrReminder({
         inquiry,
         data,
         state,
@@ -2584,7 +2706,13 @@ function handleBookingStep({
         replyFor,
         customerName,
         reminder: policy.bookingChoosePaymentMethod(data.paymentMethods),
-      }), data.paymentMethods, policy);
+      });
+      return paymentMethodReply(
+        interruption.reply,
+        data.paymentMethods,
+        policy,
+        interruption.operationalDisposition
+      );
     }
 
     case 'insurance_company': {
@@ -2656,7 +2784,7 @@ function handleBookingStep({
             bookingEngine,
             bookingContext,
             customerName,
-          });
+          }).then(withBookingExecutionDisposition);
         }
         if (interactiveReplyId === 'booking-confirm:cancel') {
           delete state.booking;
@@ -2678,7 +2806,7 @@ function handleBookingStep({
           bookingEngine,
           bookingContext,
           customerName,
-        });
+        }).then(withBookingExecutionDisposition);
       }
       if (['لا', 'الغاء', 'الغي', 'الغيه', 'رفض', 'غير موافق'].includes(normalized)) {
         delete state.booking;
@@ -3012,9 +3140,14 @@ function bookingKnowledgeOrReminder({
   customerName,
   reminder,
 }) {
-  if (!isKnowledgeInquiry(inquiry?.type)) return reminder;
+  if (!isKnowledgeInquiry(inquiry?.type)) {
+    return { reply: reminder, operationalDisposition: 'UNCONSUMED' };
+  }
   const answer = replyFor(inquiry, data, customerName);
-  return `${answer}\n\n${reminder}`;
+  return {
+    reply: `${answer}\n\n${reminder}`,
+    operationalDisposition: 'KNOWLEDGE_INTERRUPTION',
+  };
 }
 
 function normalizeEngineReply(result, nextState) {
@@ -3032,6 +3165,9 @@ function normalizeEngineReply(result, nextState) {
         ? { notificationAttempted: true }
         : {}),
       ...lifecycleMetadataFrom(result),
+      ...(operationalDispositionFrom(result)
+        ? { operationalDisposition: operationalDispositionFrom(result) }
+        : {}),
     };
   }
   return { reply: result, nextState };
@@ -3061,6 +3197,49 @@ function normalizeFlowReply(result, nextState, owner) {
   return normalized;
 }
 
+function normalizeBookingFlowReply(result, nextState, bookingBeforeTurn) {
+  const normalized = normalizeFlowReply(result, nextState, 'booking');
+  const declaredDisposition = operationalDispositionFrom(normalized);
+  const stateUnchanged = bookingStatesEqual(
+    bookingBeforeTurn,
+    nextState.booking
+  );
+  if (declaredDisposition) {
+    if (
+      ['UNCONSUMED', 'KNOWLEDGE_INTERRUPTION'].includes(declaredDisposition) &&
+      !stateUnchanged
+    ) {
+      normalized.operationalDisposition = 'OPERATIONAL_ONLY';
+    }
+    return normalized;
+  }
+  normalized.operationalDisposition = stateUnchanged
+    ? 'OPERATIONAL_ONLY'
+    : 'CONSUMED';
+  return normalized;
+}
+
+function withBookingExecutionDisposition(result) {
+  if (
+    result &&
+    typeof result === 'object' &&
+    !Array.isArray(result) &&
+    Object.prototype.hasOwnProperty.call(result, 'reply')
+  ) {
+    return {
+      ...result,
+      operationalDisposition: result.lifecycleTerminalReason === 'completed'
+        ? 'CONSUMED'
+        : 'OPERATIONAL_ONLY',
+    };
+  }
+  return { reply: result, operationalDisposition: 'OPERATIONAL_ONLY' };
+}
+
+function bookingStatesEqual(left, right) {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
 function normalizeLegacyReply(result, nextState) {
   const normalized = normalizeEngineReply(result, nextState);
   normalized.undeclaredLifecycleReason = 'legacy_undeclared';
@@ -3074,7 +3253,7 @@ function legacyEngineResult(result) {
   };
 }
 
-function paymentMethodReply(reply, paymentMethods, policy) {
+function paymentMethodReply(reply, paymentMethods, policy, operationalDisposition = null) {
   const options = paymentMethods.map((paymentMethod) => ({
     id: String(paymentMethod?.id ?? ''),
     label: policy.display(paymentMethod?.name),
@@ -3083,7 +3262,7 @@ function paymentMethodReply(reply, paymentMethods, policy) {
     options.length < 1 ||
     options.length > 3 ||
     options.some((option) => !option.id.trim() || !option.label.trim())
-  ) return reply;
+  ) return operationalDisposition ? { reply, operationalDisposition } : reply;
 
   return {
     reply,
@@ -3094,11 +3273,14 @@ function paymentMethodReply(reply, paymentMethods, policy) {
       displayText: '💳 اختاري طريقة الدفع.',
       options,
     },
+    ...(operationalDisposition ? { operationalDisposition } : {}),
   };
 }
 
-function serviceListReply(reply, services, policy) {
-  if (!Array.isArray(services)) return { reply };
+function serviceListReply(reply, services, policy, operationalDisposition = null) {
+  if (!Array.isArray(services)) return {
+    reply, ...(operationalDisposition ? { operationalDisposition } : {}),
+  };
   const options = services.map((service) => ({
     id: `service:${String(service?.id ?? '')}`,
     label: policy.display(service?.name),
@@ -3114,7 +3296,7 @@ function serviceListReply(reply, services, policy) {
       !option.label.trim() ||
       option.label.length > 24
     )
-  ) return { reply };
+  ) return { reply, ...(operationalDisposition ? { operationalDisposition } : {}) };
 
   return {
     reply,
@@ -3126,6 +3308,7 @@ function serviceListReply(reply, services, policy) {
       listPrompt: 'عرض الخدمات',
       options,
     },
+    ...(operationalDisposition ? { operationalDisposition } : {}),
   };
 }
 
@@ -3161,8 +3344,10 @@ function cityListReply(reply, cities, policy) {
   };
 }
 
-function branchListReply(reply, branches, policy) {
-  if (!Array.isArray(branches)) return { reply };
+function branchListReply(reply, branches, policy, operationalDisposition = null) {
+  if (!Array.isArray(branches)) return {
+    reply, ...(operationalDisposition ? { operationalDisposition } : {}),
+  };
   const uniqueBranches = new Map();
   for (const branch of branches) {
     const id = String(branch?.id ?? '');
@@ -3182,7 +3367,7 @@ function branchListReply(reply, branches, policy) {
     console.warn('BOOKING_BRANCH_LIST_FALLBACK', {
       branchCount: options.length,
     });
-    return { reply };
+    return { reply, ...(operationalDisposition ? { operationalDisposition } : {}) };
   }
   return {
     reply,
@@ -3194,6 +3379,7 @@ function branchListReply(reply, branches, policy) {
       listPrompt: 'عرض الفروع',
       options,
     },
+    ...(operationalDisposition ? { operationalDisposition } : {}),
   };
 }
 
@@ -4201,6 +4387,37 @@ function cityReplyId(city, policy) {
   return `city:${encodeURIComponent(policy.normalize(city))}`;
 }
 
+function isExplicitServiceOutOfCatalog(value) {
+  return value?.kind === 'EXPLICIT_SERVICE_OUT_OF_CATALOG' &&
+    typeof value.surface === 'string' &&
+    value.surface.length > 0;
+}
+
+function isAbandonActiveBookingDraft(value) {
+  return value?.kind === 'ABANDON_ACTIVE_BOOKING_DRAFT';
+}
+
+function clearBookingDraft(state) {
+  delete state.booking;
+  state.step = null;
+  state.options = [];
+  state.context = null;
+}
+
+function semanticAskRestrictsServiceSelection({
+  semanticMeaning,
+  trustedInput,
+  interactiveReplyId,
+}) {
+  if (trustedInput || typeof interactiveReplyId === 'string') return false;
+  return semanticMeaning?.status === 'UNDERSTOOD' &&
+    semanticMeaning.goal === 'ASK' &&
+    Array.isArray(semanticMeaning.subjects) &&
+    semanticMeaning.subjects.some((subject) =>
+      subject?.kind === 'SERVICE_OR_NEED' && subject.source === 'CURRENT'
+    );
+}
+
 function findBranchSelection(interactiveReplyId, text, branches, policy) {
   if (
     typeof interactiveReplyId === 'string' &&
@@ -4802,7 +5019,7 @@ function recordCancellationVerificationFailure(state) {
 
 function isUuid(value) {
   return typeof value === 'string' &&
-    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(value);
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu.test(value);
 }
 
 function isNullableUuid(value) {

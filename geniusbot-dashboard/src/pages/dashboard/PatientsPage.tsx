@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 
 import { createPatient, deletePatient, getPatient, getPatientAppointments, getPatients, setPatientActive, updatePatient } from '../../api/patientsApi'
+import { setPatientMarketingConsent } from '../../api/campaignsApi'
 import type { PatientInput } from '../../api/patientsApi'
 import { useAuth } from '../../auth/hooks/useAuth'
 import { normalizeSaudiMobile, saudiMobileHint } from '../../utils/saudiMobile'
@@ -12,7 +13,7 @@ import './PatientsManagement.css'
 
 type HandlingFilter = 'all' | 'AI_HANDLING' | 'HUMAN_HANDLING' | 'NO_CONVERSATION'
 type StatusFilter = 'all' | 'active' | 'inactive'
-const emptyForm: PatientInput = { full_name: '', phone_number: '', whatsapp_id: '', email: '', gender: null, birth_date: '', notes: '', is_active: true }
+const emptyForm: PatientInput = { full_name: '', phone_number: '', whatsapp_id: '', email: '', gender: null, birth_date: '', notes: '' }
 
 export function PatientsPage() {
   const { user } = useAuth()
@@ -26,6 +27,7 @@ export function PatientsPage() {
   const [editing, setEditing] = useState(false)
   const [creating, setCreating] = useState(false)
   const [form, setForm] = useState<PatientInput>(emptyForm)
+  const [marketingOptIn, setMarketingOptIn] = useState(false)
   const [phoneErrors, setPhoneErrors] = useState<{ phone?: string; whatsapp?: string }>({})
   const patientsQuery = useQuery({ queryKey: ['patients', clinicId], queryFn: () => getPatients(clinicId) })
   const patientQuery = useQuery({ queryKey: ['patient', clinicId, selectedId], queryFn: () => getPatient(clinicId, selectedId!), enabled: Boolean(selectedId) })
@@ -33,8 +35,12 @@ export function PatientsPage() {
   const save = useMutation({
     mutationFn: (payload: PatientInput) => creating ? createPatient(clinicId, payload) : updatePatient(clinicId, selectedId!, payload),
     onSuccess: async (patient) => {
+      const previousMarketingOptIn = creating ? false : patientQuery.data?.marketing_opt_in === true
+      if (marketingOptIn !== previousMarketingOptIn) {
+        await setPatientMarketingConsent(clinicId, patient.id, marketingOptIn)
+      }
       await queryClient.invalidateQueries({ queryKey: ['patients', clinicId] })
-      queryClient.setQueryData(['patient', clinicId, patient.id], patient)
+      await queryClient.invalidateQueries({ queryKey: ['patient', clinicId, patient.id] })
       setSelectedId(patient.id); setCreating(false); setEditing(false)
       setFeedback('Patient saved successfully.')
     },
@@ -73,11 +79,12 @@ export function PatientsPage() {
     returning: patients.filter((patient) => patient.totalAppointments > 1).length,
     upcoming: patients.filter((patient) => patient.hasUpcomingAppointment).length,
   }
-  function beginCreate() { setCreating(true); setEditing(true); setSelectedId(null); setForm({ ...emptyForm }); setPhoneErrors({}) }
+  function beginCreate() { setCreating(true); setEditing(true); setSelectedId(null); setForm({ ...emptyForm }); setMarketingOptIn(false); setPhoneErrors({}) }
   function beginEdit() {
     const patient = patientQuery.data
     if (!patient) return
-    setForm({ full_name: patient.full_name ?? '', phone_number: patient.phone_number, whatsapp_id: patient.whatsapp_id ?? '', email: patient.email ?? '', gender: patient.gender, birth_date: patient.birth_date ?? '', notes: patient.notes ?? '', is_active: patient.is_active })
+    setForm({ full_name: patient.full_name ?? '', phone_number: patient.phone_number, whatsapp_id: patient.whatsapp_id ?? '', email: patient.email ?? '', gender: patient.gender, birth_date: patient.birth_date ?? '', notes: patient.notes ?? '' })
+    setMarketingOptIn(patient.marketing_opt_in === true)
     setPhoneErrors({})
     setEditing(true)
   }
@@ -112,16 +119,16 @@ export function PatientsPage() {
     {filtered.length > 0 && <div className="patients-table-wrap"><table className="patients-table"><thead><tr><th>Patient</th><th>Phone</th><th>Status</th><th>Appointments</th><th>Last visit</th><th>Handling</th><th>Actions</th></tr></thead><tbody>{filtered.map((patient) => {
       const mode = patient.handlingMode ?? 'NO_CONVERSATION'
       const label = mode === 'AI_HANDLING' ? 'AI Handling' : mode === 'HUMAN_HANDLING' ? 'Human Handling' : 'No Conversation'
-      return <tr key={patient.id}><td>{patient.fullName}</td><td>{patient.phoneNumber}</td><td><span className={`patient-status patient-status--${patient.isActive ? 'active' : 'inactive'}`}>{patient.isActive ? 'Active' : 'Inactive'}</span></td><td>{patient.totalAppointments}</td><td>{patient.latestAppointmentDate ? new Date(patient.latestAppointmentDate).toLocaleDateString('en-GB') : '—'}</td><td><span className={`handling-badge handling-badge--${mode === 'AI_HANDLING' ? 'ai' : mode === 'HUMAN_HANDLING' ? 'human' : 'none'}`}>{label}</span></td><td className="patients-actions"><button onClick={() => setSelectedId(patient.id)}>View / Edit</button><button disabled={status.isPending} onClick={() => window.confirm(patient.isActive ? 'Deactivate this patient? Their record and history will be preserved.' : 'Reactivate this patient?') && status.mutate({ id: patient.id, active: !patient.isActive })}>{patient.isActive ? 'Deactivate' : 'Reactivate'}</button><button className="patients-danger" disabled={remove.isPending} onClick={() => window.confirm('Permanently delete this patient? This is allowed only when no historical or operational records exist.') && remove.mutate(patient.id)}>Delete</button><Link className="patients-open" to={`/dashboard/patients/${patient.id}/conversation`}>Open Conversation</Link></td></tr>
+      return <tr key={patient.id}><td>{patient.fullName}</td><td>{patient.phoneNumber}</td><td><span className={`patient-status patient-status--${patient.isActive ? 'active' : 'inactive'}`}>{patient.isActive ? 'Active' : 'Inactive'}</span></td><td>{patient.totalAppointments}</td><td>{patient.latestAppointmentDate ? new Date(patient.latestAppointmentDate).toLocaleDateString('en-GB') : '—'}</td><td><span className={`handling-badge handling-badge--${mode === 'AI_HANDLING' ? 'ai' : mode === 'HUMAN_HANDLING' ? 'human' : 'none'}`}>{label}</span></td><td className="patients-actions"><button className="action-button action-button--edit" onClick={() => setSelectedId(patient.id)}>View / Edit</button><button className="action-button action-button--status" disabled={status.isPending} onClick={() => window.confirm(patient.isActive ? 'Deactivate this patient? Their record and history will be preserved.' : 'Reactivate this patient?') && status.mutate({ id: patient.id, active: !patient.isActive })}>{patient.isActive ? 'Deactivate' : 'Reactivate'}</button><button className="patients-danger action-button action-button--delete" disabled={remove.isPending} onClick={() => window.confirm('Permanently delete this patient? This is allowed only when no historical or operational records exist.') && remove.mutate(patient.id)}>Delete</button><Link className="patients-open" to={`/dashboard/patients/${patient.id}/conversation`}>Open Conversation</Link></td></tr>
     })}</tbody></table></div>}
     {(selectedId || creating) && <div className="patient-modal" onMouseDown={(event) => event.target === event.currentTarget && close()}><div className="patient-dialog" role="dialog" aria-modal="true" aria-labelledby="patient-dialog-title">
       <header><div><p>{creating ? 'New patient' : 'Patient record'}</p><h3 id="patient-dialog-title" {...(!creating && patientQuery.data?.full_name ? { 'data-i18n-ignore': true } : {})}>{creating ? 'Add Patient' : patientQuery.data?.full_name ?? 'Patient details'}</h3></div><button type="button" aria-label="Close" onClick={close}>×</button></header>
       {selectedId && patientQuery.isLoading && <div className="patients-state">Loading patient…</div>}
       {!editing && patientQuery.data && <div className="patient-details">
-        <dl><div><dt>Phone</dt><dd>{patientQuery.data.phone_number}</dd></div><div><dt>WhatsApp</dt><dd>{patientQuery.data.whatsapp_id ?? '—'}</dd></div><div><dt>Email</dt><dd>{patientQuery.data.email ?? '—'}</dd></div><div><dt>Gender</dt><dd>{patientQuery.data.gender ?? '—'}</dd></div><div><dt>Birth date</dt><dd>{patientQuery.data.birth_date ?? '—'}</dd></div><div><dt>Status</dt><dd>{patientQuery.data.is_active ? 'Active' : 'Inactive'}</dd></div><div><dt>First seen</dt><dd>{new Date(patientQuery.data.first_seen_at).toLocaleString()}</dd></div><div><dt>Last seen</dt><dd>{new Date(patientQuery.data.last_seen_at).toLocaleString()}</dd></div></dl>
+        <dl><div><dt>Phone</dt><dd>{patientQuery.data.phone_number}</dd></div><div><dt>WhatsApp</dt><dd>{patientQuery.data.whatsapp_id ?? '—'}</dd></div><div><dt>Email</dt><dd>{patientQuery.data.email ?? '—'}</dd></div><div><dt>Gender</dt><dd>{patientQuery.data.gender ?? '—'}</dd></div><div><dt>Birth date</dt><dd>{patientQuery.data.birth_date ?? '—'}</dd></div><div><dt>Status</dt><dd>{patientQuery.data.is_active ? 'Active' : 'Inactive'}</dd></div><div><dt>Marketing consent</dt><dd>{patientQuery.data.marketing_opt_in ? 'Marketing messages allowed' : 'Marketing messages not allowed'}</dd></div><div><dt>First seen</dt><dd>{new Date(patientQuery.data.first_seen_at).toLocaleString()}</dd></div><div><dt>Last seen</dt><dd>{new Date(patientQuery.data.last_seen_at).toLocaleString()}</dd></div></dl>
         {patientQuery.data.notes && <div><strong>Notes</strong><p data-i18n-ignore>{patientQuery.data.notes}</p></div>}
         <section><h4>Appointment history</h4>{appointmentsQuery.isLoading ? <p>Loading appointments…</p> : appointmentsQuery.data?.length ? <ul className="patient-appointments">{appointmentsQuery.data.map((appointment) => <li key={appointment.id}><strong>{appointment.service_name ?? 'Appointment'}</strong><span>{new Date(appointment.appointment_start).toLocaleString()} · <span data-i18n-domain-value>{appointment.status}</span></span><small>{appointment.doctor_name ?? 'No doctor'} · {appointment.branch_name ?? 'No branch'}</small></li>)}</ul> : <p>No appointments recorded.</p>}</section>
-        <div className="patient-dialog__actions"><button onClick={beginEdit}>Edit</button><button disabled={status.isPending} onClick={() => window.confirm(patientQuery.data!.is_active ? 'Deactivate this patient? Their record and history will be preserved.' : 'Reactivate this patient?') && status.mutate({ id: patientQuery.data!.id, active: !patientQuery.data!.is_active })}>{patientQuery.data.is_active ? 'Deactivate' : 'Reactivate'}</button><button className="patients-danger" disabled={remove.isPending} onClick={() => window.confirm('Permanently delete this patient? This is allowed only when no historical or operational records exist.') && remove.mutate(patientQuery.data!.id)}>Delete</button><Link className="patients-open" to={`/dashboard/patients/${patientQuery.data.id}/conversation`}>Open Conversation</Link></div>
+        <div className="patient-dialog__actions"><button className="action-button action-button--edit" onClick={beginEdit}>Edit</button><button className="action-button action-button--status" disabled={status.isPending} onClick={() => window.confirm(patientQuery.data!.is_active ? 'Deactivate this patient? Their record and history will be preserved.' : 'Reactivate this patient?') && status.mutate({ id: patientQuery.data!.id, active: !patientQuery.data!.is_active })}>{patientQuery.data.is_active ? 'Deactivate' : 'Reactivate'}</button><button className="patients-danger action-button action-button--delete" disabled={remove.isPending} onClick={() => window.confirm('Permanently delete this patient? This is allowed only when no historical or operational records exist.') && remove.mutate(patientQuery.data!.id)}>Delete</button><Link className="patients-open" to={`/dashboard/patients/${patientQuery.data.id}/conversation`}>Open Conversation</Link></div>
       </div>}
       {editing && <form onSubmit={submit}><div className="patient-form">
         <label>Full name *<input required value={form.full_name ?? ''} onChange={(e) => setForm({ ...form, full_name: e.target.value })} /></label>
@@ -130,6 +137,7 @@ export function PatientsPage() {
         <label>Email<input type="email" value={form.email ?? ''} onChange={(e) => setForm({ ...form, email: e.target.value })} /></label>
         <label>Gender<select required value={form.gender ?? ''} onChange={(e) => setForm({ ...form, gender: e.target.value as 'female' | 'male' })}><option value="" disabled>Select gender</option><option value="female">Female</option><option value="male">Male</option></select></label>
         <label>Birth date<input type="date" max={new Date().toISOString().slice(0, 10)} value={form.birth_date ?? ''} onChange={(e) => setForm({ ...form, birth_date: e.target.value })} /></label>
+        <label className="patient-form__wide patient-consent-field"><span>WhatsApp marketing consent</span><span className="patient-consent-control"><input type="checkbox" checked={marketingOptIn} onChange={(e) => setMarketingOptIn(e.target.checked)} /> <small>Record consent only when the patient has explicitly agreed to receive marketing messages on WhatsApp.</small></span></label>
         <label className="patient-form__wide">Notes<textarea value={form.notes ?? ''} onChange={(e) => setForm({ ...form, notes: e.target.value })} /></label>
       </div>{save.isError && <p className="patient-form-error">{save.error.message}</p>}<div className="patient-dialog__actions"><button type="button" onClick={() => creating ? close() : setEditing(false)}>Cancel</button><button type="submit" className="patients-primary" disabled={save.isPending}>{save.isPending ? 'Saving...' : creating ? 'Add Patient' : 'Save Changes'}</button></div></form>}
     </div></div>}

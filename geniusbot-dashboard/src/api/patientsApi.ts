@@ -16,11 +16,12 @@ export interface PatientRecord {
   birth_date: string | null; source: string | null; notes: string | null
   first_seen_at: string; last_seen_at: string; created_at: string
   updated_at: string; is_active: boolean
+  marketing_opt_in?: boolean; marketing_opt_in_at?: string | null; marketing_opt_out_at?: string | null
 }
 export interface PatientInput {
   full_name?: string; phone_number?: string; whatsapp_id?: string | null
   email?: string | null; gender?: PatientRecord['gender']
-  birth_date?: string | null; notes?: string | null; is_active?: boolean
+  birth_date?: string | null; notes?: string | null
 }
 export interface PatientAppointment {
   id: string; appointment_start: string; appointment_end: string

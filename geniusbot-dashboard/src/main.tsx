@@ -10,6 +10,8 @@ import './index.css'
 import App from './App.tsx'
 import { AuthProvider } from './auth/context/AuthProvider'
 import { LanguageProvider } from './i18n/LanguageProvider'
+import './styles/premium-theme.css'
+import './styles/semantic-actions.css'
 
 const queryClient = new QueryClient({
   defaultOptions: {

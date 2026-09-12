@@ -33,6 +33,15 @@ function statusChange() {
   };
 }
 
+function reply() {
+  return {
+    statusCode: null,
+    body: undefined,
+    code(value) { this.statusCode = value; return this; },
+    send(value) { this.body = value; this.sent = true; return this; },
+  };
+}
+
 function payload(changes) {
   return { object: 'whatsapp_business_account', entry: [{ changes }] };
 }
@@ -82,4 +91,42 @@ test('controller acknowledges but does not dispatch a status-only callback', asy
   await controller.receiveWebhook({ body: payload([statusChange()]) }, reply);
 
   assert.equal(dispatchCount, 0);
+});
+
+test('webhook verification accepts only the configured token without logging it', async () => {
+  const entries = [];
+  const controller = new WhatsAppController({ processMessage: async () => {} }, {
+    verifyToken: 'test-verify-token',
+    logger: { info: entry => entries.push(entry), warn: entry => entries.push(entry) },
+  });
+  const accepted = reply();
+  await controller.verifyWebhook({ query: {
+    'hub.mode': 'subscribe', 'hub.verify_token': 'test-verify-token', 'hub.challenge': 'challenge',
+  } }, accepted);
+  assert.equal(accepted.statusCode, 200);
+  assert.equal(accepted.body, 'challenge');
+  assert.equal(entries[0].outcome, 'VERIFIED');
+  assert.equal(JSON.stringify(entries), JSON.stringify(entries).replace(/test-verify-token/g, ''));
+});
+
+test('webhook verification rejects an invalid token', async () => {
+  const controller = new WhatsAppController({ processMessage: async () => {} }, { verifyToken: 'expected' });
+  const rejected = reply();
+  await controller.verifyWebhook({ query: {
+    'hub.mode': 'subscribe', 'hub.verify_token': 'wrong', 'hub.challenge': 'challenge',
+  } }, rejected);
+  assert.equal(rejected.statusCode, 403);
+  assert.equal(rejected.body, 'Forbidden');
+});
+
+test('status callback invokes status handler but never Shaden', async () => {
+  let shadenCount = 0;
+  let receivedBody = null;
+  const controller = new WhatsAppController({ processMessage: async () => { shadenCount += 1; } }, {
+    statusHandler: async body => { receivedBody = body; },
+  });
+  await controller.receiveWebhook({ body: payload([statusChange()]) }, reply());
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(shadenCount, 0);
+  assert.ok(receivedBody);
 });

@@ -94,6 +94,42 @@ describe('WhatsApp outbound transport', () => {
     }, transport.options);
   });
 
+  test('preserves supplied template components and their parameter ordering', async () => {
+    const { transport } = successfulTransport((payload) => {
+      assert.deepEqual(payload.template.components, [{
+        type: 'body',
+        parameters: [{ type: 'text', text: 'first' }, { type: 'text', text: 'second' }],
+      }]);
+    });
+    await sendWhatsAppMessage({
+      to: '966500000001', templateName: 'special_offer', language: 'ar',
+      components: [{ type: 'body', parameters: [{ type: 'text', text: 'first' }, { type: 'text', text: 'second' }] }],
+    }, transport.options);
+  });
+
+  test('logs interactive-list rendering without changing the Meta payload', async () => {
+    const events = [];
+    const transport = runtime(async (_url, payload) => {
+      assert.equal(payload.type, 'interactive');
+      assert.equal(payload.interactive.type, 'list');
+      return { status: 200, data: { messages: [{ id: 'wamid.list-log' }] } };
+    });
+    transport.options.logger.info = (entry) => events.push(entry);
+    const result = await sendWhatsAppMessage({
+      to: '966500000001', body: 'اختر تاريخ الموعد الجديد من التواريخ المتاحة. 🌸',
+      interaction: {
+        version: 1, mode: 'list', purpose: 'select_reschedule_date',
+        displayText: 'اختر تاريخ الموعد الجديد من التواريخ المتاحة. 🌸', listPrompt: 'عرض الخيارات',
+        options: [{ id: 'reschedule-date:2026-09-12', label: '12 سبتمبر 2026' }],
+      },
+    }, transport.options);
+    assert.deepEqual(result, { messageId: 'wamid.list-log' });
+    assert.deepEqual(events.map(({ event, OUTBOUND_RENDER_MODE, httpSuccess, metaMessageId }) => ({ event, OUTBOUND_RENDER_MODE, httpSuccess, metaMessageId })), [
+      { event: 'WHATSAPP_OUTBOUND_RENDER', OUTBOUND_RENDER_MODE: 'interactive_list', httpSuccess: undefined, metaMessageId: undefined },
+      { event: 'WHATSAPP_OUTBOUND_RESULT', OUTBOUND_RENDER_MODE: 'interactive_list', httpSuccess: true, metaMessageId: 'wamid.list-log' },
+    ]);
+  });
+
   test('preserves the sendText helper', async () => {
     const original = sendWhatsAppMessage;
     const previousPost = require('axios').post;

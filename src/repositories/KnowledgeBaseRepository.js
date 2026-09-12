@@ -1,4 +1,4 @@
-'use strict';
+﻿'use strict';
 
 const BaseRepository = require('../core/BaseRepository');
 
@@ -36,6 +36,27 @@ class KnowledgeBaseRepository extends BaseRepository {
     return result.rows;
   }
 
+  async findDiscoveryRows({ clinicId }) {
+    const result = await this.query(
+      `SELECT
+         id,
+         service_id,
+         title,
+         content,
+         category,
+         keywords,
+         priority
+       FROM ${this.fullTableName}
+       WHERE clinic_id = $1
+         AND is_active IS TRUE
+         AND service_id IS NOT NULL
+         AND 'knowledge_role:DISCOVERY' = ANY(keywords)
+       ORDER BY priority DESC, title`,
+      [clinicId]
+    );
+
+    return result.rows;
+  }
   async findByConcept({ clinicId, concept, qualifiers = [] }) {
     const tags = [
       'knowledge_role:DISCOVERY',
@@ -63,3 +84,4 @@ class KnowledgeBaseRepository extends BaseRepository {
 }
 
 module.exports = KnowledgeBaseRepository;
+

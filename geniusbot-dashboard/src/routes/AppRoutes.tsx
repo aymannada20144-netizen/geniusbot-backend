@@ -20,6 +20,8 @@ import { DoctorWorkingHoursPage } from '../pages/master-data/DoctorWorkingHoursP
 import { ServiceAssignmentsPage } from '../pages/master-data/ServiceAssignmentsPage'
 import { PricesPage } from '../pages/prices/PricesPage'
 import { PricesPermissionGuard } from '../auth/components/PricesPermissionGuard'
+import { CampaignsPermissionGuard } from '../auth/components/CampaignsPermissionGuard'
+import { CampaignsPage } from '../pages/dashboard/CampaignsPage'
 
 export function AppRoutes() {
   return (
@@ -53,6 +55,7 @@ export function AppRoutes() {
         <Route path="services" element={<Navigate to="../master-data/services" replace />} />
         <Route path="staff" element={<StaffPage />} />
         <Route path="reports" element={<ReportsPermissionGuard><ReportsPage /></ReportsPermissionGuard>} />
+        <Route path="campaigns" element={<CampaignsPermissionGuard><CampaignsPage /></CampaignsPermissionGuard>} />
         <Route path="settings" element={<SettingsPage />} />
         <Route path="*" element={<Navigate to="/dashboard" replace />} />
       </Route>

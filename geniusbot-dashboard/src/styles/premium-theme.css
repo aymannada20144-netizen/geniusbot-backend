@@ -1,0 +1,1220 @@
+/* ==========================================================
+   GeniusBot / Shaden Premium UI Theme
+   Loaded last on purpose to unify all legacy page styles.
+   ========================================================== */
+
+/* ---------- App shell ---------- */
+.dashboard-layout {
+  background: transparent;
+}
+
+.dashboard-sidebar {
+  border-color: var(--color-border);
+  background: var(--gradient-sidebar);
+  box-shadow: 18px 0 60px rgb(0 0 0 / 22%);
+}
+
+.dashboard-main {
+  background: transparent;
+}
+
+.dashboard-header {
+  border-color: var(--color-border);
+  background: rgb(3 12 22 / 84%);
+  backdrop-filter: blur(18px) saturate(125%);
+  box-shadow: 0 1px 0 rgb(255 255 255 / 2%), 0 12px 36px rgb(0 0 0 / 12%);
+}
+
+.dashboard-content {
+  position: relative;
+  background: transparent;
+}
+
+.dashboard-content::before {
+  content: "";
+  position: fixed;
+  inset: var(--header-height) 0 0 var(--sidebar-width);
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 80% 12%, rgb(44 206 236 / 8%), transparent 24rem),
+    radial-gradient(circle at 18% 78%, rgb(111 91 255 / 7%), transparent 25rem);
+}
+
+/* ---------- Sidebar ---------- */
+.app-sidebar { padding: 1.15rem .9rem 1rem; }
+
+.app-sidebar__brand {
+  min-height: 4.3rem;
+  gap: .8rem;
+  padding: .4rem .55rem 1rem;
+  border-color: var(--color-border);
+}
+
+.app-sidebar__brand-mark {
+  width: 3.1rem;
+  height: 3.1rem;
+  overflow: hidden;
+  border: 1px solid rgb(82 222 243 / 34%);
+  border-radius: 50%;
+  background: #061321;
+  box-shadow: 0 0 24px rgb(44 217 241 / 14%);
+}
+
+.app-sidebar__brand-mark img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.app-sidebar__brand-name {
+  font-size: 1.02rem;
+  font-weight: 800;
+  letter-spacing: .01em;
+}
+
+.app-sidebar__brand-description {
+  color: var(--color-text-secondary);
+  font-size: .72rem;
+}
+
+.app-sidebar__navigation { margin-top: 1rem; padding-inline: .15rem; }
+.app-sidebar__navigation-group + .app-sidebar__navigation-group { margin-top: 1.25rem; }
+.app-sidebar__navigation-label {
+  padding-inline: .7rem;
+  padding-bottom: .45rem;
+  color: var(--color-text-secondary);
+  font-size: .64rem;
+  letter-spacing: .1em;
+}
+
+.app-sidebar__navigation-list { gap: .24rem; }
+.app-sidebar__navigation-link {
+  min-height: 2.72rem;
+  gap: .78rem;
+  padding: .56rem .72rem;
+  border: 1px solid transparent;
+  border-radius: .78rem;
+  color: var(--color-text-primary);
+  font-size: .9rem;
+  font-weight: 600;
+}
+.app-sidebar__navigation-link:hover {
+  color: var(--color-text-primary);
+  border-color: rgb(90 218 243 / 10%);
+  background: rgb(55 205 233 / 6%);
+  transform: translateX(2px);
+}
+[dir='rtl'] .app-sidebar__navigation-link:hover { transform: translateX(-2px); }
+.app-sidebar__navigation-link--active,
+.app-sidebar__navigation-link--active:hover {
+  color: var(--color-text-primary);
+  border-color: rgb(67 221 244 / 22%);
+  background: linear-gradient(90deg, rgb(53 213 238 / 15%), rgb(94 86 255 / 8%));
+  box-shadow: inset 3px 0 0 #42dff2, 0 8px 24px rgb(0 0 0 / 10%);
+}
+[dir='rtl'] .app-sidebar__navigation-link--active,
+[dir='rtl'] .app-sidebar__navigation-link--active:hover {
+  box-shadow: inset -3px 0 0 #42dff2, 0 8px 24px rgb(0 0 0 / 10%);
+}
+.app-sidebar__navigation-indicator {
+  display: none;
+}
+.app-sidebar__navigation-icon {
+  display: grid;
+  flex: 0 0 1.28rem;
+  width: 1.28rem;
+  height: 1.28rem;
+  place-items: center;
+  color: #64849d;
+}
+.app-sidebar__navigation-icon svg { width: 1.2rem; height: 1.2rem; }
+.app-sidebar__navigation-link--active .app-sidebar__navigation-icon { color: #50e3f3; filter: drop-shadow(0 0 7px rgb(65 222 242 / 24%)); }
+.app-sidebar__footer { border-color: var(--color-border); }
+.app-sidebar__version { color: var(--color-text-secondary); }
+.app-sidebar__status {
+  display: flex;
+  align-items: center;
+  gap: .55rem;
+  margin: .7rem .55rem 0;
+  padding: .65rem .75rem;
+  border: 1px solid rgb(37 211 144 / 16%);
+  border-radius: .78rem;
+  color: var(--color-text-secondary);
+  font-size: .72rem;
+  background: rgb(37 211 144 / 4%);
+}
+.app-sidebar__status-dot {
+  width: .45rem;
+  height: .45rem;
+  border-radius: 50%;
+  background: #25d390;
+  box-shadow: 0 0 12px rgb(37 211 144 / 65%);
+}
+
+/* ---------- Header ---------- */
+.app-header__eyebrow {
+  color: var(--color-text-secondary);
+  font-weight: 600;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+.app-header__title {
+  font-size: 1.38rem;
+  font-weight: 800;
+  letter-spacing: -.015em;
+}
+.app-header__actions { gap: .75rem; }
+.app-header__language,
+.app-header__clinic {
+  padding: .4rem .65rem;
+  border: 1px solid var(--color-border);
+  border-radius: .75rem;
+  background: rgb(9 26 44 / 52%);
+}
+.app-header__language select {
+  min-height: 1.72rem;
+  padding: 0 1.6rem 0 .4rem;
+  border: 0;
+  color: var(--color-text-primary);
+  background: transparent;
+  box-shadow: none;
+}
+[dir='rtl'] .app-header__language select { padding: 0 .4rem 0 1.6rem; }
+.app-header__language-label,
+.app-header__clinic-label { color: var(--color-text-secondary); font-size: .64rem; }
+.app-header__clinic-name { color: var(--color-text-primary); font-weight: 700; }
+.app-header__divider { background: var(--color-border); }
+.app-header__user {
+  gap: .65rem;
+  padding: .3rem .38rem .3rem .45rem;
+  border: 1px solid var(--color-border);
+  border-radius: .9rem;
+  background: rgb(8 23 39 / 60%);
+}
+.app-header__user:hover { border-color: var(--color-border-strong); background: rgb(13 35 58 / 78%); }
+.app-header__user-avatar {
+  width: 2.35rem;
+  height: 2.35rem;
+  border-color: rgb(72 220 242 / 26%);
+  color: #06131e;
+  background: var(--gradient-primary);
+  box-shadow: 0 0 20px rgb(54 216 239 / 14%);
+}
+.app-header__user-name { color: var(--color-text-primary); font-weight: 700; }
+.app-header__user-role { color: var(--color-text-secondary); }
+.app-header__logout {
+  min-height: 2.05rem;
+  padding-inline: .66rem;
+  border-color: rgb(94 187 223 / 16%);
+  color: var(--color-text-primary);
+  background: rgb(4 13 24 / 42%);
+}
+.app-header__logout:hover { border-color: rgb(75 221 244 / 28%); color: var(--color-text-primary); background: rgb(52 205 232 / 7%); }
+
+/* ---------- Buttons ---------- */
+.ui-button,
+.operational-primary,
+.patients-primary,
+.master-data__primary,
+.doctor-hours__primary,
+.service-assignments__primary,
+.prices-page__primary,
+.login-submit {
+  border-radius: .78rem !important;
+  font-weight: 700 !important;
+}
+
+.ui-button--primary,
+.operational-primary,
+.patients-primary,
+.master-data__primary,
+.doctor-hours__primary,
+.service-assignments__primary,
+.prices-page__primary,
+.login-submit {
+  border: 1px solid rgb(89 229 245 / 26%) !important;
+  color: #03121c !important;
+  background: var(--gradient-primary) !important;
+  box-shadow: var(--shadow-button) !important;
+}
+
+.ui-button--primary:hover:not(:disabled),
+.operational-primary:hover:not(:disabled),
+.patients-primary:hover:not(:disabled),
+.master-data__primary:hover:not(:disabled),
+.doctor-hours__primary:hover:not(:disabled),
+.service-assignments__primary:hover:not(:disabled),
+.prices-page__primary:hover:not(:disabled),
+.login-submit:hover:not(:disabled) {
+  filter: brightness(1.08) saturate(1.06);
+  transform: translateY(-1px);
+  box-shadow: 0 14px 34px rgb(39 201 230 / 24%), inset 0 1px 0 rgb(255 255 255 / 28%) !important;
+}
+
+.ui-button--secondary,
+.ui-button--ghost,
+.operational-dialog footer button:not(.operational-primary),
+.settings-card footer button:not(.operational-primary),
+.master-data__toolbar button,
+.master-data__actions button,
+.master-data__dialog-actions button:not(.master-data__primary),
+.service-assignments button:not(.service-assignments__primary),
+.prices-page button:not(.prices-page__primary),
+.doctor-hours button:not(.doctor-hours__primary) {
+  border: 1px solid var(--color-border-strong) !important;
+  color: var(--color-text-primary) !important;
+  background: linear-gradient(180deg, rgb(12 31 50 / 86%), rgb(5 17 30 / 86%)) !important;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 3%) !important;
+}
+
+.ui-button--secondary:hover:not(:disabled),
+.ui-button--ghost:hover:not(:disabled),
+.operational-dialog footer button:not(.operational-primary):hover,
+.settings-card footer button:not(.operational-primary):hover,
+.master-data__toolbar button:hover,
+.master-data__actions button:hover,
+.master-data__dialog-actions button:not(.master-data__primary):hover,
+.service-assignments button:not(.service-assignments__primary):hover,
+.prices-page button:not(.prices-page__primary):hover,
+.doctor-hours button:not(.doctor-hours__primary):hover {
+  color: var(--color-text-primary) !important;
+  border-color: rgb(70 220 243 / 48%) !important;
+  background: linear-gradient(180deg, rgb(16 45 70 / 96%), rgb(7 25 42 / 96%)) !important;
+}
+.ui-button--danger { border: 1px solid var(--color-danger-border) !important; color: var(--color-danger-text) !important; background: var(--color-danger-subtle) !important; }
+
+/* ---------- Universal panels ---------- */
+.dashboard-home__hero,
+.dashboard-home__panel,
+.appointments-page__heading,
+.appointments-summary article,
+.appointments-toolbar,
+.appointments-state,
+.appointments-table-wrap,
+.patients-page__header,
+.conversation-header,
+.patients-stats article,
+.patients-toolbar,
+.patients-table-wrap,
+.operational-page > header,
+.operational-toolbar,
+.operational-state,
+.operational-table,
+.settings-card,
+.reports-panel,
+.reports-card,
+.reports-filters,
+.reports-table-wrap,
+.master-data__toolbar,
+.master-data__table-wrap,
+.master-data__state,
+.doctor-hours__quick,
+.doctor-hours__day,
+.service-assignments__filters,
+.service-assignments__table-wrap,
+.service-assignments__state,
+.prices-page__filters,
+.prices-page__table,
+.prices-page__state {
+  border-color: var(--color-border) !important;
+  background: var(--gradient-panel) !important;
+  box-shadow: var(--shadow-sm) !important;
+}
+
+.dashboard-home__panel:hover,
+.appointments-summary article:hover,
+.patients-stats article:hover,
+.reports-card:hover {
+  border-color: rgb(72 220 242 / 30%) !important;
+  box-shadow: var(--shadow-md), var(--shadow-glow) !important;
+}
+
+/* ---------- Dashboard home ---------- */
+.dashboard-home { gap: 1.2rem; }
+.dashboard-home__hero {
+  position: relative;
+  overflow: hidden;
+  min-height: 12.5rem;
+  align-items: center;
+  padding: 2rem 2.15rem;
+  border-radius: var(--radius-2xl);
+  background: var(--gradient-hero) !important;
+  box-shadow: var(--shadow-md) !important;
+}
+.dashboard-home__hero::after {
+  content: "";
+  position: absolute;
+  width: 18rem;
+  height: 18rem;
+  inset-inline-end: -5rem;
+  top: -6rem;
+  border: 1px solid rgb(76 221 242 / 10%);
+  border-radius: 50%;
+  box-shadow: 0 0 0 2.8rem rgb(75 222 242 / 2%), 0 0 0 5.6rem rgb(107 97 255 / 2%);
+  pointer-events: none;
+}
+.dashboard-home__hero-logo {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  flex: 0 0 5.7rem;
+  width: 5.7rem;
+  height: 5.7rem;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid rgb(93 231 247 / 28%);
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 0 42px rgb(59 218 241 / 20%);
+}
+.dashboard-home__hero-logo img { width: 100%; height: 100%; object-fit: cover; }
+.dashboard-home__hero-content { position: relative; z-index: 1; }
+.dashboard-home__eyebrow { color: #52e1f2; }
+.dashboard-home__title { max-width: 48rem; font-size: clamp(1.75rem, 3vw, 2.4rem); font-weight: 800; letter-spacing: -.025em; }
+.dashboard-home__description { max-width: 43rem; color: var(--color-text-secondary); }
+.dashboard-home__status {
+  position: relative;
+  z-index: 1;
+  border-color: var(--color-success-border);
+  color: var(--color-success-text);
+  background: rgb(21 65 56 / 35%);
+  backdrop-filter: blur(8px);
+}
+.dashboard-home__status-indicator { box-shadow: 0 0 12px rgb(37 211 144 / 70%); }
+.dashboard-home__grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .9rem; }
+.dashboard-home__panel {
+  position: relative;
+  min-height: 9.8rem;
+  overflow: hidden;
+  padding: 1.15rem 1.25rem;
+  border-radius: 1.05rem;
+  text-decoration: none;
+}
+.dashboard-home__panel::after {
+  content: "";
+  position: absolute;
+  inset: auto -20% -70% 35%;
+  height: 9rem;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgb(69 219 240 / 8%), transparent 68%);
+  pointer-events: none;
+}
+.dashboard-home__panel-title { color: var(--color-text-primary); font-size: .82rem; font-weight: 600; }
+.dashboard-home__metric {
+  margin-top: auto;
+  color: var(--color-text-primary);
+  font-size: 2.35rem;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: -.04em;
+}
+.dashboard-home__metric::after { content: ""; display: block; width: 2.5rem; height: 2px; margin-top: .8rem; border-radius: 999px; background: var(--gradient-primary); opacity: .8; }
+.dashboard-home__setup { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(16rem, .55fr); gap: 1rem; }
+.dashboard-home__setup-main { min-height: auto; }
+.dashboard-home__setup-score { display: grid; place-items: center; min-height: auto; text-align: center; }
+.dashboard-home__setup-score strong { color: #51e2f2; font-size: 2rem; }
+.dashboard-home__setup-score span { color: var(--color-text-secondary); font-size: .75rem; }
+.dashboard-home__quick-links { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: .75rem; }
+.dashboard-home__quick-link {
+  display: flex;
+  align-items: center;
+  gap: .7rem;
+  min-height: 3.7rem;
+  padding: .75rem .9rem;
+  border: 1px solid var(--color-border);
+  border-radius: .9rem;
+  color: var(--color-text-primary);
+  background: rgb(7 22 38 / 74%);
+  text-decoration: none;
+}
+.dashboard-home__quick-link:hover { border-color: var(--color-border-strong); color: var(--color-text-primary); background: rgb(11 34 56 / 90%); transform: translateY(-1px); }
+.dashboard-home__quick-icon { color: #49def1; font-size: 1.05rem; }
+.dashboard-home__setup ul { margin: .8rem 0 0; padding-inline-start: 1.2rem; color: var(--color-text-secondary); }
+.dashboard-home__setup a { color: #55dff1; }
+
+/* ---------- Section headers ---------- */
+.appointments-page__heading,
+.patients-page__header,
+.conversation-header,
+.operational-page > header,
+.master-data__header,
+.doctor-hours > header,
+.service-assignments > header,
+.prices-page > header,
+.reports-header {
+  border-radius: 1.05rem !important;
+}
+
+.appointments-page__eyebrow,
+.patients-page__header p,
+.operational-page header p,
+.master-data__eyebrow,
+.doctor-hours header p,
+.service-assignments header p,
+.prices-page header p,
+.reports-header p {
+  color: #47deef !important;
+}
+
+/* ---------- Inputs / filters ---------- */
+.appointments-toolbar input,
+.appointments-toolbar select,
+.operational-toolbar input,
+.operational-form input,
+.operational-form select,
+.master-data__toolbar input,
+.master-data__toolbar select,
+.master-data__form input:not([type=checkbox]),
+.master-data__form select,
+.master-data__form textarea,
+.doctor-hours input,
+.doctor-hours select,
+.service-assignments select,
+.service-assignments input,
+.prices-page input,
+.prices-page select,
+.patient-form input,
+.patient-form select,
+.patient-form textarea,
+.login-field input {
+  border-color: var(--color-border-strong) !important;
+  color: var(--color-text-primary) !important;
+  background: rgb(3 13 24 / 78%) !important;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 2%) !important;
+}
+
+/* ---------- Tables ---------- */
+.appointments-table,
+.patients-table,
+.operational-table table,
+.master-data table,
+.reports-table,
+.service-assignments table,
+.prices-page table {
+  color: var(--color-text-primary) !important;
+  background: transparent !important;
+}
+
+.appointments-table th,
+.patients-table th,
+.operational-table th,
+.master-data th,
+.reports-table th,
+.service-assignments th,
+.prices-page th {
+  color: var(--color-text-primary) !important;
+  border-color: var(--color-border) !important;
+  background: rgb(9 26 44 / 92%) !important;
+}
+
+.appointments-table td,
+.patients-table td,
+.operational-table td,
+.master-data td,
+.reports-table td,
+.service-assignments td,
+.prices-page td {
+  border-color: var(--color-border) !important;
+}
+
+.appointments-table tbody tr,
+.patients-table tbody tr,
+.operational-table tbody tr,
+.master-data tbody tr,
+.reports-table tbody tr,
+.service-assignments tbody tr,
+.prices-page tbody tr {
+  transition: background-color var(--transition-fast);
+}
+.appointments-table tbody tr:hover,
+.patients-table tbody tr:hover,
+.operational-table tbody tr:hover,
+.master-data tbody tr:hover,
+.reports-table tbody tr:hover,
+.service-assignments tbody tr:hover,
+.prices-page tbody tr:hover { background: rgb(57 207 234 / 4%); }
+
+/* ---------- Status ---------- */
+.appointment-status,
+.handling-badge,
+.prices-page__status {
+  border: 1px solid var(--color-border);
+  background: rgb(126 148 168 / 8%);
+}
+.appointment-status--confirmed,
+.appointment-status--checked_in,
+.appointment-status--completed,
+.prices-page__status--active { border-color: var(--color-success-border) !important; color: var(--color-success-text) !important; background: var(--color-success-subtle) !important; }
+.appointment-status--pending { border-color: var(--color-warning-border) !important; color: var(--color-warning-text) !important; background: var(--color-warning-subtle) !important; }
+.appointment-status--cancelled,
+.appointment-status--no_show { border-color: var(--color-danger-border) !important; color: var(--color-danger-text) !important; background: var(--color-danger-subtle) !important; }
+
+/* ---------- Modals / dialogs ---------- */
+.operational-modal,
+.patient-modal,
+.master-data__overlay,
+.doctor-hours__overlay,
+.service-assignments__overlay,
+.prices-page__overlay,
+.appointment-cancel-dialog__backdrop {
+  background: rgb(0 5 12 / 72%) !important;
+  backdrop-filter: blur(9px);
+}
+.operational-dialog,
+.patient-dialog,
+.master-data__dialog,
+.doctor-hours__dialog,
+.service-assignments__dialog,
+.prices-page__dialog,
+.appointment-cancel-dialog {
+  border: 1px solid var(--color-border-strong) !important;
+  color: var(--color-text-primary) !important;
+  background: linear-gradient(145deg, #0a1c30, #05111f) !important;
+  box-shadow: 0 30px 90px rgb(0 0 0 / 55%), 0 0 60px rgb(52 213 239 / 6%) !important;
+}
+.operational-dialog > header,
+.master-data__dialog-header,
+.master-data__dialog-actions,
+.service-assignments__dialog-header,
+.service-assignments__dialog-actions,
+.prices-page__dialog > header,
+.prices-page__dialog footer,
+.patient-dialog__actions {
+  border-color: var(--color-border) !important;
+}
+
+/* ---------- Reports ---------- */
+.reports-page { color: var(--color-text-primary) !important; }
+.reports-chart { border-color: var(--color-border) !important; background: var(--gradient-panel) !important; }
+.reports-bar__appointments { background: linear-gradient(180deg, #4de0f1, #109fc4) !important; }
+.reports-bar__bookings { background: linear-gradient(180deg, #7569ff, #5548d9) !important; }
+.reports-fixed-scope { border-color: var(--color-border) !important; color: var(--color-text-secondary) !important; background: rgb(7 23 39 / 76%) !important; }
+.reports-retry { border-color: var(--color-border-strong) !important; color: var(--color-text-primary) !important; background: rgb(7 22 37 / 84%) !important; }
+
+/* ---------- Patient conversation ---------- */
+.messages { border-color: var(--color-border) !important; background: var(--gradient-panel) !important; }
+.message-composer { border-color: var(--color-border) !important; background: rgb(6 19 33 / 92%) !important; }
+.conversation-back { color: #50dff0 !important; }
+.conversation-empty { color: var(--color-text-muted) !important; }
+
+/* ---------- Feedback ---------- */
+.operational-success,
+.master-data__success,
+.service-assignments__success,
+.appointments-feedback--success { border-color: var(--color-success-border) !important; color: var(--color-success-text) !important; background: var(--color-success-subtle) !important; }
+.operational-error,
+.master-data__state--error,
+.master-data__form-error,
+.service-assignments__error,
+.service-assignments__danger,
+.prices-page__state--error,
+.prices-page__field-error,
+.appointments-state--error,
+.appointment-row-error,
+.appointment-cancel-dialog__error,
+.patient-form-error { color: var(--color-danger-text) !important; }
+
+/* ---------- Login ---------- */
+.login-page {
+  position: relative;
+  overflow: hidden;
+  grid-template-columns: minmax(0, 1.05fr) minmax(27rem, .75fr);
+  gap: 4rem;
+  padding: clamp(2rem, 5vw, 5rem);
+  background:
+    radial-gradient(circle at 12% 12%, rgb(48 213 240 / 14%), transparent 28rem),
+    radial-gradient(circle at 82% 85%, rgb(108 93 255 / 12%), transparent 30rem),
+    #020812 !important;
+}
+.login-page::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image: linear-gradient(rgb(78 204 236 / 3%) 1px, transparent 1px), linear-gradient(90deg, rgb(78 204 236 / 3%) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: linear-gradient(to bottom, black, transparent 88%);
+}
+.login-showcase { position: relative; z-index: 1; max-width: 45rem; }
+.login-showcase__brand { display: flex; align-items: center; gap: 1rem; }
+.login-showcase__logo { width: 5.1rem; height: 5.1rem; overflow: hidden; border: 1px solid rgb(70 222 243 / 30%); border-radius: 50%; background: #fff; box-shadow: 0 0 40px rgb(48 213 240 / 18%); }
+.login-showcase__logo img { width: 100%; height: 100%; object-fit: cover; }
+.login-showcase__name { color: var(--color-text-primary); font-size: 1.6rem; font-weight: 800; }
+.login-showcase__sub { color: var(--color-text-secondary); font-size: .82rem; }
+.login-showcase h2 { margin: 2.5rem 0 .8rem; color: var(--color-text-primary); font-size: clamp(2.4rem, 5vw, 4.3rem); line-height: 1.05; letter-spacing: -.045em; }
+.login-showcase h2 span { color: transparent; background: var(--gradient-primary); -webkit-background-clip: text; background-clip: text; }
+.login-showcase > p { max-width: 37rem; color: var(--color-text-secondary); font-size: 1.06rem; line-height: 1.8; }
+.login-showcase__features { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: .75rem; margin-top: 2rem; }
+.login-showcase__feature { padding: 1rem; border: 1px solid var(--color-border); border-radius: .95rem; color: var(--color-text-secondary); background: rgb(8 23 39 / 62%); }
+.login-showcase__feature strong { display: block; margin-bottom: .25rem; color: var(--color-text-primary); font-size: .9rem; }
+.login-card {
+  position: relative;
+  z-index: 1;
+  width: min(100%, 31rem);
+  justify-self: end;
+  padding: 2rem;
+  border: 1px solid rgb(83 211 239 / 22%);
+  border-radius: 1.45rem;
+  background: linear-gradient(145deg, rgb(10 29 49 / 94%), rgb(4 15 28 / 94%));
+  box-shadow: 0 35px 95px rgb(0 0 0 / 48%), 0 0 60px rgb(54 211 238 / 6%);
+  backdrop-filter: blur(20px);
+}
+.login-brand { color: var(--color-text-primary); }
+.login-brand__mark { overflow: hidden; width: 3.4rem; height: 3.4rem; border: 1px solid var(--color-border-strong); border-radius: 50%; background: #fff; }
+.login-brand__mark img { width: 100%; height: 100%; object-fit: cover; }
+.login-heading { margin: 2rem 0 1.65rem; }
+.login-heading h1 { color: var(--color-text-primary); font-size: 2rem; }
+.login-heading p { color: var(--color-text-secondary); }
+.login-field label { color: var(--color-text-primary); font-size: .85rem; }
+.login-field input { min-height: 3.2rem !important; border-radius: .8rem !important; }
+.login-submit { min-height: 3.2rem; }
+.login-footer { color: var(--color-text-secondary); }
+.login-error { border: 1px solid var(--color-danger-border); color: var(--color-danger-text); background: var(--color-danger-subtle); }
+.auth-loading { color: var(--color-text-secondary); background: var(--color-background); }
+
+/* ---------- Page-specific legacy color cleanup ---------- */
+.doctor-hours,
+.service-assignments,
+.prices-page { color: var(--color-text-primary) !important; }
+.doctor-hours input,
+.doctor-hours select,
+.doctor-hours button,
+.service-assignments button,
+.service-assignments select,
+.prices-page button,
+.prices-page select,
+.prices-page input { color: var(--color-text-primary); background: rgb(3 13 24 / 78%); border-color: var(--color-border-strong); }
+.doctor-hours__day > p,
+.doctor-hours__state,
+.service-assignments__filter-count,
+.service-assignments__state,
+.prices-page__state { color: var(--color-text-secondary) !important; }
+.master-data__toolbar,
+.master-data__table-wrap,
+.master-data__state,
+.master-data__dialog,
+.master-data__toolbar select,
+.master-data__toolbar button,
+.master-data__actions button,
+.master-data__dialog-actions button,
+.master-data__pagination button { background-color: transparent !important; }
+.master-data__toolbar select,
+.master-data__toolbar input,
+.master-data__form input:not([type=checkbox]),
+.master-data__form select,
+.master-data__form textarea { background: rgb(3 13 24 / 78%) !important; }
+
+/* ---------- Responsive ---------- */
+@media (max-width: 75rem) {
+  .dashboard-home__quick-links { grid-template-columns: repeat(2, minmax(0,1fr)); }
+}
+
+@media (max-width: 62rem) {
+  .app-sidebar__brand-mark { width: 2.75rem; height: 2.75rem; }
+  .app-sidebar__navigation-link { justify-content: center; }
+  .app-sidebar__navigation-icon { flex-basis: 1.35rem; }
+  .dashboard-content::before { inset-inline-start: var(--sidebar-width-compact); }
+  .login-page { grid-template-columns: 1fr; gap: 2rem; }
+  .login-showcase { display: none; }
+  .login-card { justify-self: center; }
+  .dashboard-home__setup { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 48rem) {
+  .dashboard-content::before { inset-inline-start: 0; }
+  .app-header__language, .app-header__clinic { display: none; }
+  .app-header__logout:first-of-type { display: none; }
+  .dashboard-home__hero { flex-direction: row; align-items: center; }
+  .dashboard-home__hero-logo { flex-basis: 4.2rem; width: 4.2rem; height: 4.2rem; }
+  .dashboard-home__status { display: none; }
+  .dashboard-home__grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .dashboard-home__quick-links { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 34rem) {
+  .dashboard-home__hero { flex-direction: column; align-items: flex-start; }
+  .dashboard-home__grid { grid-template-columns: 1fr; }
+  .login-page { padding: 1rem; }
+  .login-card { padding: 1.35rem; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; }
+}
+
+/* Remaining legacy controls normalized to the premium system */
+.patients-actions button,
+.patient-dialog__actions button:not(.patients-primary),
+.operational-table button {
+  border: 1px solid var(--color-border-strong) !important;
+  color: var(--color-text-primary) !important;
+  background: linear-gradient(180deg, rgb(12 31 50 / 86%), rgb(5 17 30 / 86%)) !important;
+}
+.patients-actions button:hover,
+.patient-dialog__actions button:not(.patients-primary):hover,
+.operational-table button:hover {
+  border-color: rgb(70 220 243 / 48%) !important;
+  color: var(--color-text-primary) !important;
+  background: linear-gradient(180deg, rgb(16 45 70 / 96%), rgb(7 25 42 / 96%)) !important;
+}
+.patient-status { border: 1px solid var(--color-border); }
+.patient-status--active { border-color: var(--color-success-border) !important; color: var(--color-success-text) !important; background: var(--color-success-subtle) !important; }
+.patient-status--inactive,
+.prices-page__status--inactive { color: var(--color-text-secondary) !important; background: rgb(125 148 169 / 9%) !important; }
+.reports-state { border: 1px solid var(--color-border) !important; color: var(--color-text-secondary) !important; background: var(--gradient-panel) !important; }
+.reports-state--error,
+.service-assignments__error { border-color: var(--color-danger-border) !important; color: var(--color-danger-text) !important; background: var(--color-danger-subtle) !important; }
+.assistant-identity-preview { border-color: var(--color-border) !important; background: rgb(7 25 42 / 78%) !important; }
+
+/* =========================================================
+   Shaden Premium — Arabic polish & semantic action colors
+   ========================================================= */
+
+/* Login: fixed visual order, card on the right and product story on the left. */
+.login-page {
+  grid-template-columns: minmax(0, 1.08fr) minmax(27rem, .72fr) !important;
+  grid-template-areas: "showcase card";
+  align-items: center;
+  gap: clamp(3rem, 7vw, 7rem) !important;
+}
+.login-showcase {
+  grid-area: showcase;
+  width: min(100%, 48rem);
+  justify-self: end;
+}
+.login-card {
+  grid-area: card;
+  justify-self: start !important;
+}
+[dir='rtl'] .login-page { direction: ltr; }
+[dir='rtl'] .login-showcase,
+[dir='rtl'] .login-card { direction: rtl; }
+[dir='rtl'] .login-showcase { text-align: right; }
+[dir='rtl'] .login-showcase__brand { flex-direction: row-reverse; justify-content: flex-end; }
+[dir='rtl'] .login-brand { flex-direction: row; }
+.login-showcase__copy { margin-top: 2.35rem; }
+.login-showcase__eyebrow {
+  margin: 0 0 .8rem;
+  color: #49deef !important;
+  font-size: .78rem !important;
+  font-weight: 800;
+  letter-spacing: .06em;
+}
+.login-showcase__copy h2 { margin-top: 0 !important; }
+.login-card::before {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  z-index: -1;
+  border-radius: inherit;
+  background: linear-gradient(140deg, rgb(75 225 244 / 20%), transparent 42%, rgb(111 98 255 / 13%));
+  filter: blur(18px);
+  opacity: .45;
+  pointer-events: none;
+}
+.login-heading,
+.login-form { text-align: start; }
+.login-field input:focus {
+  border-color: rgb(72 224 243 / 70%) !important;
+  box-shadow: 0 0 0 3px rgb(61 216 239 / 10%), 0 12px 28px rgb(0 0 0 / 12%) !important;
+}
+.login-submit:hover:not(:disabled) { transform: translateY(-2px); }
+
+/* Search/filter controls get a clear active state instead of looking disabled. */
+.master-data__toolbar input,
+.appointments-toolbar input,
+.operational-toolbar input,
+.patients-toolbar input,
+.prices-page__filters input {
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast), background-color var(--transition-fast);
+}
+.master-data__toolbar input:focus,
+.appointments-toolbar input:focus,
+.operational-toolbar input:focus,
+.patients-toolbar input:focus,
+.prices-page__filters input:focus {
+  outline: none;
+  border-color: rgb(66 221 242 / 72%) !important;
+  background: rgb(6 23 39 / 94%) !important;
+  box-shadow: 0 0 0 3px rgb(66 221 242 / 9%) !important;
+}
+
+/* Semantic action buttons — edit/view = blue, refresh = emerald, status = amber, delete = red. */
+.master-data__action,
+.action-button {
+  min-height: 2.35rem;
+  padding: .45rem .78rem !important;
+  border-radius: .7rem !important;
+  font-weight: 700 !important;
+  transition: transform var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast), background var(--transition-fast), box-shadow var(--transition-fast) !important;
+}
+
+.master-data__action--edit,
+.action-button--edit,
+.patients-actions > button:first-child,
+.patient-dialog__actions > button:first-child {
+  border: 1px solid rgb(51 187 255 / 36%) !important;
+  color: #89dcff !important;
+  background: linear-gradient(180deg, rgb(26 116 180 / 19%), rgb(11 66 107 / 12%)) !important;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 4%) !important;
+}
+.master-data__action--edit:hover:not(:disabled),
+.action-button--edit:hover:not(:disabled),
+.patients-actions > button:first-child:hover:not(:disabled),
+.patient-dialog__actions > button:first-child:hover:not(:disabled) {
+  transform: translateY(-1px);
+  border-color: rgb(78 207 255 / 72%) !important;
+  color: #e7f9ff !important;
+  background: linear-gradient(180deg, rgb(24 145 214 / 34%), rgb(13 87 138 / 24%)) !important;
+  box-shadow: 0 8px 24px rgb(20 151 219 / 13%) !important;
+}
+
+.master-data__refresh,
+.action-button--refresh {
+  border: 1px solid rgb(36 211 151 / 34%) !important;
+  color: #6ff0bd !important;
+  background: linear-gradient(180deg, rgb(21 121 88 / 20%), rgb(7 70 52 / 12%)) !important;
+}
+.master-data__refresh:hover:not(:disabled),
+.action-button--refresh:hover:not(:disabled) {
+  transform: translateY(-1px);
+  border-color: rgb(55 226 166 / 68%) !important;
+  color: #e1fff3 !important;
+  background: linear-gradient(180deg, rgb(26 154 111 / 35%), rgb(10 91 66 / 26%)) !important;
+  box-shadow: 0 8px 24px rgb(36 211 151 / 11%) !important;
+}
+
+.master-data__action--status,
+.action-button--status {
+  border: 1px solid rgb(245 181 70 / 33%) !important;
+  color: #ffd58b !important;
+  background: linear-gradient(180deg, rgb(150 98 22 / 18%), rgb(87 56 13 / 12%)) !important;
+}
+.master-data__action--status:hover:not(:disabled),
+.action-button--status:hover:not(:disabled) {
+  transform: translateY(-1px);
+  border-color: rgb(255 197 91 / 66%) !important;
+  color: #fff4d9 !important;
+  background: linear-gradient(180deg, rgb(177 117 26 / 33%), rgb(107 69 14 / 24%)) !important;
+  box-shadow: 0 8px 22px rgb(221 154 39 / 10%) !important;
+}
+
+.master-data__danger,
+.action-button--delete,
+.patients-danger {
+  border: 1px solid rgb(255 92 116 / 38%) !important;
+  color: #ff99a8 !important;
+  background: linear-gradient(180deg, rgb(137 29 51 / 20%), rgb(78 16 30 / 14%)) !important;
+}
+.master-data__danger:hover:not(:disabled),
+.action-button--delete:hover:not(:disabled),
+.patients-danger:hover:not(:disabled) {
+  transform: translateY(-1px);
+  border-color: rgb(255 99 123 / 76%) !important;
+  color: #fff1f4 !important;
+  background: linear-gradient(180deg, rgb(187 43 69 / 48%), rgb(126 24 45 / 40%)) !important;
+  box-shadow: 0 8px 25px rgb(228 53 83 / 16%) !important;
+}
+
+.action-button--neutral {
+  border: 1px solid rgb(129 141 255 / 31%) !important;
+  color: #c0c4ff !important;
+  background: rgb(91 81 195 / 10%) !important;
+}
+.action-button--neutral:hover:not(:disabled) {
+  border-color: rgb(142 132 255 / 60%) !important;
+  color: #f2f1ff !important;
+  background: rgb(100 89 215 / 22%) !important;
+}
+
+.master-data__actions,
+.patients-actions,
+.prices-page__actions,
+.operational-table td:last-child {
+  gap: .45rem !important;
+}
+
+/* Arabic data tables: keep interface words RTL, while raw numbers/IDs remain readable. */
+[dir='rtl'] .master-data table,
+[dir='rtl'] .appointments-table,
+[dir='rtl'] .patients-table,
+[dir='rtl'] .operational-table table,
+[dir='rtl'] .prices-page table,
+[dir='rtl'] .reports-table {
+  text-align: right;
+}
+[dir='rtl'] .master-data__actions,
+[dir='rtl'] .patients-actions,
+[dir='rtl'] .prices-page__actions { justify-content: flex-start; }
+
+@media (max-width: 62rem) {
+  .login-page { grid-template-columns: 1fr !important; grid-template-areas: "card" !important; }
+  .login-showcase { display: none; }
+  .login-card { justify-self: center !important; }
+}
+
+/* ==========================================================
+   Shaden Premium — final consistency pass (all pages)
+   ========================================================== */
+
+/* Brand artwork: the supplied logo already contains its own circular field. */
+.app-sidebar__brand-mark,
+.login-showcase__logo,
+.login-brand__mark,
+.dashboard-home__hero-logo {
+  background: transparent !important;
+}
+.app-sidebar__brand-mark img,
+.login-showcase__logo img,
+.login-brand__mark img,
+.dashboard-home__hero-logo img {
+  object-fit: contain !important;
+}
+
+/* Login: fixed physical order regardless of RTL text direction. */
+.login-page {
+  direction: ltr !important;
+  grid-template-columns: minmax(0, 1.15fr) minmax(28rem, .72fr) !important;
+  grid-template-areas: "showcase card" !important;
+}
+.login-showcase { grid-area: showcase !important; justify-self: end !important; }
+.login-card { grid-area: card !important; justify-self: start !important; }
+[dir='rtl'] .login-showcase,
+[dir='rtl'] .login-card { direction: rtl !important; text-align: right !important; }
+[dir='ltr'] .login-showcase,
+[dir='ltr'] .login-card { direction: ltr !important; text-align: left !important; }
+
+/* Data tables: premium grid with subtle vertical column separators. */
+@media (min-width: 48.01rem) {
+  .appointments-table th + th,
+  .appointments-table td + td,
+  .patients-table th + th,
+  .patients-table td + td,
+  .operational-table th + th,
+  .operational-table td + td,
+  .master-data th + th,
+  .master-data td + td,
+  .reports-table th + th,
+  .reports-table td + td,
+  .service-assignments th + th,
+  .service-assignments td + td,
+  .prices-page th + th,
+  .prices-page td + td {
+    border-inline-start: 1px solid rgb(79 185 220 / 14%) !important;
+  }
+
+  .appointments-table th:last-child,
+  .appointments-table td:last-child,
+  .patients-table th:last-child,
+  .patients-table td:last-child,
+  .operational-table th:last-child,
+  .operational-table td:last-child,
+  .master-data th:last-child,
+  .master-data td:last-child,
+  .service-assignments th:last-child,
+  .service-assignments td:last-child,
+  .prices-page th:last-child,
+  .prices-page td:last-child {
+    background: rgb(41 177 215 / 2.5%) !important;
+    border-inline-start-color: rgb(75 218 241 / 24%) !important;
+  }
+}
+
+.appointments-table thead th,
+.patients-table thead th,
+.operational-table thead th,
+.master-data thead th,
+.reports-table thead th,
+.service-assignments thead th,
+.prices-page thead th {
+  border-bottom: 1px solid rgb(76 215 239 / 25%) !important;
+  color: var(--color-text-primary) !important;
+  background: linear-gradient(180deg, rgb(12 34 55 / 98%), rgb(7 25 42 / 98%)) !important;
+}
+
+.appointments-table tbody tr:hover,
+.patients-table tbody tr:hover,
+.operational-table tbody tr:hover,
+.master-data tbody tr:hover,
+.reports-table tbody tr:hover,
+.service-assignments tbody tr:hover,
+.prices-page tbody tr:hover {
+  background: linear-gradient(90deg, rgb(50 210 236 / 7%), rgb(111 98 255 / 3%)) !important;
+}
+
+/* Clear semantic action hierarchy across all operational pages. */
+.master-data__action,
+.action-button,
+.service-assignments__actions > button,
+.appointment-actions .ui-button {
+  min-height: 2.42rem !important;
+  border-radius: .72rem !important;
+  padding: .48rem .86rem !important;
+  font-weight: 800 !important;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 8%), 0 5px 14px rgb(0 0 0 / 16%) !important;
+}
+
+/* View / edit = blue */
+.master-data__action--edit,
+.action-button--edit,
+.service-assignments__actions > button:first-child,
+.patients-actions > button:first-child,
+.patient-dialog__actions > button:first-child {
+  border-color: rgb(73 203 255 / 78%) !important;
+  color: #ffffff !important;
+  background: linear-gradient(135deg, #0b6c9e 0%, #118fca 52%, #19b4e6 100%) !important;
+}
+.master-data__action--edit:hover:not(:disabled),
+.action-button--edit:hover:not(:disabled),
+.service-assignments__actions > button:first-child:hover:not(:disabled),
+.patients-actions > button:first-child:hover:not(:disabled),
+.patient-dialog__actions > button:first-child:hover:not(:disabled) {
+  transform: translateY(-2px) scale(1.015) !important;
+  border-color: #8ae4ff !important;
+  background: linear-gradient(135deg, #0e82ba 0%, #18ace1 52%, #2ac9f1 100%) !important;
+  box-shadow: 0 10px 28px rgb(19 172 224 / 28%), inset 0 1px 0 rgb(255 255 255 / 20%) !important;
+}
+
+/* Activate / deactivate = amber */
+.master-data__action--status,
+.action-button--status,
+.service-assignments__actions > button:nth-child(2) {
+  border-color: rgb(255 193 75 / 75%) !important;
+  color: #fff8e9 !important;
+  background: linear-gradient(135deg, #765008 0%, #a06a0d 52%, #c88b19 100%) !important;
+}
+.master-data__action--status:hover:not(:disabled),
+.action-button--status:hover:not(:disabled),
+.service-assignments__actions > button:nth-child(2):hover:not(:disabled) {
+  transform: translateY(-2px) scale(1.015) !important;
+  border-color: #ffda8a !important;
+  background: linear-gradient(135deg, #96650b 0%, #c48617 52%, #eba62a 100%) !important;
+  box-shadow: 0 10px 28px rgb(217 150 31 / 25%), inset 0 1px 0 rgb(255 255 255 / 18%) !important;
+}
+
+/* Delete / destructive = red */
+.master-data__danger,
+.action-button--delete,
+.patients-danger,
+.service-assignments__danger,
+.ui-button--danger {
+  border-color: rgb(255 101 126 / 76%) !important;
+  color: #fff4f6 !important;
+  background: linear-gradient(135deg, #76172b 0%, #a52340 52%, #cb3553 100%) !important;
+}
+.master-data__danger:hover:not(:disabled),
+.action-button--delete:hover:not(:disabled),
+.patients-danger:hover:not(:disabled),
+.service-assignments__danger:hover:not(:disabled),
+.ui-button--danger:hover:not(:disabled) {
+  transform: translateY(-2px) scale(1.015) !important;
+  border-color: #ff9aac !important;
+  background: linear-gradient(135deg, #941c35 0%, #c62d4c 52%, #e64a68 100%) !important;
+  box-shadow: 0 10px 28px rgb(220 51 84 / 27%), inset 0 1px 0 rgb(255 255 255 / 18%) !important;
+}
+
+/* Refresh / update = emerald */
+.master-data__refresh,
+.action-button--refresh,
+.reports-retry,
+.operational-toolbar > button {
+  border-color: rgb(52 224 164 / 74%) !important;
+  color: #f1fff9 !important;
+  background: linear-gradient(135deg, #076047 0%, #09865f 52%, #0eae7a 100%) !important;
+}
+.master-data__refresh:hover:not(:disabled),
+.action-button--refresh:hover:not(:disabled),
+.reports-retry:hover:not(:disabled),
+.operational-toolbar > button:hover:not(:disabled) {
+  transform: translateY(-2px) scale(1.015) !important;
+  border-color: #78f2c8 !important;
+  background: linear-gradient(135deg, #087859 0%, #0aa775 52%, #14cc91 100%) !important;
+  box-shadow: 0 10px 28px rgb(25 190 137 / 24%), inset 0 1px 0 rgb(255 255 255 / 18%) !important;
+}
+
+/* Search fields are visually distinct from action buttons. */
+.master-data__toolbar,
+.appointments-toolbar,
+.patients-toolbar,
+.operational-toolbar,
+.service-assignments__filters,
+.prices-page__filters,
+.reports-filters {
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 2%), 0 14px 34px rgb(0 0 0 / 12%) !important;
+}
+.master-data__toolbar input,
+.appointments-toolbar input,
+.patients-toolbar input,
+.operational-toolbar input,
+.service-assignments__filters input,
+.prices-page__filters input,
+.reports-filters input {
+  border-color: rgb(73 199 231 / 28%) !important;
+}
+.master-data__toolbar input:hover,
+.appointments-toolbar input:hover,
+.patients-toolbar input:hover,
+.operational-toolbar input:hover,
+.service-assignments__filters input:hover,
+.prices-page__filters input:hover,
+.reports-filters input:hover {
+  border-color: rgb(73 219 241 / 48%) !important;
+}
+
+/* Neutral buttons stay neutral instead of competing with the primary action. */
+.action-button--neutral,
+.master-data__pagination button,
+.master-data__dialog-actions > button:not(.master-data__primary),
+.service-assignments__dialog-actions > button:not(.service-assignments__primary),
+.patient-dialog__actions > button:not(.patients-danger):not(:first-child),
+.prices-page__dialog footer > button:not(.prices-page__primary) {
+  border-color: rgb(123 145 166 / 28%) !important;
+  color: var(--color-text-primary) !important;
+  background: linear-gradient(180deg, rgb(18 38 58 / 78%), rgb(8 23 39 / 78%)) !important;
+}
+
+@media (max-width: 62rem) {
+  .login-page {
+    grid-template-columns: 1fr !important;
+    grid-template-areas: "card" !important;
+  }
+  .login-showcase { display: none !important; }
+  .login-card { justify-self: center !important; }
+}
+
+/* Appointment workflow actions use distinct operational colors. */
+.appointment-action--confirm,
+.appointment-action--complete {
+  border-color: rgb(50 224 163 / 72%) !important;
+  color: #effff8 !important;
+  background: linear-gradient(135deg, #075c43 0%, #07855e 52%, #0cac78 100%) !important;
+}
+.appointment-action--confirm:hover:not(:disabled),
+.appointment-action--complete:hover:not(:disabled) {
+  border-color: #75efc4 !important;
+  background: linear-gradient(135deg, #087554 0%, #0aa674 52%, #16c98e 100%) !important;
+  box-shadow: 0 9px 24px rgb(32 194 137 / 24%) !important;
+}
+.appointment-action--checkin {
+  border-color: rgb(69 204 255 / 72%) !important;
+  color: #f4fcff !important;
+  background: linear-gradient(135deg, #0b6798 0%, #0e8fc4 52%, #19b5df 100%) !important;
+}
+.appointment-action--checkin:hover:not(:disabled) {
+  border-color: #88e6ff !important;
+  background: linear-gradient(135deg, #0e80b7 0%, #17addd 52%, #2acaf0 100%) !important;
+  box-shadow: 0 9px 24px rgb(27 174 222 / 24%) !important;
+}
+.appointment-action--reschedule {
+  border-color: rgb(132 118 255 / 58%) !important;
+  color: #dcd8ff !important;
+  background: linear-gradient(135deg, rgb(84 68 182 / 42%), rgb(57 49 133 / 32%)) !important;
+}
+.appointment-action--reschedule:hover:not(:disabled) {
+  border-color: rgb(157 145 255 / 84%) !important;
+  color: #fff !important;
+  background: linear-gradient(135deg, rgb(103 88 218 / 62%), rgb(75 64 170 / 50%)) !important;
+  box-shadow: 0 9px 24px rgb(105 91 223 / 22%) !important;
+}

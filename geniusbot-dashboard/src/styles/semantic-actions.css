@@ -1,0 +1,257 @@
+/* Shaden semantic action and table consistency layer.
+   Imported last on purpose: this is the single source of truth for button semantics. */
+
+:root {
+  --shaden-action-blue-1: #0b6c9e;
+  --shaden-action-blue-2: #118fca;
+  --shaden-action-blue-3: #19b4e6;
+  --shaden-action-green-1: #076047;
+  --shaden-action-green-2: #09865f;
+  --shaden-action-green-3: #0eae7a;
+  --shaden-action-amber-1: #765008;
+  --shaden-action-amber-2: #a06a0d;
+  --shaden-action-amber-3: #c88b19;
+  --shaden-action-red-1: #76172b;
+  --shaden-action-red-2: #a52340;
+  --shaden-action-red-3: #cb3553;
+  --shaden-action-violet-1: #46349a;
+  --shaden-action-violet-2: #6550c8;
+  --shaden-action-violet-3: #806cf2;
+}
+
+/* One geometry for all compact action buttons. */
+.action-button,
+.master-data__action,
+.service-assignments__actions > button,
+.patients-actions .action-button,
+.patient-dialog__actions .action-button,
+.prices-page__actions .action-button,
+.appointment-actions .ui-button {
+  min-height: 2.45rem !important;
+  padding: .48rem .86rem !important;
+  border-width: 1px !important;
+  border-style: solid !important;
+  border-radius: .72rem !important;
+  font-weight: 800 !important;
+  line-height: 1 !important;
+  white-space: nowrap !important;
+  transition: transform 150ms ease, border-color 150ms ease, background 150ms ease, box-shadow 150ms ease, color 150ms ease !important;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 9%), 0 5px 14px rgb(0 0 0 / 16%) !important;
+}
+
+/* View / edit = blue/cyan. */
+.action-button--edit,
+.master-data__action--edit,
+.service-assignments__actions > .action-button--edit,
+.patients-actions .action-button--edit,
+.patient-dialog__actions .action-button--edit,
+.prices-page__actions .action-button--edit {
+  color: var(--color-text-primary) !important;
+  border-color: rgb(73 203 255 / 80%) !important;
+  background: linear-gradient(135deg, var(--shaden-action-blue-1), var(--shaden-action-blue-2) 52%, var(--shaden-action-blue-3)) !important;
+}
+.action-button--edit:hover:not(:disabled),
+.master-data__action--edit:hover:not(:disabled),
+.service-assignments__actions > .action-button--edit:hover:not(:disabled),
+.patients-actions .action-button--edit:hover:not(:disabled),
+.patient-dialog__actions .action-button--edit:hover:not(:disabled),
+.prices-page__actions .action-button--edit:hover:not(:disabled) {
+  transform: translateY(-2px) !important;
+  border-color: #98eaff !important;
+  background: linear-gradient(135deg, #0e82ba, #18ace1 52%, #2ac9f1) !important;
+  box-shadow: 0 10px 28px rgb(19 172 224 / 30%), inset 0 1px 0 rgb(255 255 255 / 20%) !important;
+}
+
+/* Activate / deactivate = amber. */
+.action-button--status,
+.master-data__action--status,
+.service-assignments__actions > .action-button--status,
+.patients-actions .action-button--status,
+.patient-dialog__actions .action-button--status,
+.prices-page__actions .action-button--status {
+  color: var(--color-text-primary) !important;
+  border-color: rgb(255 193 75 / 78%) !important;
+  background: linear-gradient(135deg, var(--shaden-action-amber-1), var(--shaden-action-amber-2) 52%, var(--shaden-action-amber-3)) !important;
+}
+.action-button--status:hover:not(:disabled),
+.master-data__action--status:hover:not(:disabled),
+.service-assignments__actions > .action-button--status:hover:not(:disabled),
+.patients-actions .action-button--status:hover:not(:disabled),
+.patient-dialog__actions .action-button--status:hover:not(:disabled),
+.prices-page__actions .action-button--status:hover:not(:disabled) {
+  transform: translateY(-2px) !important;
+  border-color: #ffdc91 !important;
+  background: linear-gradient(135deg, #96650b, #c48617 52%, #eba62a) !important;
+  box-shadow: 0 10px 28px rgb(217 150 31 / 26%), inset 0 1px 0 rgb(255 255 255 / 18%) !important;
+}
+
+/* Delete / cancel destructive = red. */
+.action-button--delete,
+.master-data__danger,
+.service-assignments__danger,
+.patients-actions .action-button--delete,
+.patient-dialog__actions .action-button--delete,
+.ui-button--danger,
+.appointment-action--cancel {
+  color: var(--color-text-primary) !important;
+  border-color: rgb(255 101 126 / 78%) !important;
+  background: linear-gradient(135deg, var(--shaden-action-red-1), var(--shaden-action-red-2) 52%, var(--shaden-action-red-3)) !important;
+}
+.action-button--delete:hover:not(:disabled),
+.master-data__danger:hover:not(:disabled),
+.service-assignments__danger:hover:not(:disabled),
+.patients-actions .action-button--delete:hover:not(:disabled),
+.patient-dialog__actions .action-button--delete:hover:not(:disabled),
+.ui-button--danger:hover:not(:disabled),
+.appointment-action--cancel:hover:not(:disabled) {
+  transform: translateY(-2px) !important;
+  border-color: #ffa1b2 !important;
+  background: linear-gradient(135deg, #941c35, #c62d4c 52%, #e64a68) !important;
+  box-shadow: 0 10px 28px rgb(220 51 84 / 28%), inset 0 1px 0 rgb(255 255 255 / 18%) !important;
+}
+
+/* Refresh / update = green. */
+.action-button--refresh,
+.master-data__refresh,
+.reports-retry,
+.operational-toolbar > button {
+  color: var(--color-text-primary) !important;
+  border-color: rgb(52 224 164 / 76%) !important;
+  background: linear-gradient(135deg, var(--shaden-action-green-1), var(--shaden-action-green-2) 52%, var(--shaden-action-green-3)) !important;
+}
+.action-button--refresh:hover:not(:disabled),
+.master-data__refresh:hover:not(:disabled),
+.reports-retry:hover:not(:disabled),
+.operational-toolbar > button:hover:not(:disabled) {
+  transform: translateY(-2px) !important;
+  border-color: #7ef5cc !important;
+  background: linear-gradient(135deg, #087859, #0aa775 52%, #14cc91) !important;
+  box-shadow: 0 10px 28px rgb(25 190 137 / 25%), inset 0 1px 0 rgb(255 255 255 / 18%) !important;
+}
+
+/* Neutral utility = violet; used for password reset and reschedule. */
+.action-button--neutral,
+.appointment-action--reschedule {
+  color: var(--color-text-primary) !important;
+  border-color: rgb(146 125 255 / 74%) !important;
+  background: linear-gradient(135deg, var(--shaden-action-violet-1), var(--shaden-action-violet-2) 52%, var(--shaden-action-violet-3)) !important;
+}
+.action-button--neutral:hover:not(:disabled),
+.appointment-action--reschedule:hover:not(:disabled) {
+  transform: translateY(-2px) !important;
+  border-color: #bcaeff !important;
+  background: linear-gradient(135deg, #5742b6, #7963e1 52%, #947fff) !important;
+  box-shadow: 0 10px 28px rgb(108 88 220 / 27%) !important;
+}
+
+/* Appointment flow: semantic colors instead of inherited generic Button colors. */
+.appointment-action--confirm,
+.appointment-action--checkin {
+  color: var(--color-text-primary) !important;
+  border-color: rgb(73 203 255 / 80%) !important;
+  background: linear-gradient(135deg, var(--shaden-action-blue-1), var(--shaden-action-blue-2) 52%, var(--shaden-action-blue-3)) !important;
+}
+.appointment-action--complete {
+  color: var(--color-text-primary) !important;
+  border-color: rgb(52 224 164 / 76%) !important;
+  background: linear-gradient(135deg, var(--shaden-action-green-1), var(--shaden-action-green-2) 52%, var(--shaden-action-green-3)) !important;
+}
+.appointment-action--confirm:hover:not(:disabled),
+.appointment-action--checkin:hover:not(:disabled) {
+  transform: translateY(-2px) !important;
+  background: linear-gradient(135deg, #0e82ba, #18ace1 52%, #2ac9f1) !important;
+  box-shadow: 0 10px 28px rgb(19 172 224 / 28%) !important;
+}
+.appointment-action--complete:hover:not(:disabled) {
+  transform: translateY(-2px) !important;
+  background: linear-gradient(135deg, #087859, #0aa775 52%, #14cc91) !important;
+  box-shadow: 0 10px 28px rgb(25 190 137 / 24%) !important;
+}
+
+/* Primary create/save buttons use one cyan-blue treatment everywhere. */
+.operational-primary,
+.patients-primary,
+.prices-page__primary,
+.service-assignments__primary,
+.master-data__primary {
+  color: #03131f !important;
+  border: 1px solid rgb(104 228 255 / 82%) !important;
+  background: linear-gradient(135deg, #42d8ec 0%, #31bfe9 47%, #6571ff 100%) !important;
+  box-shadow: 0 8px 24px rgb(42 190 231 / 20%), inset 0 1px 0 rgb(255 255 255 / 32%) !important;
+}
+.operational-primary:hover:not(:disabled),
+.patients-primary:hover:not(:disabled),
+.prices-page__primary:hover:not(:disabled),
+.service-assignments__primary:hover:not(:disabled),
+.master-data__primary:hover:not(:disabled) {
+  transform: translateY(-2px) !important;
+  filter: brightness(1.08) saturate(1.05) !important;
+  box-shadow: 0 12px 32px rgb(42 190 231 / 27%), inset 0 1px 0 rgb(255 255 255 / 42%) !important;
+}
+
+/* Price table: payment method is compact; actions get breathing room. */
+.prices-page table {
+  table-layout: fixed !important;
+  min-width: 72rem;
+}
+.prices-page th:nth-child(1) { width: 15% !important; }
+.prices-page th:nth-child(2), .prices-page__payment-column { width: 8% !important; }
+.prices-page th:nth-child(3) { width: 12% !important; }
+.prices-page th:nth-child(4) { width: 10% !important; }
+.prices-page th:nth-child(5) { width: 7% !important; }
+.prices-page th:nth-child(6) { width: 7% !important; }
+.prices-page th:nth-child(7) { width: 10% !important; }
+.prices-page th:nth-child(8) { width: 10% !important; }
+.prices-page th:nth-child(9) { width: 7% !important; }
+.prices-page th:nth-child(10), .prices-page__actions-column, .prices-page__actions { width: 14% !important; min-width: 12rem !important; }
+.prices-page__actions { align-items: center; justify-content: flex-start; flex-wrap: wrap; }
+
+/* Appointments: same principle — compact payment column, larger actions. */
+.appointments-table th:nth-child(7) { width: 10% !important; }
+.appointments-table th:nth-child(8), .appointments-table__payment { width: 6% !important; }
+.appointments-table th:nth-child(10), .appointments-table__actions { width: 18% !important; }
+.appointment-actions { flex-wrap: wrap; align-items: center; }
+
+/* Language control shows the language you can switch TO, never the current language. */
+.app-header__language-toggle {
+  display: inline-flex;
+  min-height: 2.6rem;
+  align-items: center;
+  justify-content: center;
+  gap: .5rem;
+  padding: .42rem .8rem;
+  border: 1px solid rgb(78 205 235 / 32%);
+  border-radius: .72rem;
+  color: var(--color-text-primary);
+  font: inherit;
+  font-size: .78rem;
+  font-weight: 800;
+  background: linear-gradient(180deg, rgb(12 42 65 / 88%), rgb(7 26 43 / 94%));
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 4%);
+  cursor: pointer;
+  transition: transform 150ms ease, border-color 150ms ease, background 150ms ease, box-shadow 150ms ease, color 150ms ease;
+}
+.app-header__language-toggle:hover {
+  transform: translateY(-1px);
+  border-color: rgb(87 226 246 / 68%);
+  color: var(--color-text-primary);
+  background: linear-gradient(180deg, rgb(15 70 100 / 92%), rgb(8 40 63 / 96%));
+  box-shadow: 0 8px 22px rgb(26 168 211 / 13%), inset 0 1px 0 rgb(255 255 255 / 8%);
+}
+.app-header__language-toggle:focus-visible {
+  outline: 2px solid rgb(74 222 242 / 68%);
+  outline-offset: 2px;
+}
+.app-header__language-icon {
+  width: 1rem;
+  height: 1rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+}
+
+@media (max-width: 48rem) {
+  .prices-page table { min-width: 66rem; }
+  .app-header__language-toggle { min-height: 2.35rem; padding-inline: .62rem; }
+}
