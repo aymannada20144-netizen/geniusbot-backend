@@ -214,10 +214,11 @@ describe('Shaden Phase 1.2 public runtime', () => {
 
     const identity = createSession();
     const identityReply = await identity.send('من معى');
-    assert.match(identityReply.replyText, /معك شادن/);
+    assert.match(identityReply.replyText, /أنا شادن/);
+    assert.match(identityReply.replyText, /الذكاء الاصطناعي/);
+    assert.match(identityReply.replyText, /لست موظفة بشرية/);
     assert.match(identityReply.replyText, /عيادات أوريان/);
     assert.doesNotMatch(identityReply.replyText, /Oryan Clinic/);
-    assert.match(identityReply.replyText, /ممكن أعرف اسمك/);
 
     const known = createSession({ customerName: 'نورة' });
     assert.match(

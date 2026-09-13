@@ -14,7 +14,7 @@ class AppointmentChangeNotificationProcessor {
     const claim = await this.deliveries.claim(outboxEventId);
     if (!claim) {
       const receipt = await this.deliveries.find(outboxEventId);
-      if (receipt?.status === 'sent' || receipt?.status === 'uncertain' ||
+      if (['sent', 'delivered', 'read'].includes(receipt?.status) || receipt?.status === 'uncertain' ||
           (receipt?.status === 'failed' && receipt.retryable === false)) return;
       // A concurrent sender or a retry scheduled for later still owns this event.
       throw new Error('CHANGE_NOTIFICATION_PENDING');

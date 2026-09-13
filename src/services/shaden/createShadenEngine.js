@@ -468,19 +468,6 @@ function createShadenEngine({
           notificationAttempted: notificationAttempted === true,
         };
       }
-      if (!sideQueryEligible) {
-        logger.info({
-          event: 'STATE_PERSIST_BEGIN',
-          rescheduleStep: nextState?.reschedule?.step || null,
-        });
-        await conversations.updateState(conversation.id, {
-          current: 'shaden', data: { ...nextData, shaden: nextState },
-        });
-        logger.info({
-          event: 'STATE_PERSISTED',
-          rescheduleStep: nextState?.reschedule?.step || null,
-        });
-      }
       console.log(
         `ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â°ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¸ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã¢â‚¬Å“ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¤ Sending reply to ${maskPhone(message.senderId)}: ${reply.substring(0, 50)}...`
       );
@@ -516,6 +503,16 @@ function createShadenEngine({
           } : null,
         },
       });
+      // Pending conversational transitions are committed only after Meta has
+      // accepted the prompt the patient must see to continue. Domain changes
+      // are already committed by their own transactional operation.
+      if (!sideQueryEligible) {
+        logger.info({ event: 'STATE_PERSIST_BEGIN', rescheduleStep: nextState?.reschedule?.step || null });
+        await conversations.updateState(conversation.id, {
+          current: 'shaden', data: { ...nextData, shaden: nextState },
+        });
+        logger.info({ event: 'STATE_PERSISTED', rescheduleStep: nextState?.reschedule?.step || null });
+      }
       return {
         replyText: sideQueryAnswered ? `${sideAnswer}\n\n${reply}` : reply,
         state: sideQueryEligible

@@ -50,6 +50,7 @@ const OutboxScheduler = require('./core/events/OutboxScheduler');
 const AppointmentEvents = require('./modules/appointments/AppointmentEvents');
 const AppointmentChangeDeliveryRepository = require('./repositories/AppointmentChangeDeliveryRepository');
 const AppointmentChangeNotificationProcessor = require('./services/AppointmentChangeNotificationProcessor');
+const WhatsAppStatusRouter = require('./channels/whatsapp/WhatsAppStatusRouter');
 
 const appointmentsModule = require('./modules/appointments');
 const dashboardModule = require('./modules/dashboard');
@@ -238,9 +239,14 @@ async function buildApp() {
     debouncerConstructed: true,
     debounceMs: env.whatsappMessageDebounceMs,
   });
+  const whatsappStatusRouter = new WhatsAppStatusRouter({
+    campaignService: campaigns.service,
+    appointmentChangeDeliveries: new AppointmentChangeDeliveryRepository(db),
+    logger: app.log,
+  });
   const whatsappController = new WhatsAppController(inboundConversationService, {
     verifyToken: env.whatsapp.verifyToken,
-    statusHandler: (body) => campaigns.service.handleStatusWebhook(body),
+    statusHandler: whatsappStatusRouter.handle.bind(whatsappStatusRouter),
     logger: app.log,
   });
   app.get('/api/whatsapp/webhook', whatsappController.verifyWebhook.bind(whatsappController));

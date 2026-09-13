@@ -1,5 +1,7 @@
 'use strict';
 
+const AssistantIdentityPolicy = require('./AssistantIdentityPolicy');
+
 const { normalizeArabic } = require('./ShadenArabicNormalizer');
 const { resolveBookingIntent } = require('./ShadenIntentResolver');
 const messageFormatter = require('./ShadenMessageFormatter');
@@ -58,6 +60,9 @@ const SAUDI_CITIES = Object.freeze([
 ]);
 
 class ShadenPolicy {
+  constructor({ assistantIdentityPolicy = new AssistantIdentityPolicy() } = {}) {
+    this.assistantIdentityPolicy = assistantIdentityPolicy;
+  }
   initialState() {
     return {
       version: 1,
@@ -247,7 +252,7 @@ class ShadenPolicy {
   combinedGreeting(customerName) { return customerName ? `أهلًا وسهلًا يا ${customerName} 🌸 الحمد لله بخير.\nكيف أقدر أساعدكِ؟` : 'أهلًا وسهلًا 🌸 الحمد لله بخير.\nممكن أعرف اسمكِ؟'; }
   nameCaptured(name) { return `أهلًا بيكِ يا ${name}، نورتينا 🌸\nكيف أقدر أساعدكِ؟`; }
   presence(customerName, assistantIdentity) { const identity = assistantIdentityText(assistantIdentity); return customerName ? `نعم معاكِ يا ${customerName} 🌸\nكيف أقدر أساعدكِ؟` : `نعم معاكِ ${identity.name} 🌸\nكيف أقدر أساعدكِ؟`; }
-  identity(clinicName, customerName, assistantIdentity) { const identity = assistantIdentityText(assistantIdentity); return customerName ? `معك ${identity.name} يا ${customerName}، ${identity.role} في ${clinicName} 🌸` : `معك ${identity.name}، ${identity.role} في ${clinicName} 🌸\nممكن أعرف اسمكِ؟`; }
+  identity(clinicName, customerName, assistantIdentity) { return this.assistantIdentityPolicy.describe({ clinicName, customerName, assistantIdentity }); }
   howAreYou(customerName) { return `الحمد لله بخير${customerName ? ` يا ${customerName}` : ''}، شكرًا لسؤالكِ 🌸\nكيف أقدر أساعدكِ؟`; }
   courtesy(kind, customerName) { const name = customerName ? ` يا ${customerName}` : ''; return { wellbeing: `الله يعافيكِ${name}، تحت أمركِ ✨`, affection: `حبيبتي${name}، هذا واجبي 🌸`, praise: `تسلمي${name}، نورتينا 🌸` }[kind] || `العفو${name}، تحت أمركِ دائمًا 🌸`; }
   acknowledgement(customerName) { return customerName ? `تمام يا ${customerName} 🌸` : 'تمام 🌸'; }
@@ -445,7 +450,8 @@ class ShadenPolicy {
       lines.push(`الغرفة: ${this.display(appointment.room_number || appointment.room_name || 'غير محددة')} ← ${this.display(assignment.room_number || assignment.room_name || 'غير محددة')}`);
     }
     if (appointment.quoted_price != null && String(appointment.quoted_price) !== String(price.price)) {
-      lines.push(`السعر: ${appointment.quoted_price} ${appointment.currency || 'SAR'} ← ${price.price} ${price.currency}`);
+      lines.push(`السعر السابق: ${appointment.quoted_price} ${appointment.currency || 'SAR'}`);
+      lines.push(`السعر الجديد: ${price.price} ${price.currency}`);
     }
     lines.push('', 'تأكيد تغيير الخدمة؟ 🌸');
     return lines.join('\n');
@@ -493,7 +499,8 @@ class ShadenPolicy {
       lines.push(`الغرفة: ${this.display(appointment.room_number || appointment.room_name || 'غير محددة')} ← ${this.display(assignment.room_number || assignment.room_name || 'غير محددة')}`);
     }
     if (appointment.quoted_price != null && String(appointment.quoted_price) !== String(price.price)) {
-      lines.push(`السعر: ${appointment.quoted_price} ${appointment.currency || 'SAR'} ← ${price.price} ${price.currency}`);
+      lines.push(`السعر السابق: ${appointment.quoted_price} ${appointment.currency || 'SAR'}`);
+      lines.push(`السعر الجديد: ${price.price} ${price.currency}`);
     }
     lines.push('', 'تأكيد تغيير الفرع؟ 🌸');
     return lines.join('\n');
@@ -571,7 +578,19 @@ class ShadenPolicy {
 }
 
 function recognizeGreeting(text) { const how = isHowAreYou(text); if (/^(?:هاي|هلا|اهلا|مرحبا)(?: والله)?(?: كيفك)?$/.test(text)) return { type: how ? 'combined_greeting' : 'greeting', kind: 'casual' }; if (/^(?:السلام عليكم|السلام)$/.test(text)) return { type: 'greeting', kind: 'salam' }; if (/^(?:صباح الخير|صباح النور|يسعد صباحك)$/.test(text)) return { type: 'greeting', kind: 'morning' }; if (/^(?:مساء الخير|مساء النور|يسعد مساك)$/.test(text)) return { type: 'greeting', kind: 'evening' }; return null; }
-function isIdentity(text) { return /^(?:من معي|من معاي|مين معي|مين معاي|ما اسمك|اسمك ايه|من انتي|من انت|مين انت|ما اسم العياده|اسم العياده)$/.test(text); }
+function isIdentity(text) {
+  // Intent routing only; the answer itself comes exclusively from
+  // AssistantIdentityPolicy. Keep this compact normalizer boundary rather than
+  // encoding factual claims in recognition rules.
+  const words = new Set(String(text || '').toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, ' ').split(/\s+/u).filter(Boolean));
+  const asksIdentity = words.has('human') || words.has('bot') || words.has('ai') ||
+    words.has('بشرية') || words.has('بشريه') || words.has('بشر') || words.has('انسانة') || words.has('إنسانة') ||
+    words.has('موظفة') || words.has('موظفه') || words.has('موظف') || words.has('حقيقية') || words.has('حقيقيه') ||
+    (words.has('من') && (words.has('معي') || words.has('معاك') || words.has('انتي') || words.has('انت'))) ||
+    (words.has('are') && words.has('you'));
+  return asksIdentity;
+}
 function assistantIdentityText(value) {
   const gender = value?.gender === 'male' ? 'male' : 'female';
   return {

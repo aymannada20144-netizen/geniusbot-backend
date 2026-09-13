@@ -14,7 +14,7 @@ function harness() {
   const h = { state: { version: 1, mode: 'idle', step: null, customer: { name: 'نورة' }, context: null, options: [] },
     writes: 0, committed: false, conversationCalls: 0, bridgeCalls: 0, groundings: [], routes: [], replies: [],
     operation: 'change_service_request', goal: 'ACT', decision: 'RESOLVED', failWrite: false, needsSlot: false,
-    failBridge: false, failGrounding: false };
+    failBridge: false, failGrounding: false, failSend: false };
   const appointment = { id: id(3), clinic_id: id(1), patient_id: id(2), service_id: id(4),
     branch_id: id(7), booking_reference: 'ABC12345', status: 'confirmed',
     service_name: 'ليزر', branch_name: 'الروضة', updated_at: '2026-08-13T08:00:00.000Z',
@@ -87,7 +87,11 @@ function harness() {
     } },
     semanticCandidateResolver: { async resolve() { return { decision: h.decision, candidateIndex: 0 }; } },
     logger: { info(entry) { if (entry.event === 'SHADEN_CONVERSATION_ROUTE') h.routes.push(entry); }, warn() {} },
-    async sendMessage({ body, interaction }) { h.replies.push({ body, interaction, committed: h.committed }); return { messageId: 'sent' }; },
+    async sendMessage({ body, interaction }) {
+      h.replies.push({ body, interaction, committed: h.committed });
+      if (h.failSend) throw Object.assign(new Error('Meta unavailable'), { code: 'META_UNAVAILABLE' });
+      return { messageId: 'sent' };
+    },
   });
   h.send = async (text, goal = 'ACT', input = {}) => {
     h.text = text; h.goal = goal;
@@ -116,6 +120,18 @@ test('pending service resolution uses eligible services, confirmation commits on
   assert.equal(h.writes, 1); assert.equal(h.replies.at(-1).committed, true);
   assert.ok(h.replies.at(-1).body.includes('تم تغيير')); assert.equal(h.conversationCalls, 0);
   await h.send('نعم', 'SOCIAL'); assert.equal(h.writes, 1);
+});
+test('interactive change-service state advances only after Meta accepts its prompt', async () => {
+  const h = harness();
+  h.failSend = true;
+  await assert.rejects(() => h.send('تغيير خدمة'), /Meta unavailable/);
+  assert.equal(h.state.changeService, undefined);
+  assert.equal(h.writes, 0);
+
+  h.failSend = false;
+  await h.send('تغيير خدمة');
+  assert.equal(h.state.changeService.step, 'awaiting_service');
+  assert.equal(h.writes, 0);
 });
 test('ambiguous, not-found and resolver failure stay in operational selection', async () => {
   for (const decision of ['AMBIGUOUS', 'NOT_FOUND', 'FAILURE']) {

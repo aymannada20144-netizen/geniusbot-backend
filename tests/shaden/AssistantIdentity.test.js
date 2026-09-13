@@ -5,14 +5,22 @@ const assert = require('node:assert/strict');
 const ShadenEngine = require('../../src/services/shaden/ShadenEngine');
 const AssistantIdentityService = require('../../src/modules/assistant-identity/AssistantIdentityService');
 
-test('renders female and male assistant identities without changing customer address', () => {
+test('identity policy is explicit that the assistant is AI and not human', () => {
   const engine = new ShadenEngine();
   const base = { clinic: { name: 'عيادات أوريان' } };
-  const female = engine.handle({ message: { text: 'من معي' }, clinicData: { ...base, assistantIdentity: { name: 'مروة', gender: 'female' } } });
-  const male = engine.handle({ message: { text: 'من معي' }, clinicData: { ...base, assistantIdentity: { name: 'خالد', gender: 'male' } } });
-  assert.match(female.reply, /معك مروة، موظفة الاستقبال الذكية/);
-  assert.match(male.reply, /معك خالد، موظف الاستقبال الذكي/);
-  assert.match(male.reply, /اسمكِ/);
+  for (const text of ['من معي؟', 'هل أنت بشرية؟', 'انتي موظفة حقيقية؟', 'are you human?']) {
+    const result = engine.handle({ message: { text }, clinicData: { ...base, assistantIdentity: { name: 'مروة', gender: 'female' } } });
+    assert.match(result.reply, /مروة/);
+    assert.match(result.reply, /الذكاء الاصطناعي/);
+    assert.match(result.reply, /لست موظفة بشرية/);
+  }
+});
+
+test('ordinary greeting remains natural and does not turn into identity disclosure', () => {
+  const engine = new ShadenEngine();
+  const result = engine.handle({ message: { text: 'هلا' }, clinicData: { clinic: { name: 'عيادات أوريان' }, assistantIdentity: { name: 'مروة', gender: 'female' } } });
+  assert.match(result.reply, /أهلًا/);
+  assert.doesNotMatch(result.reply, /لست موظفة بشرية/);
 });
 
 test('validates names, gender, and unknown fields', async () => {

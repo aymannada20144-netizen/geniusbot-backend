@@ -173,19 +173,7 @@ class CampaignService {
     let updated = 0;
     for (const item of statuses) {
       if (!item?.id || !item?.status) continue;
-      const occurredAt = item.timestamp
-        ? new Date(Number(item.timestamp) * 1000)
-        : new Date();
-      const firstError = Array.isArray(item.errors) ? item.errors[0] : null;
-      const result = await this.repository.updateDeliveryStatus(
-        item.id,
-        item.status,
-        occurredAt,
-        firstError ? {
-          code: firstError.code ? String(firstError.code) : null,
-          message: firstError.title || firstError.message || firstError.error_data?.details || null,
-        } : null
-      );
+      const result = await this.handleOwnedStatus(item, item.timestamp ? new Date(Number(item.timestamp) * 1000) : new Date());
       if (result) {
         updated += 1;
         this.#logStatusWebhook({
@@ -210,6 +198,15 @@ class CampaignService {
       updatedRecipientCount: updated,
     });
     return updated;
+  }
+
+  async handleOwnedStatus(item, occurredAt = new Date()) {
+    const firstError = Array.isArray(item?.errors) ? item.errors[0] : null;
+    return this.repository.updateDeliveryStatus(item.id, item.status, occurredAt,
+      firstError ? {
+        code: firstError.code ? String(firstError.code) : null,
+        message: firstError.title || firstError.message || firstError.error_data?.details || null,
+      } : null);
   }
 
   #logStatusWebhook(entry) {
