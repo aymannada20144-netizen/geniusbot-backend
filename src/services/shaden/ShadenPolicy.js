@@ -435,31 +435,12 @@ class ShadenPolicy {
   changeServiceInvalidTime() { return 'الوقت غير متاح. اختر من القائمة الحالية. 🌸'; }
   changeServiceSlotUnavailable() { return 'الوقت المختار لم يعد متاحًا. اختر وقتًا آخر. 🌸'; }
   changeServiceReview({ appointment, service, assignment, price, appointmentStart }) {
-    const lines = [
-      `رقم الحجز: ${this.display(appointment.booking_reference || 'غير متوفر')}`,
-      '', `الخدمة السابقة: ${this.display(appointment.service_name || 'الخدمة الحالية')}`,
-      `الخدمة الجديدة: ${this.display(service.name)}`,
-      `الفرع: ${this.display(appointment.branch_name || 'الفرع الحالي')}`,
-      `الموعد السابق: ${formatRescheduleDate(appointment.appointment_start)} — ${formatRescheduleTime(appointment.appointment_start)}`,
-      `الموعد النهائي: ${formatRescheduleDate(appointmentStart)} — ${formatRescheduleTime(appointmentStart)}`,
-    ];
-    if ((appointment.doctor_id || null) !== (assignment.doctor_id || null)) {
-      lines.push(`مقدم الخدمة: ${this.display(appointment.doctor_name || 'غير محدد')} ← ${this.display(assignment.doctor_name || 'غير محدد')}`);
-    }
-    if ((appointment.room_id || null) !== (assignment.room_id || null)) {
-      lines.push(`الغرفة: ${this.display(appointment.room_number || appointment.room_name || 'غير محددة')} ← ${this.display(assignment.room_number || assignment.room_name || 'غير محددة')}`);
-    }
-    if (appointment.quoted_price != null && String(appointment.quoted_price) !== String(price.price)) {
-      lines.push(`السعر السابق: ${appointment.quoted_price} ${appointment.currency || 'SAR'}`);
-      lines.push(`السعر الجديد: ${price.price} ${price.currency}`);
-    }
-    lines.push('', 'تأكيد تغيير الخدمة؟ 🌸');
-    return lines.join('\n');
+    return messageFormatter.formatAppointmentChangeReview({ operation: 'change_service', appointment, target: service, assignment, price, appointmentStart });
   }
   changeServiceAskConfirmation() { return 'يرجى تأكيد تغيير الخدمة أو الاحتفاظ بالخدمة الحالية. 🌸'; }
   changeServiceDeclined() { return 'تم الاحتفاظ بالخدمة الحالية دون تغيير. 🌸'; }
   changeServiceUnavailable() { return 'تعذر تغيير الخدمة لهذا الموعد حاليًا. لم يتم إجراء أي تغيير. 🌸'; }
-  changeServiceSuccessful(reference) { return `تم تغيير خدمة الموعد بنجاح. رقم الحجز: ${this.display(reference || 'غير متوفر')} 🌸`; }
+  changeServiceSuccessful(appointment) { return messageFormatter.formatAppointmentChangeSuccess({ operation: 'change_service', appointment }); }
   changeBranchAskBookingReference() { return 'للمتابعة، أرسل رقم الحجز المكوّن من 8 أحرف وأرقام. 🌸'; }
   changeBranchAskRegisteredMobile() { return 'للمتابعة، أرسل رقم الجوال الكامل المسجل لدى العيادة. 🌸'; }
   changeBranchVerificationFailed() { return 'تعذر التحقق من بيانات الحجز. تحقق من البيانات وحاول مرة أخرى. 🌸'; }
@@ -484,31 +465,12 @@ class ShadenPolicy {
   changeBranchInvalidTime() { return 'الوقت غير متاح. اختر من القائمة الحالية. 🌸'; }
   changeBranchSlotUnavailable() { return 'الوقت المختار لم يعد متاحًا. اختر وقتًا آخر. 🌸'; }
   changeBranchReview({ appointment, branch, assignment, price, appointmentStart }) {
-    const lines = [
-      `رقم الحجز: ${this.display(appointment.booking_reference || 'غير متوفر')}`,
-      '', `الفرع السابق: ${this.display(appointment.branch_name || 'الفرع الحالي')}`,
-      `الفرع الجديد: ${this.display(branch.name)}`,
-      `الخدمة: ${this.display(appointment.service_name || 'الخدمة الحالية')}`,
-      `الموعد السابق: ${formatRescheduleDate(appointment.appointment_start)} — ${formatRescheduleTime(appointment.appointment_start)}`,
-      `الموعد النهائي: ${formatRescheduleDate(appointmentStart)} — ${formatRescheduleTime(appointmentStart)}`,
-    ];
-    if ((appointment.doctor_id || null) !== (assignment.doctor_id || null)) {
-      lines.push(`مقدم الخدمة: ${this.display(appointment.doctor_name || 'غير محدد')} ← ${this.display(assignment.doctor_name || 'غير محدد')}`);
-    }
-    if ((appointment.room_id || null) !== (assignment.room_id || null)) {
-      lines.push(`الغرفة: ${this.display(appointment.room_number || appointment.room_name || 'غير محددة')} ← ${this.display(assignment.room_number || assignment.room_name || 'غير محددة')}`);
-    }
-    if (appointment.quoted_price != null && String(appointment.quoted_price) !== String(price.price)) {
-      lines.push(`السعر السابق: ${appointment.quoted_price} ${appointment.currency || 'SAR'}`);
-      lines.push(`السعر الجديد: ${price.price} ${price.currency}`);
-    }
-    lines.push('', 'تأكيد تغيير الفرع؟ 🌸');
-    return lines.join('\n');
+    return messageFormatter.formatAppointmentChangeReview({ operation: 'change_branch', appointment, target: branch, assignment, price, appointmentStart });
   }
   changeBranchAskConfirmation() { return 'يرجى تأكيد تغيير الفرع أو الاحتفاظ بالفرع الحالي. 🌸'; }
   changeBranchDeclined() { return 'تم الاحتفاظ بالفرع الحالي دون تغيير. 🌸'; }
   changeBranchUnavailable() { return 'تعذر تغيير الفرع لهذا الموعد حاليًا. لم يتم إجراء أي تغيير. 🌸'; }
-  changeBranchSuccessful(reference) { return `تم تغيير فرع الموعد بنجاح. رقم الحجز: ${this.display(reference || 'غير متوفر')} 🌸`; }
+  changeBranchSuccessful(appointment) { return messageFormatter.formatAppointmentChangeSuccess({ operation: 'change_branch', appointment }); }
   changeBranchUnsupported() {
     return 'فهمت أنك ترغب في تغيير الفرع لموعد قائم. هذه العملية غير متاحة عبر شادن حاليًا. 🌸';
   }

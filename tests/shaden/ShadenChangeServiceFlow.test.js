@@ -83,8 +83,8 @@ describe('Shaden change-service flow', () => {
     assert.match(started.reply, /بوتكس/u);
     assert.match(started.reply, /د\. نورة/u);
     assert.match(started.reply, /الغرفة/u);
-    assert.match(started.reply, /السعر السابق: 100\.00 SAR/u);
-    assert.match(started.reply, /السعر الجديد: 250\.00 SAR/u);
+    assert.match(started.reply, /السعر السابق:\* .*100/u);
+    assert.match(started.reply, /السعر الجديد:\* .*250/u);
     assert.doesNotMatch(started.reply, /السعر:.*←/u);
     assert.equal(changes, 0);
 

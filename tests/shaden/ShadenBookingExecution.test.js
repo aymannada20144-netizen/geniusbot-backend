@@ -400,7 +400,7 @@ describe('Shaden confirmed booking execution', () => {
       { id: 'booking-confirm:yes', label: 'تأكيد الحجز' },
       { id: 'booking-confirm:cancel', label: 'إلغاء' },
     ]);
-    assert.match(result.reply, /\*الخدمة\*[\s\S]+\*الفرع\*[\s\S]+\*التاريخ\*[\s\S]+\*الوقت\*[\s\S]+\*طريقة الدفع\*/u);
+    assert.match(result.reply, /\*الخدمة:\*[\s\S]+\*الفرع:\*[\s\S]+\*التاريخ:\*[\s\S]+\*الوقت:\*[\s\S]+\*طريقة الدفع:\*/u);
     assert.doesNotMatch(result.reply, /null|undefined/u);
   });
 

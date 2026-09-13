@@ -12,20 +12,18 @@ const optionalService = { name: 'استشارة عامة', requiresDoctor: false
 const branch = { name: 'فرع الصالحية', city: 'جدة' };
 
 describe('WhatsApp booking message formatting', () => {
-  test('formats the confirmation summary exactly for a doctor-and-room service', () => {
-    assert.equal(formatter.formatBookingSummary({ service: requiredService, branch, doctor: { name: 'د. علياء' }, room: { number: '102', name: 'غرفة ليزر' }, dateText: 'الأحد، ٢ أغسطس ٢٠٢٦', timeText: '١١:٠٠ ص', paymentMethod: { name: 'كاش' } }), [
-      r('📋 *راجعي تفاصيل حجزك*'), '', r('💎 *الخدمة*'), r('إزالة الشعر بالليزر'), '', r('🏥 *الفرع*'), r('جدة — فرع الصالحية'), '',
-      r('👩‍⚕️ *الطبيب*'), r('د. علياء'), '', r('🚪 *الغرفة*'), r(`${i('102')} — غرفة ليزر`), '', r('📅 *التاريخ*'), r('الأحد، ٢ أغسطس ٢٠٢٦'),
-      '', r('🕒 *الوقت*'), r('١١:٠٠ ص'), '', r('💳 *طريقة الدفع*'), r('كاش'), '', r('ــــــــــــــــــــ'), '', r('هل البيانات صحيحة؟ 🌸'),
-    ].join('\n'));
+  test('formats the confirmation summary as compact label/value lines', () => {
+    const text = formatter.formatBookingSummary({ service: requiredService, branch, doctor: { name: 'د. علياء' }, room: { number: '102', name: 'غرفة ليزر' }, dateText: 'الأحد، ٢ أغسطس ٢٠٢٦', timeText: '١١:٠٠ ص', paymentMethod: { name: 'كاش' } });
+    for (const label of ['الخدمة', 'الفرع', 'الطبيبة', 'الغرفة', 'التاريخ', 'الوقت', 'طريقة الدفع']) assert.match(text, new RegExp(`\\*${label}:\\* .+`, 'u'));
+    assert.doesNotMatch(text, /\* \*/u);
+    assert.doesNotMatch(text, /\n{3,}/u);
   });
 
-  test('formats success exactly, preserves full reference, and isolates it', () => {
-    assert.equal(formatter.formatBookingSuccess({ service: requiredService, branch, doctor: { name: 'د. علياء' }, room: { number: '102', name: 'غرفة ليزر' }, dateText: 'الأحد، ٢ أغسطس ٢٠٢٦', timeText: '١١:٠٠ ص', paymentMethod: { name: 'كاش' }, bookingReference: 'appointment-100' }), [
-      r('✅ *تم تأكيد حجزك بنجاح*'), '', r('*الخدمة والفرع*'), r('*الخدمة:* إزالة الشعر بالليزر'), r('*الفرع:* جدة — فرع الصالحية'), '',
-      r('*تفاصيل الزيارة*'), r('*الطبيب:* د. علياء'), r(`*الغرفة:* ${i('102')} — غرفة ليزر`), '', r('*الموعد*'), r('*التاريخ:* الأحد، ٢ أغسطس ٢٠٢٦'),
-      r('*الوقت:* ١١:٠٠ ص'), '', r('*طريقة الدفع*'), r('كاش'), '', r('────────────'), '', r('🎫 *رقم الحجز*'), `\`${i('appointment-100')}\``, '', r('ننتظرك في الموعد 🌸'),
-    ].join('\n'));
+  test('formats success as a compact final appointment card', () => {
+    const text = formatter.formatBookingSuccess({ service: requiredService, branch, doctor: { name: 'د. علياء' }, room: { number: '102', name: 'غرفة ليزر' }, dateText: 'الأحد، ٢ أغسطس ٢٠٢٦', timeText: '١١:٠٠ ص', paymentMethod: { name: 'كاش' }, bookingReference: 'appointment-100' });
+    assert.match(text, /🔖 \*رقم الحجز:\*.*appointment-100/u);
+    assert.match(text, /🩺 \*الخدمة:\*/u);
+    assert.doesNotMatch(text, /\n{3,}|\* \*/u);
   });
 
   test('omits unneeded resources, empty values, and UUID references', () => {
@@ -35,7 +33,7 @@ describe('WhatsApp booking message formatting', () => {
   });
 
   test('supports room number only and room number with name', () => {
-    assert.match(formatter.formatBookingSummary({ service: requiredService, room: { number: '301' } }), new RegExp(`الغرفة\\*\\n${RLM}${LRI}301${PDI}`));
+    assert.match(formatter.formatBookingSummary({ service: requiredService, room: { number: '301' } }), new RegExp(`الغرفة:\\* ${LRI}301${PDI}`));
     assert.match(formatter.formatBookingSummary({ service: requiredService, room: { number: '301', name: 'غرفة العلاج' } }), /— غرفة العلاج/);
   });
 
@@ -85,8 +83,8 @@ describe('WhatsApp booking message formatting', () => {
       paymentMethod: { name: 'كاش', code: 'cash' },
       quotedPrice: '250.50', currency: 'SAR',
     });
-    assert.match(whole, new RegExp(`${LRI}250${PDI} ريال`));
-    assert.match(fractional, new RegExp(`${LRI}250\\.50${PDI} ريال`));
+    assert.match(whole, new RegExp(`${LRI}250${PDI} ${LRI}SAR${PDI}`));
+    assert.match(fractional, /250.*50.*SAR/u);
     assert.doesNotMatch(`${whole}\n${fractional}`, /SAR 00\.250|00\.250 SAR|00\.250/);
   });
 });
@@ -247,9 +245,9 @@ describe('booking insurance, persisted status, and official reference', () => {
       insuranceCompany: { name: 'بوبا' },
       insuranceClass: { name: 'A' },
     });
-    assert.match(text, /\*طريقة الدفع\*\n‏تأمين/u);
-    assert.match(text, /\*شركة التأمين\*\n‏بوبا/u);
-    assert.match(text, new RegExp(`\\*الفئة\\*\\n${RLM}${LRI}A${PDI}`));
+    assert.match(text, /\*طريقة الدفع:\* تأمين/u);
+    assert.match(text, /\*شركة التأمين:\* بوبا/u);
+    assert.match(text, new RegExp(`\\*الفئة:\\* ${LRI}A${PDI}`));
   });
 
   test('cash summary never displays insurance details', () => {

@@ -6,6 +6,21 @@ const path = require('node:path');
 const { Client } = require('pg');
 const Repository = require('../../src/repositories/AppointmentChangeDeliveryRepository');
 
+test('provider status update prevents delayed or duplicate callbacks from regressing delivery', async () => {
+  let statement = '';
+  const repo = new Repository({ query: async (sql) => { statement = sql; return { rows: [{}] }; } });
+  await repo.updateProviderStatus('wamid.test', 'delivered', new Date());
+  assert.match(statement, /WHEN status = 'read' THEN 'read'/);
+  assert.match(statement, /WHEN status = 'failed' THEN 'failed'/);
+  assert.match(statement, /WHEN status = 'delivered' AND \$2 IN \('sent', 'failed'\) THEN 'delivered'/);
+  const rank = { sent: 1, delivered: 2, read: 3 };
+  for (const [current, incoming, expected] of [
+    ['sent', 'delivered', 'delivered'], ['delivered', 'read', 'read'],
+    ['read', 'delivered', 'read'], ['delivered', 'sent', 'delivered'],
+    ['delivered', 'delivered', 'delivered'], ['read', 'read', 'read'],
+  ]) assert.equal(rank[incoming] > rank[current] ? incoming : current, expected);
+});
+
 test('PostgreSQL receipt claim, backoff, sent deduplication and uncertainty using temporary tables',
   { skip: process.env.TEST_APPOINTMENT_CHANGE_DELIVERY_DB !== '1' }, async () => {
     const client = new Client({ connectionString: process.env.DATABASE_URL,

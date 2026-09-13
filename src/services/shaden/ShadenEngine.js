@@ -860,9 +860,10 @@ async function handleChangeBranch({
           source: 'shaden', conversationId,
         }, flow.reviewedUpdatedAt
       );
+      const presentation = changePresentation(result, flow.presentation);
       clearChangeBranchState(state);
       return {
-        reply: policy.changeBranchSuccessful(result.booking_reference),
+        reply: policy.changeBranchSuccessful(presentation),
         lifecycleTerminalReason: 'completed',
       };
     } catch {
@@ -1025,6 +1026,14 @@ function prepareChangeBranchReview(proposal, flow, policy) {
   flow.reviewedUpdatedAt = new Date(proposal.appointment.updated_at).toISOString();
   flow.step = 'awaiting_confirmation';
   flow.confirmationPending = true;
+  flow.presentation = changePresentation(proposal.appointment, {
+    booking_reference: proposal.appointment.booking_reference,
+    service_name: proposal.appointment.service_name,
+    branch_name: proposal.branch?.name || proposal.appointment.branch_name,
+    doctor_name: proposal.assignment?.doctor_name || proposal.appointment.doctor_name,
+    room_number: proposal.assignment?.room_number || proposal.assignment?.room_name || proposal.appointment.room_number || proposal.appointment.room_name,
+    appointment_start: proposal.appointmentStart,
+  });
   const review = policy.changeBranchReview(proposal);
   return {
     reply: review,
@@ -1217,9 +1226,10 @@ async function handleChangeService({
           source: 'shaden', conversationId,
         }, flow.reviewedUpdatedAt
       );
+      const presentation = changePresentation(result, flow.presentation);
       clearChangeServiceState(state);
       return {
-        reply: policy.changeServiceSuccessful(result.booking_reference),
+        reply: policy.changeServiceSuccessful(presentation),
         lifecycleTerminalReason: 'completed',
       };
     } catch {
@@ -1388,6 +1398,14 @@ function prepareChangeServiceReview(proposal, flow, state, policy) {
   flow.reviewedUpdatedAt = new Date(proposal.appointment.updated_at).toISOString();
   flow.step = 'awaiting_confirmation';
   flow.confirmationPending = true;
+  flow.presentation = changePresentation(proposal.appointment, {
+    booking_reference: proposal.appointment.booking_reference,
+    service_name: proposal.service?.name || proposal.appointment.service_name,
+    branch_name: proposal.appointment.branch_name,
+    doctor_name: proposal.assignment?.doctor_name || proposal.appointment.doctor_name,
+    room_number: proposal.assignment?.room_number || proposal.assignment?.room_name || proposal.appointment.room_number || proposal.appointment.room_name,
+    appointment_start: proposal.appointmentStart,
+  });
   return {
     reply: policy.changeServiceReview(proposal),
     interaction: {
@@ -3197,6 +3215,23 @@ function normalizeFlowReply(result, nextState, owner) {
   return normalized;
 }
 
+function changePresentation(result, fallback = {}) {
+  const source = { ...fallback, ...(result && typeof result === 'object' ? result : {}) };
+  return Object.fromEntries([
+    'booking_reference', 'service_name', 'branch_name', 'doctor_name',
+    'room_number', 'room_name', 'appointment_start',
+  ].map((key) => [key, source[key] == null ? null : String(source[key])])
+    .map(([key, value]) => [key, key === 'booking_reference' && !value ? null : value]));
+}
+
+function isChangePresentation(value) {
+  if (value === null) return true;
+  if (!isPlainObject(value)) return false;
+  const allowed = new Set(['booking_reference', 'service_name', 'branch_name', 'doctor_name', 'room_number', 'room_name', 'appointment_start']);
+  return Object.keys(value).every((key) => allowed.has(key)) &&
+    Object.values(value).every((item) => item === null || typeof item === 'string');
+}
+
 function normalizeBookingFlowReply(result, nextState, bookingBeforeTurn) {
   const normalized = normalizeFlowReply(result, nextState, 'booking');
   const declaredDisposition = operationalDispositionFrom(normalized);
@@ -4649,7 +4684,7 @@ const CHANGE_SERVICE_FIELDS = Object.freeze([
   'intent', 'step', 'candidateAppointmentIds', 'selectedAppointmentId',
   'bookingReference', 'verificationRequired', 'ownershipVerified',
   'verificationAttempts', 'targetServiceId', 'availableDates', 'availableTimes',
-  'proposedDate', 'proposedStart', 'reviewedUpdatedAt', 'confirmationPending',
+  'proposedDate', 'proposedStart', 'reviewedUpdatedAt', 'confirmationPending', 'presentation',
 ]);
 function createChangeServiceState({
   verificationRequired = false, targetServiceId = null,
@@ -4662,7 +4697,7 @@ function createChangeServiceState({
     ownershipVerified: false, verificationAttempts: 0,
     targetServiceId: isUuid(targetServiceId) ? targetServiceId : null,
     availableDates: [], availableTimes: [], proposedDate: null,
-    proposedStart: null, reviewedUpdatedAt: null, confirmationPending: false,
+    proposedStart: null, reviewedUpdatedAt: null, confirmationPending: false, presentation: null,
   };
 }
 function normalizeChangeServiceState(value) {
@@ -4684,7 +4719,7 @@ function normalizeChangeServiceState(value) {
       !(value.proposedDate === null || isIsoDate(value.proposedDate)) ||
       !(value.proposedStart === null || Number.isFinite(Date.parse(value.proposedStart))) ||
       !(value.reviewedUpdatedAt === null || Number.isFinite(Date.parse(value.reviewedUpdatedAt))) ||
-      typeof value.confirmationPending !== 'boolean') return null;
+      typeof value.confirmationPending !== 'boolean' || !isChangePresentation(value.presentation)) return null;
   return structuredClone(value);
 }
 function clearChangeServiceState(state) {
@@ -4704,7 +4739,7 @@ const CHANGE_BRANCH_FIELDS = Object.freeze([
   'intent', 'step', 'candidateAppointmentIds', 'selectedAppointmentId',
   'bookingReference', 'verificationRequired', 'ownershipVerified',
   'verificationAttempts', 'targetBranchId', 'availableDates', 'availableTimes',
-  'proposedDate', 'proposedStart', 'reviewedUpdatedAt', 'confirmationPending',
+  'proposedDate', 'proposedStart', 'reviewedUpdatedAt', 'confirmationPending', 'presentation',
 ]);
 function createChangeBranchState({ verificationRequired = false, targetBranchId = null } = {}) {
   return {
@@ -4715,7 +4750,7 @@ function createChangeBranchState({ verificationRequired = false, targetBranchId 
     ownershipVerified: false, verificationAttempts: 0,
     targetBranchId: isUuid(targetBranchId) ? targetBranchId : null,
     availableDates: [], availableTimes: [], proposedDate: null,
-    proposedStart: null, reviewedUpdatedAt: null, confirmationPending: false,
+    proposedStart: null, reviewedUpdatedAt: null, confirmationPending: false, presentation: null,
   };
 }
 function normalizeChangeBranchState(value) {
@@ -4732,7 +4767,7 @@ function normalizeChangeBranchState(value) {
       !(value.proposedDate === null || isIsoDate(value.proposedDate)) ||
       !(value.proposedStart === null || Number.isFinite(Date.parse(value.proposedStart))) ||
       !(value.reviewedUpdatedAt === null || Number.isFinite(Date.parse(value.reviewedUpdatedAt))) ||
-      typeof value.confirmationPending !== 'boolean') return null;
+      typeof value.confirmationPending !== 'boolean' || !isChangePresentation(value.presentation)) return null;
   return structuredClone(value);
 }
 function clearChangeBranchState(state) {

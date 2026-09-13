@@ -141,23 +141,14 @@ function formatSimpleList({ icon, title, items, selection, question, footer }) {
 }
 
 function formatBookingSummary(input = {}) {
-  const sections = [];
-  addReviewSection(sections, '💎', 'الخدمة', input.service?.name);
-  addReviewSection(sections, '🏥', 'الفرع', branchWithCity(input.branch));
-  if (input.service?.requiresDoctor === true) {
-    addReviewSection(sections, '👩‍⚕️', 'الطبيب', personName(input.doctor));
-  }
-  if (input.service?.requiresRoom === true) {
-    addReviewSection(sections, '🚪', 'الغرفة', roomLabel(input.room));
-  }
-  addReviewSection(sections, '📅', 'التاريخ', input.dateText);
-  addReviewSection(sections, '🕒', 'الوقت', input.timeText);
-  addReviewSection(sections, '💳', 'طريقة الدفع', input.paymentMethod?.name);
+  const lines = [rtl('📋 *راجعي تفاصيل حجزك*'), ''];
+  lines.push(...appointmentFields(input, { includePayment: true }));
   if (isInsurancePayment(input.paymentMethod)) {
-    addReviewSection(sections, '🏢', 'شركة التأمين', input.insuranceCompany?.name);
-    addReviewSection(sections, '🎫', 'الفئة', input.insuranceClass?.name);
+    pushLine(lines, '🏢', 'شركة التأمين', input.insuranceCompany?.name);
+    pushLine(lines, '🎫', 'الفئة', input.insuranceClass?.name);
   }
-  return [rtl('📋 *راجعي تفاصيل حجزك*'), '', ...joinSections(sections), '', rtl(DIVIDER), '', rtl('هل البيانات صحيحة؟ 🌸')].join('\n');
+  lines.push('', rtl('هل البيانات صحيحة؟ 🌸'));
+  return compactLines(lines).join('\n');
 }
 
 function formatBookingSuccess(input = {}) {
@@ -170,21 +161,56 @@ function formatBookingSuccess(input = {}) {
     ].join('\n');
   }
 
-  const sections = [];
-  addSection(sections, null, [
-    field('الاسم', input.customerName),
-  ]);
-  addSection(sections, 'الخدمة والفرع', [field('الخدمة', input.service?.name), field('الفرع', branchWithCity(input.branch))]);
-  addSection(sections, 'تفاصيل الزيارة', resourceFields(input, true));
-  addSection(sections, 'الموعد', [field('التاريخ', input.dateText), field('الوقت', input.timeText)]);
-  addSection(sections, 'طريقة الدفع', paymentFields(input, true));
-  const title = '✅ *تم تأكيد حجزك بنجاح*';
-  const ending = 'ننتظرك في الموعد 🌸';
-  const lines = [rtl(title), '', ...joinSections(sections)];
+  const lines = [rtl('✅ *تم تأكيد حجزك بنجاح*'), ''];
+  pushLine(lines, '🔖', 'رقم الحجز', input.bookingReference);
+  lines.push(...appointmentFields(input, { includePayment: true, includeAssigned: true }));
   const reference = cleanValue(input.bookingReference);
-  if (reference) lines.push('', rtl(LIST_DIVIDER), '', rtl('🎫 *رقم الحجز*'), `\`${LRI}${reference}${PDI}\``);
-  lines.push('', rtl(ending));
-  return lines.join('\n');
+  if (!reference) pushLine(lines, '🔖', 'رقم الحجز', input.bookingReference);
+  lines.push('', rtl('ننتظرك في الموعد 🌸'));
+  return compactLines(lines).join('\n');
+}
+
+function formatAppointmentChangeReview({ operation, appointment = {}, target = {}, assignment = {}, price = {}, appointmentStart } = {}) {
+  const isService = operation === 'change_service';
+  const title = isService ? '🌸 *تأكيد تغيير الخدمة*' : '🌸 *تأكيد تغيير الفرع*';
+  const lines = [rtl(title), ''];
+  pushLine(lines, '🔖', 'رقم الحجز', appointment.booking_reference);
+  if (isService) {
+    pushLine(lines, '🩺', 'الخدمة الحالية', appointment.service_name);
+    pushLine(lines, '✨', 'الخدمة الجديدة', target.name);
+    pushLine(lines, '📍', 'الفرع', appointment.branch_name);
+  } else {
+    pushLine(lines, '📍', 'الفرع الحالي', appointment.branch_name);
+    pushLine(lines, '✨', 'الفرع الجديد', target.name);
+    pushLine(lines, '🩺', 'الخدمة', appointment.service_name);
+  }
+  const doctorChanged = (appointment.doctor_id || null) !== (assignment.doctor_id || null);
+  const roomChanged = (appointment.room_id || null) !== (assignment.room_id || null);
+  pushLine(lines, '👩‍⚕️', 'الطبيبة', doctorChanged ? assignment.doctor_name : appointment.doctor_name);
+  pushLine(lines, '🚪', 'الغرفة', roomChanged ? (assignment.room_number || assignment.room_name) : (appointment.room_number || appointment.room_name));
+  const schedule = formatAppointmentScheduleForCard(appointmentStart || appointment.appointment_start);
+  pushLine(lines, '📅', 'التاريخ', schedule.dateText);
+  pushLine(lines, '🕐', 'الوقت', schedule.timeText);
+  if (appointment.quoted_price != null && String(appointment.quoted_price) !== String(price.price)) {
+    pushLine(lines, '💳', 'السعر السابق', `${appointment.quoted_price} ${appointment.currency || 'SAR'}`);
+    pushLine(lines, '💳', 'السعر الجديد', `${price.price} ${price.currency || appointment.currency || 'SAR'}`);
+  }
+  lines.push('', rtl(isService ? 'هل ترغبين في تأكيد تغيير الخدمة؟' : 'هل ترغبين في تأكيد تغيير الفرع؟'));
+  return compactLines(lines).join('\n');
+}
+
+function formatAppointmentChangeSuccess({ operation, appointment = {} } = {}) {
+  const title = operation === 'change_service' ? '✅ *تم تغيير خدمة الموعد بنجاح*' : '✅ *تم تغيير فرع الموعد بنجاح*';
+  const lines = [rtl(title), ''];
+  pushLine(lines, '🔖', 'رقم الحجز', appointment.booking_reference);
+  pushLine(lines, '🩺', 'الخدمة', appointment.service_name);
+  pushLine(lines, '📍', 'الفرع', appointment.branch_name);
+  pushLine(lines, '👩‍⚕️', 'الطبيبة', appointment.doctor_name);
+  pushLine(lines, '🚪', 'الغرفة', appointment.room_number || appointment.room_name);
+  const schedule = formatAppointmentScheduleForCard(appointment.appointment_start);
+  pushLine(lines, '📅', 'التاريخ', schedule.dateText);
+  pushLine(lines, '🕐', 'الوقت', schedule.timeText);
+  return compactLines(lines).join('\n');
 }
 
 function formatNoActiveBranches(city) {
@@ -229,6 +255,38 @@ function addSection(sections, title, lines) {
 function addReviewSection(sections, icon, title, value) {
   const clean = cleanValue(value);
   if (clean) sections.push([rtl(`${icon} *${title}*`), rtl(bidi(clean))]);
+}
+
+function appointmentFields(input, { includePayment = false, includeAssigned = false } = {}) {
+  const lines = [];
+  pushLine(lines, '🩺', 'الخدمة', input.service?.name);
+  pushLine(lines, '📍', 'الفرع', branchWithCity(input.branch));
+  if (input.service?.requiresDoctor === true || (includeAssigned && personName(input.doctor))) pushLine(lines, '👩‍⚕️', 'الطبيبة', personName(input.doctor));
+  if (input.service?.requiresRoom === true || (includeAssigned && roomLabel(input.room))) pushLine(lines, '🚪', 'الغرفة', roomLabel(input.room));
+  pushLine(lines, '📅', 'التاريخ', input.dateText);
+  pushLine(lines, '🕐', 'الوقت', input.timeText);
+  if (includePayment) pushLine(lines, '💳', 'طريقة الدفع', input.paymentMethod?.name);
+  const amount = normalizedDecimal(input.quotedPrice);
+  if (amount) pushLine(lines, '💳', 'السعر', `${amount} ${cleanValue(input.currency) || 'SAR'}`);
+  return lines;
+}
+
+function pushLine(lines, icon, label, value) {
+  const clean = cleanValue(value);
+  if (clean) lines.push(rtl(`${icon} *${label}:* ${bidi(clean)}`));
+}
+
+function compactLines(lines) {
+  return lines.filter((line, index) => line !== '' || (index > 0 && lines[index - 1] !== ''));
+}
+
+function formatAppointmentScheduleForCard(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return { dateText: null, timeText: null };
+  return {
+    dateText: new Intl.DateTimeFormat('ar-SA-u-ca-gregory-nu-latn', { timeZone: 'Asia/Riyadh', weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }).format(date),
+    timeText: new Intl.DateTimeFormat('ar-SA-u-ca-gregory-nu-latn', { timeZone: 'Asia/Riyadh', hour: 'numeric', minute: '2-digit', hour12: true }).format(date),
+  };
 }
 
 function joinSections(sections) {
@@ -341,6 +399,8 @@ module.exports = {
   formatInlineListItem,
   formatBookingSummary,
   formatBookingSuccess,
+  formatAppointmentChangeReview,
+  formatAppointmentChangeSuccess,
   formatNoActiveBranches,
   controls: Object.freeze({ RLM, LRI, PDI }),
 };

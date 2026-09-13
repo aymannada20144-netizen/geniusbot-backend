@@ -53,8 +53,9 @@ class AppointmentChangeDeliveryRepository {
     const result = await this.db.query(`UPDATE geniusbot.appointment_change_deliveries
       SET status = CASE
             WHEN status = 'read' THEN 'read'
+            WHEN status = 'failed' THEN 'failed'
             WHEN $2 = 'read' THEN 'read'
-            WHEN status = 'delivered' AND $2 = 'sent' THEN 'delivered'
+            WHEN status = 'delivered' AND $2 IN ('sent', 'failed') THEN 'delivered'
             ELSE $2 END,
           provider_status_at = COALESCE(provider_status_at, $3),
           error_code = CASE WHEN $2 = 'failed' THEN $4 ELSE error_code END,

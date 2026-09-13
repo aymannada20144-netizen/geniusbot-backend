@@ -14,7 +14,7 @@ function harness() {
   const h = { state: { version: 1, mode: 'idle', step: null, customer: { name: 'نورة' }, context: null, options: [] },
     writes: 0, committed: false, conversationCalls: 0, bridgeCalls: 0, groundings: [], routes: [], replies: [],
     operation: 'change_service_request', goal: 'ACT', decision: 'RESOLVED', failWrite: false, needsSlot: false,
-    failBridge: false, failGrounding: false, failSend: false };
+    failBridge: false, failGrounding: false, failSend: false, failStatePersist: false };
   const appointment = { id: id(3), clinic_id: id(1), patient_id: id(2), service_id: id(4),
     branch_id: id(7), booking_reference: 'ABC12345', status: 'confirmed',
     service_name: 'ليزر', branch_name: 'الروضة', updated_at: '2026-08-13T08:00:00.000Z',
@@ -24,7 +24,10 @@ function harness() {
     conversationService: {
       async findOrCreateForChannel() { return { id: id(8), patientId: id(2), botEnabled: true }; },
       async loadState() { return { data: { shaden: structuredClone(h.state) } }; },
-      async updateState(_id, value) { h.state = value.data.shaden; },
+      async updateState(_id, value) {
+        if (h.failStatePersist) throw new Error('state store unavailable');
+        h.state = value.data.shaden;
+      },
     },
     patientService: { async resolveChannelIdentity() { return { id: id(2), full_name: 'نورة' }; } },
     messageRepository: {
@@ -131,6 +134,19 @@ test('interactive change-service state advances only after Meta accepts its prom
   h.failSend = false;
   await h.send('تغيير خدمة');
   assert.equal(h.state.changeService.step, 'awaiting_service');
+  assert.equal(h.writes, 0);
+});
+test('accepted prompt with failed state persistence rejects a later trusted button without mutation', async () => {
+  const h = harness();
+  h.failStatePersist = true;
+  await assert.rejects(() => h.send('تغيير خدمة'), /state store unavailable/);
+  assert.equal(h.replies.length, 1);
+  assert.equal(h.state.changeService, undefined);
+  h.failStatePersist = false;
+  await h.send('تأكيد تغيير الخدمة', 'SOCIAL', {
+    rawPayload: { value: 'change-service-confirm:yes' },
+    inputProvenance: { trusted: true, source: 'meta_whatsapp', kind: 'meta_interactive_button' },
+  });
   assert.equal(h.writes, 0);
 });
 test('ambiguous, not-found and resolver failure stay in operational selection', async () => {
