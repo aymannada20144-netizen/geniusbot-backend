@@ -18,6 +18,7 @@ const PatientService = require('../../modules/patients/PatientService');
 const { normalizeSaudiMobile } = require('../../core/validators/saudiMobile');
 const OpenRouterConversationProvider = require('./conversation/OpenRouterConversationProvider');
 const ShadenConversationLayer = require('./conversation/ShadenConversationLayer');
+const ShadenLatencyTrace = require('./ShadenLatencyTrace');
 
 const OpenRouterSemanticProvider = require('./semanticV1/OpenRouterSemanticProvider');
 const SemanticInterpreterV1 = require('./semanticV1/SemanticInterpreterV1');
@@ -126,6 +127,9 @@ function createShadenEngine({
     async processMessage(rawMessage) {
       if (!rawMessage?.text) return null;
       const message = normalizeMessage(rawMessage);
+      const latency = new ShadenLatencyTrace({ logger, messageId: message.externalMessageId });
+      latency.begin('runtime_entry');
+      latency.begin('context_resolution');
       const clinic = await clinics.resolveWhatsAppClinic({
         phoneNumberId: message.receiverPhoneNumberId,
         displayPhoneNumber: message.receiverId,
@@ -148,6 +152,7 @@ function createShadenEngine({
       const identityContext = await contextProvider.load({
         clinicId: clinic.id, channelIdentity: message.senderId, conversation,
       });
+      latency.end('context_resolution', { conversationId: conversation.id });
       if (conversation.botEnabled === false) return { suppressed: true };
       if (await messageRepository.findByExternalId(
         conversation.id, message.externalMessageId

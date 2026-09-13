@@ -8,19 +8,21 @@ class WhatsAppMessageDebouncer {
   }
 
   processMessage(message) {
+    const enteredAt = Date.now();
     if (message?.inputProvenance?.trusted === true || message?.messageType === 'button' || message?.messageType === 'interactive') {
       this.#log({
         event: 'SHADEN_DEBOUNCE',
         correlationId: message?.waMessageId || null,
         entered: false,
         aggregatedMessageCount: 1,
+        durationMs: 0,
       });
       return this.target.processMessage(message);
     }
     const key = `${message?.metaPhoneNumberId || message?.receiverPhone || ''}:${message?.senderPhone || ''}`;
     return new Promise((resolve, reject) => {
       const entry = this.pending.get(key) || { messages: [], waiters: [], timer: null };
-      entry.messages.push(message); entry.waiters.push({ resolve, reject });
+      entry.messages.push(message); entry.waiters.push({ resolve, reject, enteredAt });
       if (entry.timer) this.clearTimer(entry.timer);
       entry.timer = this.setTimer(() => this.#flush(key), this.windowMs);
       this.pending.set(key, entry);
@@ -38,6 +40,7 @@ class WhatsAppMessageDebouncer {
       correlationId: last?.waMessageId || null,
       entered: true,
       aggregatedMessageCount: entry.messages.length,
+      durationMs: Date.now() - entry.waiters[entry.waiters.length - 1].enteredAt,
     });
     try { const result = await this.target.processMessage(combined); entry.waiters.forEach(({ resolve }) => resolve(result)); }
     catch (error) { entry.waiters.forEach(({ reject }) => reject(error)); }
