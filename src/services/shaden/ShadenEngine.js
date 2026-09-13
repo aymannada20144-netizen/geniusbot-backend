@@ -453,9 +453,9 @@ class ShadenEngine {
           if (branchesInCity.length > 0) return `نعم، لدينا ${branchesInCity.length} فروع في ${this.policy.display(inquiry.city)}:\n${this.policy.branches(branchesInCity)}`;
           return this.policy.noActiveBranches(inquiry.city);
         }
-        return this.policy.branches(data.branches);
+        return this.policy.branches(data.branches, data.clinic);
 
-      case 'specialties': return this.policy.specialties(data.specialties, data.clinic);
+      case 'specialties': return this.policy.specialties(data.specialties, data.clinic, data.services);
       case 'services':
         return this.policy.services(data.services, data.clinic);
       case 'services_under_specialty':

@@ -39,6 +39,26 @@ function state(booking = null) {
 }
 
 describe('Shaden runtime formatter coverage', () => {
+  test('read-only clinic inquiries use the formatter without identity disclosure', () => {
+    const engine = new ShadenEngine();
+    const clinicData = data();
+    clinicData.specialties = [{ id: 'specialty-1', name: 'الجلدية', description: 'عناية بالبشرة' }];
+    clinicData.services = [{ id: 'service-1', name: 'ليزر', specialtyName: 'الجلدية' }];
+    clinicData.branches = [{ id: 'branch-1', name: 'فرع الصالحية', city: 'جدة', address: 'الشارع العام' }];
+    clinicData.workingHours = [{ branchId: 'branch-1', dayOfWeek: 0, opensAt: '10:00', closesAt: '22:00', isClosed: false }];
+    const cases = [
+      ['ما خدماتكم', 'ليزر'], ['ما التخصصات', 'الجلدية'], ['ما الفروع', 'الشارع العام'],
+      ['ما المواعيد', '10'], ['ما شركات التأمين', 'بوبا'],
+    ];
+    for (const [question, authoritativeValue] of cases) {
+      const result = engine.handle({ message: { text: question }, currentState: state(), clinicData });
+      assert.match(result.reply, new RegExp(authoritativeValue, 'u'));
+      assert.doesNotMatch(result.reply, /أنا شادن|لست موظفة بشرية/u);
+      assert.doesNotMatch(result.reply, /\* \*|\*\*/u);
+      assert.ok(result.reply.length <= 4096);
+    }
+  });
+
   test('general insurance classes and fallback pass through the central formatter', () => {
     const engine = new ShadenEngine();
     const classes = engine.handle({ message: { text: 'ما الفئات المعتمدة' }, currentState: state(), clinicData: data() });

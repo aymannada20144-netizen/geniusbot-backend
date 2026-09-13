@@ -283,15 +283,15 @@ describe('Shaden Phase 1.2 public runtime', () => {
     assert.equal(session.harness.lastSentInput.interaction.mode, 'list');
     assert.equal(
       session.harness.lastSentInput.interaction.purpose,
-      'select_service'
+      'select_specialty'
     );
     assert.equal(
       session.harness.lastSentInput.interaction.displayText,
-      '💎 اختاري الخدمة:'
+      '💎 اختاري التخصص:'
     );
     assert.equal(
       session.harness.lastSentInput.interaction.listPrompt,
-      'عرض الخدمات'
+      'عرض التخصصات'
     );
     assert.equal(
       session.harness.lastOutgoing.messageText,
@@ -301,14 +301,76 @@ describe('Shaden Phase 1.2 public runtime', () => {
     assert.deepEqual(session.harness.lastOutgoing.rawPayload.interaction, {
       version: 1,
       mode: 'list',
-      purpose: 'select_service',
-      optionIds: ['service:service-1', 'service:service-2'],
+      purpose: 'select_specialty',
+      optionIds: ['specialty:uncategorized'],
     });
     assert.equal(
       session.harness.lastOutgoing.rawPayload.delivery.messageId,
       session.harness.lastOutgoing.waMessageId
     );
     assert.equal(session.harness.aiCalls, 0);
+  });
+
+  test('routes recognized clinic-information aliases to the structured formatter with conversation enabled', async () => {
+    const events = [];
+    let conversationCalls = 0;
+    const session = createSession({
+      customerName: 'نورة',
+      runtimeOptions: {
+        conversationEnabled: true,
+        conversationProvider: {
+          async complete() {
+            conversationCalls += 1;
+            throw new Error('Structured clinic information must not call the conversation provider.');
+          },
+        },
+        semanticProvider: {
+          async completeJson() {
+            return {
+              result: { status: 'UNKNOWN', goal: null, subjects: [], constraints: [] },
+              model: 'test-semantic', usage: null, rawContent: '{}',
+            };
+          },
+        },
+        logger: {
+          info(entry) { events.push(entry); },
+          warn(entry) { events.push(entry); },
+        },
+      },
+    });
+    const cases = [
+      { text: 'ما الفروع', type: 'branches', expected: 'فرع العليا' },
+      { text: 'فروعكم ايه', type: 'branches', expected: 'فرع الصالحية' },
+      { text: 'ما خدماتكم', type: 'services', expected: 'إزالة الشعر بالليزر' },
+      { text: 'ايه الخدمات', type: 'services', expected: 'تنظيف البشرة' },
+      { text: 'ما التخصصات', type: 'specialties', expected: 'الجلدية' },
+      { text: 'ايه تخصصاتكم', type: 'specialties', expected: 'الجلدية' },
+    ];
+
+    for (const entry of cases) {
+      const result = await session.send(entry.text);
+      assert.match(result.replyText, new RegExp(entry.expected));
+      assert.doesNotMatch(result.replyText, /تتشرف عيادات أوريان|\*|•/u);
+    }
+
+    assert.equal(conversationCalls, 0);
+    const structuredEvents = events.filter(
+      ({ event }) => event === 'SHADEN_STRUCTURED_PRESENTATION'
+    );
+    assert.equal(structuredEvents.length, cases.length);
+    assert.deepEqual(
+      structuredEvents.map(({ deterministicType }) => deterministicType),
+      cases.map(({ type }) => type)
+    );
+    for (const event of structuredEvents) {
+      assert.equal(event.finalOwner, 'STRUCTURED_FORMATTER');
+      assert.match(event.formatterMethod, /^ShadenMessageFormatter\.format/u);
+      assert.equal(event.conversationId, 'conversation-1');
+      assert.match(event.messageId, /^in-\d+$/u);
+    }
+    const routeEvents = events.filter(({ event }) => event === 'SHADEN_CONVERSATION_ROUTE');
+    assert.equal(routeEvents.length, cases.length);
+    assert.ok(routeEvents.every(({ owner }) => owner === 'STRUCTURED_FORMATTER'));
   });
 
   test('passes payment interaction once and persists only safe metadata', async () => {
@@ -354,7 +416,11 @@ describe('Shaden Phase 1.2 public runtime', () => {
   });
 });
 
-function createSession({ customerName = null, initialShadenState = null } = {}) {
+function createSession({
+  customerName = null,
+  initialShadenState = null,
+  runtimeOptions = {},
+} = {}) {
   const initialState = initialShadenState || (customerName
     ? {
       version: 1,
@@ -375,7 +441,7 @@ function createSession({ customerName = null, initialShadenState = null } = {}) 
       harness.reload();
     },
     async send(text) {
-      const runtime = createShadenEngine(harness.dependencies);
+      const runtime = createShadenEngine({ ...harness.dependencies, ...runtimeOptions });
       return runtime.processMessage({
         channel: 'whatsapp',
         waMessageId: `in-${++harness.messageNumber}`,

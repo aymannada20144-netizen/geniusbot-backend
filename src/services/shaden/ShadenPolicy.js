@@ -204,8 +204,8 @@ class ShadenPolicy {
       return { type: 'services_under_specialty', specialtyText: servicesUnderMatch[1] };
     }
 
-    if (/(ما|وش|اي|ا)?\s*(خدمات|الخدمات|خدماتكم)/.test(text)) return { type: 'services' };
-    if (/(ما|وش|اي|ا)?\s*(تخصصات|التخصصات|تخصصاتكم)/.test(text)) return { type: 'specialties' };
+    if (/(ما|وش|ايه|اي|ا)?\s*(خدمات|الخدمات|خدماتكم)/.test(text)) return { type: 'services' };
+    if (/(ما|وش|ايه|اي|ا)?\s*(تخصصات|التخصصات|تخصصاتكم)/.test(text)) return { type: 'specialties' };
    
     const norCityMatch = text.match(/^(?:ولا|و)\s*(.+)$/);
     if (norCityMatch) {
@@ -266,9 +266,9 @@ class ShadenPolicy {
     return city && name ? `${city} — ${name}` : city || name || 'الفرع';
   }
 
-  branches(items) { return messageFormatter.formatBranches({ items: items.map(b => ({ ...b, name: this.cleanBranchName(b.name), city: this.display(b.city) })) }); }
+  branches(items, clinic = null) { return messageFormatter.formatBranches({ items: items.map(b => ({ ...b, name: this.cleanBranchName(b.name), city: this.display(b.city) })), clinicName: clinic?.name }); }
   branchExists(branch) { return !branch ? 'لا يوجد لدينا فرع نشط مطابق حاليًا. 🌸' : `نعم، لدينا ${this.branchLabel(branch)}.`; }
-  specialties(items, clinic) { return messageFormatter.formatSpecialties({ items: items.map(item => ({ ...item, name: this.display(item.name) })), clinicName: clinic?.name }); }
+  specialties(items, clinic, services = []) { return messageFormatter.formatSpecialties({ items: items.map(item => ({ ...item, name: this.display(item.name) })), services: services.map(item => ({ ...item, name: this.display(item.name) })), clinicName: clinic?.name }); }
   services(items, clinic, selection = false) { return messageFormatter.formatServices({ items: items.map(item => ({ ...item, name: this.display(item.name) })), clinicName: clinic?.name, selection }); }
   serviceExists(service) { return service ? `نعم، خدمة ${this.display(service.name)} متوفرة لدينا.` : 'عذراً، لا نقدم هذه الخدمة لأنها غير مسجلة لدينا حالياً. 🌸'; }
   
@@ -280,54 +280,11 @@ class ShadenPolicy {
   insuranceClassStatus(item, requested) { return !item ? `عذراً، فئة ${requested} غير مقبولة حالياً. 🌸` : (item.isAccepted ? `نعم، فئة ${this.display(item.name)} مقبولة. 🌸` : `عذراً، فئة ${this.display(item.name)} غير مقبولة حالياً. 🌸`); }
 
   allWorkingHours(snapshot, cityFilter = null) {
-    if (!snapshot.workingHours.length) return 'مواعيد العمل غير مسجلة حاليًا. 🌸';
-    const branches = new Map(snapshot.branches.map(b => [b.id, b]));
-    const branchSchedules = new Map();
-    
-    for (const hours of snapshot.workingHours) {
-      const branch = branches.get(hours.branchId);
-      if (!branch) continue;
-      const branchName = this.branchLabel(branch);
-      if (cityFilter) {
-        if (this.normalize(branch.city) !== this.normalize(cityFilter)) continue;
-      }
-      if (!branchSchedules.has(branchName)) branchSchedules.set(branchName, []);
-      branchSchedules.get(branchName).push(hours);
-    }
-
-    if (branchSchedules.size === 0) return `لا يوجد لدينا فروع في ${this.display(cityFilter)} حاليًا. 🌸`;
-
-    const groupedBySchedule = new Map();
-    for (const [bName, hList] of branchSchedules.entries()) {
-      hList.sort((a, b) => a.dayOfWeek - b.dayOfWeek);
-      const scheduleKey = hList.map(h => `${h.dayOfWeek}:${h.isClosed}:${h.opensAt}:${h.closesAt}`).join('|');
-      if (!groupedBySchedule.has(scheduleKey)) groupedBySchedule.set(scheduleKey, { branchNames: [], hours: hList });
-      groupedBySchedule.get(scheduleKey).branchNames.push(bName);
-    }
-
-    const lines = [cityFilter ? `مواعيد العمل لفروع ${this.display(cityFilter)} كالتالي:` : 'مواعيد العمل لدينا كالتالي:'];
-    const isSingleSchedule = groupedBySchedule.size === 1;
-
-    for (const group of groupedBySchedule.values()) {
-      if (isSingleSchedule) lines.push(``, `📍 جميع الفروع:`);
-      else lines.push(``, `📍 ${group.branchNames.join('، ')}`);
-      
-      const open = group.hours.filter(h => !h.isClosed);
-      const closed = group.hours.filter(h => h.isClosed);
-      
-      if (open.length > 0) {
-        const first = open[0];
-        const same = open.every(h => h.opensAt === first.opensAt && h.closesAt === first.closesAt);
-        if (same) {
-          const cDay = closed.length > 0 ? displayDay(closed[0].dayOfWeek) : null;
-          if (open.length === 6 && cDay) lines.push(`🕒 يومياً عدا ${cDay}: من ${time(first.opensAt)} إلى ${time(first.closesAt)}`);
-          else if (open.length === 7) lines.push(`🕒 طوال الأسبوع: من ${time(first.opensAt)} إلى ${time(first.closesAt)}`);
-          else group.hours.forEach(h => lines.push(this.formatHoursForList(h)));
-        } else group.hours.forEach(h => lines.push(this.formatHoursForList(h)));
-      } else lines.push(`🕒 مغلق طوال الأسبوع.`);
-    }
-    lines.push(``, ``);
-    return lines.join('\n');
+    return messageFormatter.formatWorkingHours({
+      branches: snapshot.branches,
+      workingHours: snapshot.workingHours,
+      city: cityFilter,
+    });
   }
 
   branchWorkingHours(branch, snapshot) {

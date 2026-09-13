@@ -323,7 +323,8 @@ function createShadenEngine({
       ) || (semanticMeaning?.status === 'UNDERSTOOD' && semanticMeaning.goal === 'ACT'
         ? 'UNRESOLVED_OPERATIONAL_ACT' : null);
       let conversationalResult = null;
-      if (conversationLayer && !operationalOwner) {
+      const structuredReadOnlyOwner = isStructuredReadOnlyInquiry(deterministicInquiry);
+      if (conversationLayer && !operationalOwner && !structuredReadOnlyOwner) {
         const context = buildConversationContext(
           await messageRepository.getRecentMessages({
             conversationId: conversation.id,
@@ -391,7 +392,7 @@ function createShadenEngine({
       validateInternalLifecycleResult(internalResult);
       let sideQueryAnswered = false;
       let sideAnswer = null;
-      const sideQueryEligible = isBookingSideQueryEligible({
+      const sideQueryEligible = !structuredReadOnlyOwner && isBookingSideQueryEligible({
         message,
         semanticMeaning,
         operationalDisposition: operationalDispositionFrom(internalResult),
@@ -448,14 +449,26 @@ function createShadenEngine({
           ? 'LLM_CONVERSATION'
           : sideQueryAnswered
             ? 'BOOKING_SIDE_QUERY'
+            : structuredReadOnlyOwner
+              ? 'STRUCTURED_FORMATTER'
             : 'OPERATIONAL_CORE',
-        ownershipReason: operationalOwner ||
+        ownershipReason: operationalOwner || structuredReadOnlyOwner ||
           (conversationLayer ? 'FREE_FORM_CONVERSATION' : 'CONVERSATION_LAYER_DISABLED'),
         deterministicRecognizedType: deterministicInquiry?.type || 'unknown',
         operationalRecognizedType: operationalInquiry?.type || null,
         toolCallCount: conversationalResult?.toolCallCount || 0,
         conversationStatus: conversationalResult?.status || null,
       });
+      if (structuredReadOnlyOwner && STRUCTURED_PRESENTATION_TYPES.has(deterministicInquiry?.type)) {
+        logger.info({
+          event: 'SHADEN_STRUCTURED_PRESENTATION',
+          conversationId: conversation.id,
+          messageId: message.externalMessageId,
+          deterministicType: deterministicInquiry.type,
+          formatterMethod: STRUCTURED_PRESENTATION_FORMATTERS[deterministicInquiry.type],
+          finalOwner: 'STRUCTURED_FORMATTER',
+        });
+      }
       const nextData = plainObject(preservedData);
       if (!reply || typeof reply !== 'string' || reply.trim() === '') {
         console.warn('ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¯ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¸ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â Shaden Engine returned an empty reply. Message:', message.text);
@@ -638,6 +651,10 @@ function shouldUseOperationalCore(message, state, inquiry) {
   return OPERATIONAL_INQUIRY_TYPES.has(inquiry?.type)
     ? 'EXPLICIT_OPERATIONAL_REQUEST' : null;
 }
+function isStructuredReadOnlyInquiry(inquiry) {
+  return STRUCTURED_READ_ONLY_INQUIRY_TYPES.has(inquiry?.type)
+    ? 'STRUCTURED_READ_ONLY_FORMATTER' : null;
+}
 
 function isBookingSideQueryEligible({
   message,
@@ -664,6 +681,18 @@ const OPERATIONAL_INQUIRY_TYPES = new Set([
   'appointment_query_request', 'booking_rejection', 'bulk_cancel_request',
   'compound_appointment_request', 'cancellation_information_request',
 ]);
+const STRUCTURED_READ_ONLY_INQUIRY_TYPES = new Set([
+  'services', 'specialties', 'branches', 'working_hours', 'working_hours_city',
+  'working_hours_branch', 'insurance_companies', 'insurance_classes',
+]);
+const STRUCTURED_PRESENTATION_TYPES = new Set([
+  'services', 'specialties', 'branches',
+]);
+const STRUCTURED_PRESENTATION_FORMATTERS = Object.freeze({
+  branches: 'ShadenMessageFormatter.formatBranchesOverview',
+  services: 'ShadenMessageFormatter.formatServicesOverview',
+  specialties: 'ShadenMessageFormatter.formatSpecialtiesOverview',
+});
 
 const MAX_CONTEXT_TURNS = 4;
 const MAX_CONTEXT_MESSAGE_CHARS = 800;
@@ -707,5 +736,6 @@ module.exports.validateInternalLifecycleResult = validateInternalLifecycleResult
 module.exports.buildConversationContext = buildConversationContext;
 module.exports.MAX_CONTEXT_TURNS = MAX_CONTEXT_TURNS;
 module.exports.shouldUseOperationalCore = shouldUseOperationalCore;
+module.exports.isStructuredReadOnlyInquiry = isStructuredReadOnlyInquiry;
 
 

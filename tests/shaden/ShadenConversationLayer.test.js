@@ -160,6 +160,17 @@ test('operational requests, active state, and trusted input retain deterministic
   assert.equal(owns({ inputProvenance: { trusted: true } }, { version: 1 }, { type: 'unknown' }),
     'TRUSTED_MACHINE_INPUT');
   assert.equal(owns({}, { version: 1 }, { type: 'services' }), null);
+  assert.equal(createShadenEngine.isStructuredReadOnlyInquiry({ type: 'services' }), 'STRUCTURED_READ_ONLY_FORMATTER');
+  assert.equal(createShadenEngine.isStructuredReadOnlyInquiry({ type: 'working_hours' }), 'STRUCTURED_READ_ONLY_FORMATTER');
+  assert.equal(createShadenEngine.isStructuredReadOnlyInquiry({ type: 'identity' }), null);
+});
+
+test('social prompt keeps warmth while grounding identity and personal context', () => {
+  const prompt = ShadenConversationLayer.systemPrompt(clinicData);
+  assert.match(prompt, /مجرد ذكر اسمك.*ليس سؤال هوية/u);
+  assert.match(prompt, /لا تخترعي حقائق شخصية أو أحداثًا مستقبلية/u);
+  assert.match(prompt, /لا تملكين مظهرًا بشريًا حقيقيًا/u);
+  assert.match(prompt, /الدفء الطبيعي والأسلوب الودود الحالي/u);
 });
 
 test('current user turn is last and a duplicated persisted current turn is removed', async () => {

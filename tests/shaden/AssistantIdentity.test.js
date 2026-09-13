@@ -23,6 +23,15 @@ test('ordinary greeting remains natural and does not turn into identity disclosu
   assert.doesNotMatch(result.reply, /لست موظفة بشرية/);
 });
 
+test('a casual use of Shaden name is not classified as an identity question', () => {
+  const policy = new (require('../../src/services/shaden/ShadenPolicy'))();
+  assert.equal(policy.recognize('بنتي كمان اسمها شادن').type, 'unknown');
+  assert.equal(policy.recognize('شكرا يا شادن').type, 'unknown');
+  assert.equal(policy.recognize('بنتي شقراء وانتي شقراء؟').type, 'unknown');
+  assert.equal(policy.recognize('بنتي تزوجت أمس').type, 'unknown');
+  assert.equal(policy.recognize('هل انتي بشرية؟').type, 'identity');
+});
+
 test('validates names, gender, and unknown fields', async () => {
   const service = new AssistantIdentityService({});
   await assert.rejects(service.update('clinic-1', { assistantName: 'خالد', assistantGender: 'other' }), /female or male/);

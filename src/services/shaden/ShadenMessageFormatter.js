@@ -7,8 +7,11 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3
 const DIVIDER = 'ــــــــــــــــــــ';
 const LIST_DIVIDER = '────────────';
 const SUPPORTED_CAPABILITIES = Object.freeze(['الخدمات', 'الفروع', 'مواعيد العمل', 'التأمين', 'طرق الدفع']);
+// Database day_of_week convention: 0=Sunday … 6=Saturday.
+const DAY_ORDER = Object.freeze([6, 0, 1, 2, 3, 4, 5]);
 
 function formatServices({ items, clinicName, selection = false } = {}) {
+  if (!selection) return formatServicesOverview({ items, clinicName });
   const title = clinicTitle('✨', 'الخدمات المتاحة', clinicName);
   const values = displayItems(items);
   const lines = [title, ''];
@@ -21,15 +24,53 @@ function formatServices({ items, clinicName, selection = false } = {}) {
   return lines.join('\n');
 }
 
-function formatSpecialties({ items, clinicName } = {}) {
-  const lines = [clinicTitle('🩺', 'التخصصات المتاحة', clinicName), ''];
-  const values = displayItems(items);
-  lines.push(...(values.length ? values.map(listItem) : [rtl('لا توجد تخصصات نشطة متاحة حاليًا.')]))
-  if (values.length) appendGeneralListFooter(lines, 'يسعدني توضيح أي تخصص منها 🌸');
+function formatServicesOverview({ items, clinicName } = {}) {
+  const services = activeItems(items).filter((item) => cleanValue(item?.name));
+  const lines = [plainClinicTitle('🌸', 'الخدمات المتاحة', clinicName), ''];
+  if (!services.length) return [...lines, rtl('لا توجد خدمات نشطة متاحة حاليًا.')].join('\n');
+  const bySpecialty = new Map();
+  for (const service of services) {
+    const specialty = cleanValue(service.specialtyName);
+    const key = normalizeKey(specialty || 'other');
+    if (!bySpecialty.has(key)) bySpecialty.set(key, { specialty, names: [] });
+    bySpecialty.get(key).names.push(cleanValue(service.name));
+  }
+  const groups = [...bySpecialty.values()].sort((left, right) => compareArabic(left.specialty || '', right.specialty || ''));
+  for (const [index, group] of groups.entries()) {
+    if (index > 0) lines.push('');
+    if (group.specialty) lines.push(rtl(`✨ ${bidi(group.specialty)}`));
+    lines.push(...sortNames(group.names).map((name) => rtl(bidi(name))));
+  }
+  lines.push('', rtl('🌸 هل ترغبين بمعرفة تفاصيل خدمة معينة أو توفرها في أحد الفروع؟'));
   return lines.join('\n');
 }
 
-function formatBranches({ items, city = null, selection = false } = {}) {
+function formatSpecialties({ items, services = [], clinicName } = {}) {
+  const values = activeItems(items).filter((item) => cleanValue(item?.name));
+  const lines = [plainClinicTitle('🩺', 'تخصصات', clinicName), ''];
+  if (!values.length) return [...lines, rtl('لا توجد تخصصات نشطة متاحة حاليًا.')].join('\n');
+  const serviceItems = activeItems(services).filter((service) => cleanValue(service?.name));
+  const servicesBySpecialtyId = new Map();
+  for (const service of serviceItems) {
+    if (!service.specialtyId) continue;
+    const key = String(service.specialtyId);
+    const names = servicesBySpecialtyId.get(key) || [];
+    names.push(cleanValue(service.name));
+    servicesBySpecialtyId.set(key, names);
+  }
+  const hasAuthoritativeChildren = values.some((item) => servicesBySpecialtyId.has(String(item.id)));
+  if (!hasAuthoritativeChildren) return [...lines, ...sortNames(values.map((item) => cleanValue(item.name))).map((name) => rtl(`✨ ${bidi(name)}`)), '', rtl('🌸 هل ترغبين بمعرفة الخدمات المتاحة في تخصص معين؟')].join('\n');
+  for (const [index, item] of values.sort((left, right) => compareArabic(left.name, right.name)).entries()) {
+    if (index > 0) lines.push('');
+    lines.push(rtl(`✨ ${bidi(cleanValue(item.name))}`));
+    const children = servicesBySpecialtyId.get(String(item.id)) || [];
+    if (children.length) lines.push(...sortNames(children).map((name) => rtl(bidi(name))));
+  }
+  lines.push('', rtl('🌸 هل ترغبين بمعرفة الخدمات المتاحة في تخصص معين؟'));
+  return lines.join('\n');
+}
+
+function formatBranches({ items, city = null, selection = false, clinicName = null } = {}) {
   const branches = activeItems(items).filter((branch) => cleanValue(branch?.name) && cleanValue(branch?.city));
   const normalizedCity = normalizeKey(city);
   const selected = normalizedCity
@@ -42,20 +83,129 @@ function formatBranches({ items, city = null, selection = false } = {}) {
     appendListEnding(lines, selection, 'ما الفرع المناسب لكِ؟ 🌸', 'يمكنني إرسال عنوان أي فرع تختارينه 🌸');
     return lines.join('\n');
   }
-  const groups = new Map();
+  const byCity = new Map();
   for (const branch of selected) {
     const cityName = cleanValue(branch.city);
-    const key = normalizeKey(cityName);
-    if (!groups.has(key)) groups.set(key, { city: cityName, names: [] });
-    groups.get(key).names.push(cleanBranchName(branch.name));
+    const group = byCity.get(normalizeKey(cityName)) || { cityName, branches: [] };
+    group.branches.push(branch);
+    byCity.set(normalizeKey(cityName), group);
   }
-  const lines = [rtl('📍 *فروعنا المتاحة*')];
-  const ordered = [...groups.values()].sort((left, right) => compareArabic(left.city, right.city));
+  const clinic = cleanValue(clinicName);
+  const lines = [rtl(`📍 فروع${clinic ? ` ${bidi(clinic)}` : 'نا'}`), ''];
+  for (const [index, group] of [...byCity.values()].sort((left, right) => compareArabic(left.cityName, right.cityName)).entries()) {
+    if (index > 0) lines.push('');
+    lines.push(rtl(`✨ ${bidi(group.cityName)}`), '');
+    for (const [branchIndex, branch] of group.branches.sort((left, right) => compareArabic(left.name, right.name)).entries()) {
+      if (branchIndex > 0) lines.push('');
+      lines.push(rtl(`🏥 ${bidi(cleanBranchName(branch.name))}`));
+      const address = cleanValue(branch.address);
+      if (address) lines.push(rtl(bidi(address)));
+    }
+  }
+  lines.push('', rtl('🌸 يسعدنا زيارتك في الفرع الأنسب لك'));
+  return compactLines(lines).join('\n');
+}
+
+function formatWorkingHours({ branches, workingHours, city = null } = {}) {
+  const branchById = new Map(activeItems(branches).map((branch) => [String(branch.id), branch]));
+  const schedules = new Map();
+  for (const entry of Array.isArray(workingHours) ? workingHours : []) {
+    const branch = branchById.get(String(entry.branchId));
+    if (!branch || (city && normalizeKey(branch.city) !== normalizeKey(city))) continue;
+    const values = schedules.get(String(branch.id)) || { branch, entriesByDay: new Map() };
+    const normalized = normalizeWorkingHoursEntry(entry);
+    if (!normalized) continue;
+    // The database has a unique (branch_id, day_of_week) constraint. Keeping
+    // one normalized value also prevents a malformed read from duplicating a day.
+    if (!values.entriesByDay.has(normalized.dayOfWeek)) values.entriesByDay.set(normalized.dayOfWeek, normalized);
+    schedules.set(String(branch.id), values);
+  }
+  if (!schedules.size) return rtl(city ? `لا يوجد لدينا فروع في ${bidi(city)} حاليًا. 🌸` : 'مواعيد العمل غير مسجلة حاليًا. 🌸');
+  const groups = new Map();
+  for (const schedule of schedules.values()) {
+    const entries = DAY_ORDER.map((day) => schedule.entriesByDay.get(day)).filter(Boolean);
+    const key = entries.map((entry) => `${entry.dayOfWeek}|${entry.isClosed}|${entry.opensAt || ''}|${entry.closesAt || ''}`).join(';');
+    const group = groups.get(key) || { entries, branches: [] };
+    group.branches.push(schedule.branch);
+    groups.set(key, group);
+  }
+  const lines = [rtl(city ? `🕐 مواعيد العمل في ${bidi(city)}` : '🕐 مواعيد العمل'), ''];
+  if (groups.size === 1) {
+    appendSchedule(lines, groups.values().next().value.entries);
+    lines.push('', rtl('🌸 يسعدنا استقبالكم في الأوقات المناسبة لكم'));
+    return compactLines(lines).join('\n');
+  }
+  const ordered = [...groups.values()].sort((left, right) => right.branches.length - left.branches.length || compareArabic(left.branches[0].name, right.branches[0].name));
   for (const group of ordered) {
-    lines.push('', rtl(`*${bidi(group.city)}*`), ...sortNames(group.names).map(listItem));
+    const names = sortNames(group.branches.map((branch) => cleanBranchName(branch.name)));
+    if (names.length > 1) {
+      lines.push(rtl('📍 المواعيد المشتركة'), rtl(`🏥 ${names.map(bidi).join('، ')}`));
+    } else lines.push(rtl(`🏥 ${bidi(names[0])}`));
+    appendSchedule(lines, group.entries);
+    lines.push('');
   }
-  appendGeneralListFooter(lines, 'يمكنني إرسال عنوان أي فرع تختارينه 🌸');
-  return lines.join('\n');
+  lines.push(rtl('🌸 يسعدنا استقبالكم في الأوقات المناسبة لكم'));
+  return compactLines(lines).join('\n');
+}
+
+function appendSchedule(lines, entries) {
+  for (const group of consecutiveScheduleGroups(entries)) {
+    if (lines.at(-1) !== '') lines.push('');
+    const dayText = formatDayRange(group.map((entry) => entry.dayOfWeek));
+    const entry = group[0];
+    if (entry.isClosed) lines.push(rtl(`🚫 ${dayText}: إجازة`));
+    else lines.push(rtl(`📅 ${dayText}`), '', rtl(`⏰ من ${bidi(formatWorkingTime(entry.opensAt))} إلى ${bidi(formatWorkingTime(entry.closesAt))}`));
+  }
+}
+
+function normalizeWorkingHoursEntry(entry) {
+  const dayOfWeek = Number(entry?.dayOfWeek);
+  if (!DAY_ORDER.includes(dayOfWeek)) return null;
+  const isClosed = entry?.isClosed === true;
+  const opensAt = isClosed ? null : normalizeDatabaseTime(entry?.opensAt);
+  const closesAt = isClosed ? null : normalizeDatabaseTime(entry?.closesAt);
+  if (!isClosed && (!opensAt || !closesAt)) return null;
+  return { dayOfWeek, isClosed, opensAt, closesAt };
+}
+
+function normalizeDatabaseTime(value) {
+  const match = String(value ?? '').trim().match(/^(\d{1,2}):(\d{2})(?::\d{2}(?:\.\d+)?)?$/u);
+  if (!match) return null;
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+  if (hour > 23 || minute > 59) return null;
+  return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+}
+
+function formatWorkingTime(value) {
+  const normalized = normalizeDatabaseTime(value);
+  if (!normalized) return 'غير محدد';
+  const [hourText, minute] = normalized.split(':');
+  const hour = Number(hourText);
+  return `${hour % 12 || 12}${minute === '00' ? '' : `:${minute}`} ${hour < 12 ? 'صباحًا' : 'مساءً'}`;
+}
+
+function consecutiveScheduleGroups(entries) {
+  const groups = [];
+  for (const entry of entries) {
+    const previous = groups.at(-1);
+    if (previous && sameSchedule(previous[0], entry) && areConsecutive(previous.at(-1).dayOfWeek, entry.dayOfWeek)) previous.push(entry);
+    else groups.push([entry]);
+  }
+  return groups;
+}
+
+function sameSchedule(left, right) {
+  return left.isClosed === right.isClosed && left.opensAt === right.opensAt && left.closesAt === right.closesAt;
+}
+
+function areConsecutive(leftDay, rightDay) {
+  return DAY_ORDER.indexOf(rightDay) === DAY_ORDER.indexOf(leftDay) + 1;
+}
+
+function formatDayRange(days) {
+  const names = days.map(displayDay);
+  return names.length === 1 ? names[0] : `من ${names[0]} إلى ${names.at(-1)}`;
 }
 
 function formatCities({ items, selection = false } = {}) {
@@ -84,7 +234,7 @@ function formatInsuranceCompanies({ items, selection = false } = {}) {
     items,
     selection,
     question: 'ما شركة التأمين الخاصة بكِ؟ 🌸',
-    footer: 'يمكنني التحقق من شركة تأمينك 🌸',
+    footer: '🌸 يسعدنا التحقق من التغطية المناسبة لخدمتك',
   });
 }
 
@@ -135,7 +285,7 @@ function formatInlineListItem(value) {
 
 function formatSimpleList({ icon, title, items, selection, question, footer }) {
   const values = [...new Map(displayItems(items).map((value) => [normalizeKey(value), value])).values()];
-  const lines = [rtl(`${icon} *${title}*`), '', ...(values.length ? values.map(listItem) : [rtl('لا توجد عناصر نشطة متاحة حاليًا.')])];
+  const lines = [rtl(`${icon} ${title}`), '', ...(values.length ? values.map(listItem) : [rtl('لا توجد عناصر نشطة متاحة حاليًا.')])];
   if (values.length) lines.push('', rtl(LIST_DIVIDER), '', rtl(selection ? question : footer));
   return lines.join('\n');
 }
@@ -317,6 +467,11 @@ function clinicTitle(icon, title, clinicName) {
   return rtl(`${icon} *${title}${clinic ? ` في ${bidi(clinic)}` : ''}*`);
 }
 
+function plainClinicTitle(icon, title, clinicName) {
+  const clinic = cleanValue(clinicName);
+  return rtl(`${icon} ${title}${clinic ? ` في ${bidi(clinic)}` : ''}`);
+}
+
 function displayItems(items) {
   return activeItems(items).map((item) => cleanValue(typeof item === 'string' ? item : item?.name)).filter(Boolean);
 }
@@ -325,7 +480,7 @@ function activeItems(items) {
   return (Array.isArray(items) ? items : []).filter((item) => item?.isActive !== false && item?.is_active !== false);
 }
 
-function listItem(value) { return rtl(`▪️ ${bidi(value)}`); }
+function listItem(value) { return rtl(`• ${bidi(value)}`); }
 function rtl(value) { return `${RLM}${value}`; }
 
 function bidi(value) {
@@ -372,6 +527,10 @@ function normalizedDecimal(value) {
     : integer;
 }
 
+function displayDay(day) {
+  return ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'][Number(day)] || 'يوم غير محدد';
+}
+
 function cleanValue(value) {
   if (value === null || value === undefined) return null;
   const clean = String(value).trim();
@@ -394,6 +553,7 @@ module.exports = {
   formatPaymentMethods,
   formatInsuranceCompanies,
   formatInsuranceClasses,
+  formatWorkingHours,
   formatUnknown,
   formatBookingClarification,
   formatInlineListItem,
