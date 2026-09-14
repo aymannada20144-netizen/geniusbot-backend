@@ -202,8 +202,12 @@ test('existing branch and reschedule entry retain deterministic ownership', asyn
     assert.equal(h.routes.at(-1).owner, 'OPERATIONAL_CORE');
   }
 });
-test('ordinary service ASK stays conversational without bridge', async () => {
+test('structured service-category ASK is runtime-owned without bridge or LLM', async () => {
   const h = harness(); await h.send('ما هي خدمات التقشير؟', 'ASK');
+  assert.equal(h.bridgeCalls, 0); assert.equal(h.conversationCalls, 0); assert.equal(h.state.changeService, undefined);
+});
+test('free-form service discussion remains conversational without bridge', async () => {
+  const h = harness(); await h.send('هل الليزر مؤلم؟', 'ASK');
   assert.equal(h.bridgeCalls, 0); assert.equal(h.conversationCalls, 1); assert.equal(h.state.changeService, undefined);
 });
 test('new booking remains booking and deterministic operations do not invoke bridge', async () => {

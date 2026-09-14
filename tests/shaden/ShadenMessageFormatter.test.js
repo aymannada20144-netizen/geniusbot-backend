@@ -113,8 +113,11 @@ describe('central Shaden list formatting', () => {
 
   test('renders specialty names only when no authoritative child relation is supplied', () => {
     const text = formatter.formatSpecialties({ items: [{ id: 'skin', name: 'الجلدية' }], services: [{ name: 'غير مرتبط' }] });
-    assert.match(text, /• الجلدية/u);
+    assert.match(text, /🩺 تخصصات/u);
+    assert.match(text, /✨ الجلدية/u);
+    assert.match(text, /هل ترغبين بمعرفة الخدمات المتاحة في تخصص معين/u);
     assert.doesNotMatch(text, /غير مرتبط/u);
+    assert.doesNotMatch(text, /•|\*\*/u);
   });
 
   test('formats branches as compact authoritative location cards', () => {

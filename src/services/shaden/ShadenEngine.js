@@ -513,7 +513,11 @@ class ShadenEngine {
         return workingBranchReply(inquiry, data, this.policy);
       case 'working_day': return workingDayReply(inquiry, data, this.policy);
 
-      case 'branch_address': return this.policy.branchAddress(inquiry.branchText ? findBranch(inquiry.branchText, data, this.policy) : (data.branches[0] || null));
+      case 'branch_address':
+        // A general “where are you?” is a branch catalogue request, not a
+        // one-off prose answer. Keep it on the canonical branch presenter.
+        if (!inquiry.branchText) return this.policy.branches(data.branches, data.clinic);
+        return this.policy.branchAddress(findBranch(inquiry.branchText, data, this.policy));
       case 'holiday_day': return this.policy.holidayDay(data);
       case 'empathy': return this.policy.empathy();
       case 'context_holiday_all': return "نعم، الإجازة تشمل جميع الفروع حاليًا 🌸";

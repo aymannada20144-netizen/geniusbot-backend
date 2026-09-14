@@ -152,7 +152,7 @@ test('final response sanitizes internal UUIDs', async () => {
   assert.equal(result.reply.includes(uuid), false);
 });
 
-test('operational requests, active state, and trusted input retain deterministic ownership', () => {
+test('operational, structured catalogue, and social identity intents retain deterministic ownership', () => {
   const owns = createShadenEngine.shouldUseOperationalCore;
   assert.equal(owns({}, { version: 1 }, { type: 'booking' }), 'EXPLICIT_OPERATIONAL_REQUEST');
   assert.equal(owns({}, { version: 1, cancellation: { step: 'confirmation' } }, { type: 'unknown' }),
@@ -161,8 +161,12 @@ test('operational requests, active state, and trusted input retain deterministic
     'TRUSTED_MACHINE_INPUT');
   assert.equal(owns({}, { version: 1 }, { type: 'services' }), null);
   assert.equal(createShadenEngine.isStructuredReadOnlyInquiry({ type: 'services' }), 'STRUCTURED_READ_ONLY_FORMATTER');
+  assert.equal(createShadenEngine.isStructuredReadOnlyInquiry({ type: 'services_under_specialty' }), 'STRUCTURED_READ_ONLY_FORMATTER');
+  assert.equal(createShadenEngine.isStructuredReadOnlyInquiry({ type: 'branches' }), 'STRUCTURED_READ_ONLY_FORMATTER');
+  assert.equal(createShadenEngine.isStructuredReadOnlyInquiry({ type: 'specialties' }), 'STRUCTURED_READ_ONLY_FORMATTER');
   assert.equal(createShadenEngine.isStructuredReadOnlyInquiry({ type: 'working_hours' }), 'STRUCTURED_READ_ONLY_FORMATTER');
-  assert.equal(createShadenEngine.isStructuredReadOnlyInquiry({ type: 'identity' }), null);
+  assert.equal(createShadenEngine.isStructuredReadOnlyInquiry({ type: 'identity' }), 'STRUCTURED_READ_ONLY_FORMATTER');
+  assert.equal(createShadenEngine.isStructuredReadOnlyInquiry({ type: 'greeting' }), 'STRUCTURED_READ_ONLY_FORMATTER');
 });
 
 test('social prompt keeps warmth while grounding identity and personal context', () => {

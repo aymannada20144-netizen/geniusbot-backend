@@ -197,9 +197,9 @@ test('real runtime derives abandonment authority, persists cleared state, and do
 
   await harness.send('مرحبا');
   assert.equal(harness.persistedData.shaden.booking, undefined);
-  assert.equal(harness.conversationCalls, 1);
+  assert.equal(harness.conversationCalls, 0);
   assert.equal(harness.sends.length, 2);
-  assert.equal(harness.sends[1].body, 'أهلًا بك');
+  assert.match(harness.sends[1].body, /أهلًا وسهلًا/u);
 });
 
 function runtimeHarness() {

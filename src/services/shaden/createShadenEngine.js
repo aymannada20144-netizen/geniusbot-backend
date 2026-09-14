@@ -684,13 +684,20 @@ const OPERATIONAL_INQUIRY_TYPES = new Set([
 const STRUCTURED_READ_ONLY_INQUIRY_TYPES = new Set([
   'services', 'specialties', 'branches', 'working_hours', 'working_hours_city',
   'working_hours_branch', 'insurance_companies', 'insurance_classes',
+  // These responses have a deterministic policy/presenter.  They must reach
+  // the operational core before the conversation provider gets a turn.
+  'services_under_specialty',
+  'branch_address',
+  'greeting', 'combined_greeting', 'presence', 'identity', 'courtesy',
+  'farewell', 'acknowledgement', 'how_are_you',
 ]);
 const STRUCTURED_PRESENTATION_TYPES = new Set([
-  'services', 'specialties', 'branches',
+  'services', 'services_under_specialty', 'specialties', 'branches',
 ]);
 const STRUCTURED_PRESENTATION_FORMATTERS = Object.freeze({
   branches: 'ShadenMessageFormatter.formatBranchesOverview',
   services: 'ShadenMessageFormatter.formatServicesOverview',
+  services_under_specialty: 'ShadenMessageFormatter.formatServicesOverview',
   specialties: 'ShadenMessageFormatter.formatSpecialtiesOverview',
 });
 

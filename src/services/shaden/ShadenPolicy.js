@@ -206,6 +206,12 @@ class ShadenPolicy {
 
     if (/(ما|وش|ايه|اي|ا)?\s*(خدمات|الخدمات|خدماتكم)/.test(text)) return { type: 'services' };
     if (/(ما|وش|ايه|اي|ا)?\s*(تخصصات|التخصصات|تخصصاتكم)/.test(text)) return { type: 'specialties' };
+    // A location question with no named branch requests the authoritative
+    // branch catalogue. It is intentionally a typed inquiry, never an LLM
+    // generated location answer.
+    if (/(?:وين|اين|مكان).*(?:موقع|موقعكم|مكانكم)|^(?:موقع|مكان)(?:كم| العيادة| العياده)?$/.test(text)) {
+      return { type: 'branches' };
+    }
    
     const norCityMatch = text.match(/^(?:ولا|و)\s*(.+)$/);
     if (norCityMatch) {

@@ -10,6 +10,53 @@ const ConversationRepository = require(
 );
 
 describe('Shaden Phase 1.2 public runtime', () => {
+  test('runtime preserves registered customer identity and keeps deterministic replies out of the LLM', async () => {
+    const patient = { id: 'patient-1', full_name: 'سامي عبدالله' };
+    const harness = createHarness(null, patient);
+    const runtime = createShadenEngine({
+      ...harness.dependencies,
+      patientService: { async resolveChannelIdentity() { return patient; } },
+      conversationEnabled: true,
+      conversationProvider: { async complete() {
+        throw new Error('LLM MUST NOT RUN AFTER RUNTIME FINAL PRESENTATION');
+      } },
+      semanticProvider: { async completeJson() {
+        throw new Error('semantic provider is unavailable in this ownership test');
+      } },
+    });
+    const send = (text, number) => runtime.processMessage({
+      channel: 'whatsapp', waMessageId: `owned-${number}`,
+      senderPhone: '+966500000001', receiverPhone: '+966500000002',
+      messageType: 'text', text, rawPayload: {},
+    });
+
+    const greeting = await send('السلام عليكم', 1);
+    assert.match(greeting.replyText, /سامي عبدالله/u);
+    assert.equal(harness.lastSentInput.body, greeting.replyText);
+
+    for (const [index, input, expected] of [
+      [2, 'وين موقعكم', 'فرع العليا'],
+      [3, 'الخدمات', 'إزالة الشعر بالليزر'],
+      [4, 'ما خدمات الليزر', 'إزالة الشعر بالليزر'],
+      [5, 'التخصصات', 'الجلدية'],
+    ]) {
+      const result = await send(input, index);
+      assert.match(result.replyText, new RegExp(expected, 'u'));
+      assert.equal(harness.lastSentInput.body, result.replyText);
+    }
+  });
+
+  test('registered customer name normalizes safely when unavailable', async () => {
+    const patient = { id: 'patient-1', full_name: '   ' };
+    const harness = createHarness(null, patient);
+    const runtime = createShadenEngine({ ...harness.dependencies,
+      patientService: { async resolveChannelIdentity() { return patient; } } });
+    const result = await runtime.processMessage({ channel: 'whatsapp', waMessageId: 'empty-name',
+      senderPhone: '+966500000001', receiverPhone: '+966500000002', messageType: 'text',
+      text: 'السلام عليكم', rawPayload: {} });
+    assert.doesNotMatch(result.replyText, /undefined|null|يا\s+🌸/u);
+  });
+
   test('reuses one anonymous conversation through the real repository', async () => {
     const database = createConversationDatabase();
     const repository = new ConversationRepository(database);
@@ -581,7 +628,7 @@ function conversationRow({
   };
 }
 
-function createHarness(initialShadenState) {
+function createHarness(initialShadenState, registeredPatient = null) {
   let storedState = {
     current: initialShadenState ? 'shaden' : null,
     data: {
@@ -592,6 +639,7 @@ function createHarness(initialShadenState) {
   const conversation = {
     id: 'conversation-1',
     botEnabled: true,
+    patientId: registeredPatient?.id || null,
   };
   let lastSentInput = null;
   let lastOutgoing = null;
@@ -637,7 +685,7 @@ function createHarness(initialShadenState) {
     },
     dependencies: {
       patientRepository: {
-        findByClinicAndChannelIdentity: async () => null,
+        findByClinicAndChannelIdentity: async () => registeredPatient,
       },
       clinicRepository: {
         resolveWhatsAppClinic: async () => ({
@@ -657,6 +705,7 @@ function createHarness(initialShadenState) {
       },
       messageRepository: {
         findByExternalId: async () => null,
+        getRecentMessages: async () => [],
         saveIncomingMessage: async () => ({}),
         saveOutgoingMessage: async (input) => {
           lastOutgoing = reload(input);

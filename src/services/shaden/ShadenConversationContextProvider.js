@@ -33,15 +33,29 @@ class ShadenConversationContextProvider {
         'CONVERSATION_PATIENT_MISMATCH'
       );
     }
+    const displayName = normalizedDisplayName(patient?.full_name);
     return {
       patient: patient ? {
         id: patient.id,
-        fullName: patient.full_name || null,
+        fullName: displayName,
       } : null,
-      customerName: patient?.full_name || null,
+      // This is the single customer identity boundary for the Shaden runtime.
+      // Downstream code must not independently read a patient or WhatsApp profile.
+      customer: patient ? {
+        id: patient.id,
+        displayName,
+        firstName: displayName?.split(/\s+/u)[0] || null,
+      } : null,
+      customerName: displayName,
       customerNameSource: patient ? 'patients.full_name' : 'current_conversation_state',
     };
   }
+}
+
+function normalizedDisplayName(value) {
+  if (typeof value !== 'string') return null;
+  const name = value.replace(/\s+/gu, ' ').trim();
+  return name && !/^(?:null|undefined)$/iu.test(name) ? name : null;
 }
 
 module.exports = ShadenConversationContextProvider;
