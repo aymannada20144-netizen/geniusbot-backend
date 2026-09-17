@@ -142,6 +142,110 @@ describe('Shaden confirmed booking execution', () => {
     assert.equal(result.interaction.purpose, 'confirm_booking');
   });
 
+  test('trusted interactive UUID selections persist the current insurance class and execute with it', async () => {
+    const ids = {
+      insurance: '00000000-0000-4000-8000-000000000111',
+      company: '00000000-0000-4000-8000-000000000112',
+      classA: '00000000-0000-4000-8000-000000000113',
+      classVip: '00000000-0000-4000-8000-000000000114',
+    };
+    const data = clinicData();
+    data.paymentMethods[1].id = ids.insurance;
+    data.insuranceCompanies = [{ id: ids.company, name: 'شركة ألف' }];
+    data.insuranceClasses = [
+      { id: ids.classA, insuranceCompanyId: ids.company, name: 'A', isAccepted: true },
+      { id: ids.classVip, insuranceCompanyId: ids.company, name: 'VIP', isAccepted: true },
+    ];
+    const calls = [];
+    const engine = createEngine(async (input) => {
+      calls.push(input);
+      return successfulServiceResult();
+    });
+    let state = bookingState({ step: 'payment_method', paymentMethodId: null });
+
+    let result = await interactiveTurnWithData(
+      engine, state, ids.insurance, 'تأمين', data
+    );
+    assert.equal(result.nextState.booking.paymentMethodId, ids.insurance);
+    state = result.nextState;
+
+    result = await interactiveTurnWithData(
+      engine, state, ids.company, 'شركة ألف', data
+    );
+    assert.equal(result.nextState.booking.insuranceCompanyId, ids.company);
+    state = result.nextState;
+
+    result = await interactiveTurnWithData(engine, state, ids.classA, 'A', data);
+    assert.equal(result.nextState.booking.insuranceClassId, ids.classA);
+
+    result = await interactiveTurnWithData(
+      engine, result.nextState, ids.classVip, 'VIP', data
+    );
+    assert.equal(result.nextState.booking.step, 'confirmation');
+    assert.equal(result.nextState.booking.insuranceClassId, ids.classVip);
+    assert.match(result.reply, /VIP/u);
+    assert.doesNotMatch(result.reply, /فئة التأمين:\s*A/u);
+
+    await interactiveTurnWithData(
+      engine, result.nextState, 'booking-confirm:yes', 'تأكيد الحجز', data
+    );
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].payment_method_id, ids.insurance);
+    assert.equal(calls[0].insurance_company_id, ids.company);
+    assert.equal(calls[0].insurance_class_id, ids.classVip);
+  });
+
+  test('cash confirmation keeps null insurance fields in the create payload', async () => {
+    const calls = [];
+    const engine = createEngine(async (input) => {
+      calls.push(input);
+      return successfulServiceResult();
+    });
+
+    await confirm(engine);
+
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].payment_method_id, 'cash-1');
+    assert.equal(calls[0].insurance_company_id, null);
+    assert.equal(calls[0].insurance_class_id, null);
+  });
+
+  test('accepted insurance A and VIP selections each create with their selected class', async () => {
+    const data = clinicData();
+    for (const [classId, label] of [['class-a', 'فئة A'], ['class-vip', 'VIP']]) {
+      const calls = [];
+      const engine = createEngine(async (input) => {
+        calls.push(input);
+        return successfulServiceResult();
+      });
+      const selected = await interactiveTurnWithData(
+        engine,
+        bookingState({
+          step: 'insurance_class',
+          paymentMethodId: 'insurance-1',
+          insuranceCompanyId: 'company-1',
+          insuranceClassId: null,
+        }),
+        classId,
+        label,
+        data
+      );
+      assert.equal(selected.nextState.booking.insuranceClassId, classId);
+      assert.match(selected.reply, new RegExp(label.replace('فئة ', ''), 'u'));
+
+      await interactiveTurnWithData(
+        engine,
+        selected.nextState,
+        'booking-confirm:yes',
+        'تأكيد الحجز',
+        data
+      );
+      assert.equal(calls.length, 1);
+      assert.equal(calls[0].insurance_company_id, 'company-1');
+      assert.equal(calls[0].insurance_class_id, classId);
+    }
+  });
+
   test('payment selection exposes the active methods as reply buttons', async () => {
     const engine = createEngine(async () => successfulServiceResult());
     const result = await turn(engine, bookingState({
@@ -492,10 +596,14 @@ function turn(engine, currentState, text) {
 }
 
 function interactiveTurn(engine, currentState, value, text) {
+  return interactiveTurnWithData(engine, currentState, value, text, clinicData());
+}
+
+function interactiveTurnWithData(engine, currentState, value, text, data) {
   return Promise.resolve(engine.handle({
     message: { text, rawPayload: { value } },
     currentState,
-    clinicData: clinicData(),
+    clinicData: data,
     bookingContext: bookingContext(),
   }));
 }

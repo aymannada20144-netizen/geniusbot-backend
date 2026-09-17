@@ -2705,7 +2705,8 @@ function handleBookingStep({
       const paymentMethod = findNamedSelection(
         text,
         data.paymentMethods,
-        policy
+        policy,
+        interactiveReplyId
       );
       if (paymentMethod) {
         booking.paymentMethodId = paymentMethod.id;
@@ -2741,7 +2742,8 @@ function handleBookingStep({
       const company = findNamedSelection(
         text,
         data.insuranceCompanies,
-        policy
+        policy,
+        interactiveReplyId
       );
       if (!company) {
         return insuranceCompanyReply(
@@ -2775,7 +2777,8 @@ function handleBookingStep({
         text,
         data.insuranceClasses,
         booking.insuranceCompanyId,
-        policy
+        policy,
+        interactiveReplyId
       );
       if (!insuranceClass) {
         const classes = data.insuranceClasses.filter((item) =>
@@ -2796,6 +2799,23 @@ function handleBookingStep({
     }
 
     case 'confirmation': {
+      const replacementInsuranceClass = findInsuranceClassSelection(
+        text,
+        data.insuranceClasses,
+        booking.insuranceCompanyId,
+        policy,
+        interactiveReplyId
+      );
+      if (
+        replacementInsuranceClass &&
+        isInsurancePayment(
+          findById(data.paymentMethods, booking.paymentMethodId) || {},
+          policy
+        )
+      ) {
+        booking.insuranceClassId = replacementInsuranceClass.id;
+        return bookingSummary(policy, data, booking);
+      }
       if (typeof interactiveReplyId === 'string') {
         if (interactiveReplyId === 'booking-confirm:yes') {
           return executeConfirmedBooking({
@@ -3143,7 +3163,20 @@ function isCashSelection(text, policy) {
   return ['cash', 'كاش', 'نقد', 'نقدي'].includes(value);
 }
 
-function findInsuranceClassSelection(text, classes, companyId, policy) {
+function findInsuranceClassSelection(
+  text,
+  classes,
+  companyId,
+  policy,
+  interactiveReplyId = null
+) {
+  if (typeof interactiveReplyId === 'string') {
+    const interactiveSelection = classes.find((item) =>
+      String(item.id) === interactiveReplyId &&
+      item.insuranceCompanyId === companyId
+    );
+    if (interactiveSelection) return interactiveSelection;
+  }
   const needle = policy.normalize(text).replace(/^(class|فئه)\s+/, '');
   return classes.find((item) => {
     if (item.insuranceCompanyId !== companyId) return false;
@@ -4384,7 +4417,13 @@ function isKnowledgeInquiry(type) {
   ].includes(type);
 }
 
-function findNamedSelection(text, items, policy) {
+function findNamedSelection(text, items, policy, interactiveReplyId = null) {
+  if (typeof interactiveReplyId === 'string') {
+    const interactiveSelection = items.find((item) =>
+      String(item.id) === interactiveReplyId
+    );
+    if (interactiveSelection) return interactiveSelection;
+  }
   const needle = policy.normalize(text);
   if (!needle) return null;
   return items.find((item) => {

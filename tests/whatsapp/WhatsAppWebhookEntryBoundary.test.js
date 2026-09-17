@@ -58,6 +58,27 @@ test('parser ignores a status-only callback', () => {
   assert.equal(WhatsAppWebhookParser.parse(payload([statusChange()])), null);
 });
 
+test('parser preserves the Meta interactive UUID as the trusted raw payload', () => {
+  const optionId = '00000000-0000-4000-8000-000000000114';
+  const parsed = WhatsAppWebhookParser.parse(payload([{
+    field: 'messages',
+    value: {
+      metadata: { display_phone_number: '15550000000', phone_number_id: 'phone-number-id' },
+      messages: [{
+        from: '966500000000', id: 'wamid.insurance-class', timestamp: '1700000000',
+        type: 'interactive',
+        interactive: { type: 'button_reply', button_reply: { id: optionId, title: 'VIP' } },
+      }],
+    },
+  }]));
+
+  assert.equal(parsed.text, 'VIP');
+  assert.equal(parsed.rawPayload, optionId);
+  assert.deepEqual(parsed.inputProvenance, {
+    trusted: true, source: 'meta_whatsapp', kind: 'meta_interactive_button',
+  });
+});
+
 test('controller acknowledges and dispatches a parsed inbound message', async () => {
   const dispatched = [];
   const controller = new WhatsAppController({
