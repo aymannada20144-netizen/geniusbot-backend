@@ -7,7 +7,7 @@ class PriceStateMachine {
   decide({ message, currentSlots = {}, persistedPriceState = null, catalog = {} }) {
     const text = String(message?.text ?? message ?? '');
     const p = this.policy;
-    const current = this.extract(text, catalog);
+    const current = { ...this.extract(text, catalog), ...currentSlots };
     const base = this.normalise(persistedPriceState);
     // Current message always wins; a new service/company invalidates dependent data.
     const slots = { ...base, ...current };
@@ -22,8 +22,14 @@ class PriceStateMachine {
       Object.assign(slots, { selected_insurance_class_id: null, selected_insurance_class_name: null, resolved_insurance_price: null });
       invalidatedSlots.push('insuranceClass', 'price');
     }
+    Object.assign(slots, current);
     if (current.company || current.insurance) slots.payment = 'insurance';
-    if (current.cash) slots.payment = 'cash';
+    if (current.cash && !current.company) {
+      slots.payment = 'cash';
+      slots.company = null;
+      slots.insuranceClass = null;
+      Object.assign(slots, { selected_insurance_company_id: null, selected_insurance_company_name: null, selected_insurance_class_id: null, selected_insurance_class_name: null, resolved_insurance_price: null });
+    }
     const resolved = this.toState(slots, catalog);
     const common = this.decisionBase(base, current, resolved, invalidatedSlots);
 
@@ -42,7 +48,7 @@ class PriceStateMachine {
     if (resolved.selected_insurance_company_id) {
       const validClasses = this.classesFor(resolved.selected_insurance_company_id, catalog);
       if (current.insuranceClass && !validClasses.some((x) => x.id === current.insuranceClass.id)) {
-        return this.withAction(common, 'INVALID_INSURANCE_CLASS', { ...resolved, insuranceClass: null, state: 'awaiting_price_insurance_class' });
+        return this.withAction(common, 'INVALID_INSURANCE_CLASS', { ...resolved, selected_insurance_class_id: null, selected_insurance_class_name: null, resolved_insurance_price: null, state: 'awaiting_price_insurance_class' });
       }
       if (!resolved.selected_insurance_class_id) return this.withAction(common, 'ASK_INSURANCE_CLASS', { ...resolved, state: 'awaiting_price_insurance_class' });
       return this.withAction(common, 'QUOTE_INSURANCE_PRICE', { ...resolved, state: 'awaiting_price_booking_confirmation' });

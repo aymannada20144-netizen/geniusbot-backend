@@ -137,11 +137,13 @@ describe('Shaden persisted price inquiry flow', () => {
     assert.equal(result.nextState.priceInquiry.state, 'awaiting_price_service');
   });
 
-  test('price state survives serialization between messages', async () => {
+  test('serialization preserves service and neutral payment without a cash quote', async () => {
     const first = await harness().send('ما أسعار الخدمات');
     const persisted = JSON.parse(JSON.stringify(first.nextState));
     const second = await harness().send('فيلر', persisted);
-    assert.match(second.reply, /500/);
+    assert.equal(second.nextState.priceInquiry.selected_payment_method, null);
+    assert.equal(second.nextState.priceInquiry.resolved_cash_price, null);
+    assert.doesNotMatch(second.reply, /500/);
     assert.equal(second.nextState.priceInquiry.selected_service_name, 'فيلر');
   });
 
