@@ -284,16 +284,18 @@ class ShadenEngine {
         currentSlots: {},
         persistedPriceState: nextState.priceInquiry,
         catalog: safeData,
-      }, this.priceService).then(decision => this.priceDecisionExecutor.execute(decision, safeData)).then((result) => {
-        nextState.priceInquiry = result.nextPriceState;
-        if (!result.nextPriceState) delete nextState.priceInquiry;
-        if (result.handoff) {
+      }, this.priceService).then(async decision => {
+        const outcome = await this.priceDecisionExecutor.execute(decision);
+        const completed = this.priceStateMachine.complete(decision, outcome);
+        nextState.priceInquiry = completed.nextPriceState;
+        if (!completed.nextPriceState) delete nextState.priceInquiry;
+        if (completed.action === 'HANDOFF_TO_BOOKING') {
           return normalizeLegacyReply(handoffPriceToBooking({
-            state: nextState, flow: result.nextPriceState, data: safeData,
+            state: nextState, flow: completed.nextPriceState, data: safeData,
             policy: this.policy, bookingContext,
           }), nextState);
         }
-        return normalizeLegacyReply(result.reply, nextState);
+        return normalizeLegacyReply(this.priceDecisionExecutor.render(completed, safeData), nextState);
       });
     }
 

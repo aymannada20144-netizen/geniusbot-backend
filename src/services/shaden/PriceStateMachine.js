@@ -45,7 +45,12 @@ class PriceStateMachine {
       Object.assign(slots, { selected_insurance_company_id: null, selected_insurance_company_name: null, selected_insurance_class_id: null, selected_insurance_class_name: null, resolved_insurance_price: null });
     }
     const resolved = this.toState(slots, catalog);
+    const method = (catalog.paymentMethods || []).find(item => item.code === resolved.selected_payment_method);
     const common = { ...this.decisionBase(base, current, resolved, invalidatedSlots),
+      unknownService: !resolved.selected_service_id && !this.isGeneralInquiry(text),
+      lookup: { clinicId: catalog.clinic?.id, serviceId: resolved.selected_service_id,
+        paymentMethodId: method?.id, ...(resolved.selected_payment_method === 'insurance'
+          ? { insuranceCompanyId: resolved.selected_insurance_company_id, insuranceClassId: resolved.selected_insurance_class_id } : {}) },
       options: { companies: catalog.applicable?.companies || catalog.insuranceCompanies || [],
         classes: this.classesFor(resolved.selected_insurance_company_id, catalog) } };
 
@@ -81,6 +86,21 @@ class PriceStateMachine {
   }
 
   withAction(decision, action, nextPriceState) { return { ...decision, action, nextPriceState, resolvedSlots: nextPriceState, missingSlots: nextPriceState ? this.missing(nextPriceState) : [] }; }
+  complete(decision, outcome) {
+    if (outcome.type === 'NO_LOOKUP') return decision;
+    const state = { ...decision.nextPriceState, resolved_cash_price: null, resolved_insurance_price: null,
+      amount: null, currency: null, quoteCompleted: false };
+    if (outcome.type === 'QUOTE_FAILED') {
+      state.state = 'price_inquiry_ready';
+      return this.withAction(decision, 'PRICE_NOT_FOUND', state);
+    }
+    state.amount = outcome.amount;
+    state.currency = outcome.currency;
+    state.quoteCompleted = true;
+    state.state = 'awaiting_price_booking_confirmation';
+    state[decision.action === 'QUOTE_CASH_PRICE' ? 'resolved_cash_price' : 'resolved_insurance_price'] = outcome.rawAmount;
+    return this.withAction(decision, decision.action, state);
+  }
   decisionBase(persisted, current, resolved, invalidatedSlots) {
     return { kind: 'PRICE', owner: 'PriceStateMachine', action: 'ASK_PAYMENT_METHOD', currentSlots: current, persistedSlots: persisted, resolvedSlots: resolved, missingSlots: this.missing(resolved), invalidatedSlots, provenance: Object.fromEntries(Object.keys(current).map((k) => [k, 'CURRENT'])), evidence: current.cash ? 'CURRENT' : null };
   }
