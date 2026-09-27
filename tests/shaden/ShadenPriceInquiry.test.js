@@ -86,7 +86,9 @@ describe('Shaden persisted price inquiry flow', () => {
     const session = harness();
     let result = await toInsuranceClass(session);
     result = await session.send('VIP', result.nextState);
-    assert.deepEqual(session.calls[1], {
+    // Insurance is the first lookup; a neutral service turn never prefetches cash.
+    assert.equal(session.calls.length, 1);
+    assert.deepEqual(session.calls[0], {
       clinicId: IDS.clinic, serviceId: IDS.filler,
       paymentMethodId: IDS.insurance,
       insuranceCompanyId: IDS.company,
@@ -325,7 +327,8 @@ describe('Shaden persisted price inquiry flow', () => {
   test('clear wrong-keyboard price question resolves safely', async () => {
     const result = await harness().send('lh suv hgf,j;s');
     assert.equal(result.nextState.priceInquiry.selected_service_id, IDS.botox);
-    assert.match(result.reply, /500/);
+    assert.equal(result.nextState.priceInquiry.selected_payment_method, null);
+    assert.doesNotMatch(result.reply, /500/);
   });
 
   test('unclear Latin input keeps the safe generic fallback', async () => {

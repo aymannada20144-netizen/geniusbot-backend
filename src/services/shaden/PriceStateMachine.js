@@ -1,4 +1,5 @@
 'use strict';
+const { matches } = require('./PriceCatalogMatcher');
 
 // The only component allowed to turn a price conversation into a decision.
 class PriceStateMachine {
@@ -109,7 +110,7 @@ class PriceStateMachine {
   toState(s) { return { ...this.empty(), state: s.state || 'awaiting_price_payment_method', selected_service_id: s.service?.id || s.selected_service_id || null, selected_service_name: s.service?.name || s.selected_service_name || null, selected_payment_method: s.payment || s.selected_payment_method || null, selected_insurance_company_id: s.company?.id || s.selected_insurance_company_id || null, selected_insurance_company_name: s.company?.name || s.selected_insurance_company_name || null, selected_insurance_class_id: s.insuranceClass?.id || s.selected_insurance_class_id || null, selected_insurance_class_name: s.insuranceClass?.name || s.selected_insurance_class_name || null, resolved_cash_price: s.cashPrice || s.resolved_cash_price || null, resolved_insurance_price: s.insurancePrice || s.resolved_insurance_price || null, currency: s.currency || null }; }
   missing(s) { return ['selected_service_id', 'selected_payment_method', ...(s.selected_payment_method === 'insurance' ? ['selected_insurance_company_id', 'selected_insurance_class_id'] : [])].filter((k) => !s[k]); }
   classesFor(companyId, catalog) { return (catalog.applicable?.classes || catalog.insuranceClasses || []).filter((x) => x.insuranceCompanyId === companyId && x.isAccepted !== false); }
-  extract(text, catalog) { const n = this.policy.normalize(text); const match = (items) => (items || []).filter((x) => this.compact(n).includes(this.compact(x.name)) || this.compact(x.name).includes(this.compact(n)));
+  extract(text, catalog) { const n = this.policy.normalize(text); const match = (items) => matches(n, items);
     const one = (items) => { const v = match(items); return v.length === 1 ? v[0] : null; };
     const service = one(catalog.services); const company = one(catalog.insuranceCompanies); const insuranceClass = one(catalog.insuranceClasses);
     return { ...(service ? { service } : {}), ...(company ? { company } : {}), ...(insuranceClass ? { insuranceClass } : {}), ...( /(كاش|نقدي)/.test(n) ? { cash: true } : {}), ...( /(تامين|تأمين)/.test(n) ? { insurance: true } : {}) }; }
