@@ -1,0 +1,21 @@
+'use strict';
+const QUOTE_ACTIONS = new Set(['QUOTE_CASH_PRICE', 'QUOTE_INSURANCE_PRICE']);
+class PriceDecisionExecutor {
+  constructor({ priceService, policy, clock = { now: () => new Date() } }) { this.priceService = priceService; this.policy = policy; this.clock = clock; }
+  async execute(decision, catalog) {
+    if (!decision?.action) throw new TypeError('Price decision action is required.');
+    if (decision.action === 'QUOTE_CASH_PRICE' && decision.evidence !== 'CURRENT') throw new Error('Cash quote requires CURRENT explicit evidence.');
+    const state = { ...decision.nextPriceState };
+    if (QUOTE_ACTIONS.has(decision.action)) return this.quote(decision, state, catalog);
+    return { reply: this.prompt(decision, state, catalog), nextPriceState: state, handoff: decision.action === 'HANDOFF_TO_BOOKING' };
+  }
+  async quote(decision, state, catalog) { const cash = decision.action === 'QUOTE_CASH_PRICE'; const method = (catalog.paymentMethods || []).find((x) => String(x.code).toLowerCase() === (cash ? 'cash' : 'insurance'));
+    if (!method || !this.priceService) return { reply: 'السعر غير متاح حاليًا 🌸', nextPriceState: state };
+    try { const price = await this.priceService.resolvePrice({ clinicId: catalog.clinic.id, serviceId: state.selected_service_id, paymentMethodId: method.id, insuranceCompanyId: cash ? null : state.selected_insurance_company_id, insuranceClassId: cash ? null : state.selected_insurance_class_id, bookingDate: this.clock.now() });
+      const value = String(price.price); state.currency = price.currency || 'SAR'; if (cash) state.resolved_cash_price = value; else state.resolved_insurance_price = value;
+      return { reply: cash ? `سعر ${state.selected_service_name} كاش ${value} ريال 🌸\nهل ترغبين في حجز موعد؟` : `سعر ${state.selected_service_name} على ${state.selected_insurance_company_name} فئة ${state.selected_insurance_class_name} هو ${value} ريال 🌸\nهل ترغبين في حجز موعد؟`, nextPriceState: state };
+    } catch { return { reply: 'لا يوجد سعر مسجل لهذه الخيارات حاليًا 🌸', nextPriceState: state }; }
+  }
+  prompt(d, s, c) { const names = (items) => (items || []).map((x) => `▪️ ${x.name}`).join('\n') || 'لا توجد خيارات متاحة حاليًا.'; switch (d.action) { case 'ASK_PAYMENT_METHOD': return s.selected_service_id ? 'هل الدفع كاش أم تأمين؟' : `${this.policy.services(c.services || [], c.clinic)}\nاختاري خدمة واحدة لمعرفة سعرها.`; case 'ASK_INSURANCE_COMPANY': return `اختاري شركة التأمين:\n${names(c.insuranceCompanies)}`; case 'ASK_INSURANCE_CLASS': return `اختاري فئة التأمين:\n${names((c.insuranceClasses || []).filter((x) => x.insuranceCompanyId === s.selected_insurance_company_id && x.isAccepted !== false))}`; case 'INVALID_INSURANCE_CLASS': return `هذه الفئة غير صالحة للشركة المختارة.\nالفئات المتاحة:\n${names((c.insuranceClasses || []).filter((x) => x.insuranceCompanyId === s.selected_insurance_company_id && x.isAccepted !== false))}`; case 'INVALID_INSURANCE_COMPANY': return `شركة التأمين غير صالحة.\n${names(c.insuranceCompanies)}`; case 'PRICE_NOT_FOUND': return 'لا يوجد سعر مسجل لهذه الخيارات حاليًا 🌸'; case 'OFFER_BOOKING': return 'هل ترغبين في حجز موعد؟ 🌸'; case 'HANDOFF_TO_BOOKING': return ''; default: throw new Error(`Unsupported price action: ${d.action}`); } }
+}
+module.exports = PriceDecisionExecutor;

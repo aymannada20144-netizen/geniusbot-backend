@@ -13,6 +13,8 @@ const {
   lifecycleMetadataFrom,
   operationalDispositionFrom,
 } = require('../../contracts/shaden/InternalHandlerResult');
+const PriceStateMachine = require('./PriceStateMachine');
+const PriceDecisionExecutor = require('./PriceDecisionExecutor');
 
 class ShadenEngine {
   constructor({
@@ -27,6 +29,10 @@ class ShadenEngine {
     this.bookingEngine = bookingEngine;
     this.appointmentService = appointmentService;
     this.priceService = priceService;
+    this.priceStateMachine = new PriceStateMachine({ policy });
+    this.priceDecisionExecutor = new PriceDecisionExecutor({
+      priceService, policy, clock: clock && typeof clock.now === 'function' ? clock : { now: () => new Date() },
+    });
     this.logger = logger;
     this.clock = clock && typeof clock.now === 'function'
       ? clock
@@ -273,15 +279,22 @@ class ShadenEngine {
       this.policy
     );
     if (nextState.priceInquiry || isPriceInquiry(priceText, this.policy)) {
-      return handlePriceInquiry({
-        text: priceText,
-        state: nextState,
-        data: safeData,
-        policy: this.policy,
-        priceService: this.priceService,
-        now: this.clock.now(),
-        bookingContext,
-      }).then((result) => normalizeLegacyReply(result, nextState));
+      const decision = this.priceStateMachine.decide({
+        message: priceText,
+        currentSlots: {},
+        persistedPriceState: nextState.priceInquiry,
+        catalog: safeData,
+      });
+      return this.priceDecisionExecutor.execute(decision, safeData).then((result) => {
+        nextState.priceInquiry = result.nextPriceState;
+        if (result.handoff) {
+          return normalizeLegacyReply(handoffPriceToBooking({
+            state: nextState, flow: result.nextPriceState, data: safeData,
+            policy: this.policy, bookingContext,
+          }), nextState);
+        }
+        return normalizeLegacyReply(result.reply, nextState);
+      });
     }
 
     if (canonicalCustomerName && nextState.step === 'customer_name') {
