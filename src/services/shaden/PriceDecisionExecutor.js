@@ -8,6 +8,10 @@ class PriceDecisionExecutor {
     if (decision.action === 'QUOTE_CASH_PRICE' && decision.evidence !== 'CURRENT') throw new Error('Cash quote requires CURRENT explicit evidence.');
     const state = { ...decision.nextPriceState };
     if (QUOTE_ACTIONS.has(decision.action)) return this.quote(decision, state, catalog);
+    if (decision.action === 'ASK_INSURANCE_COMPANY') return { reply: this.policy.insuranceCompanies(decision.options.companies, true), nextPriceState: state };
+    if (decision.action === 'ASK_INSURANCE_CLASS') return { reply: this.policy.insuranceClasses(decision.options.classes, true), nextPriceState: state };
+    if (decision.action === 'INVALID_INSURANCE_COMPANY') return { reply: `لا يوجد سعر مسجل لهذه الشركة.\n${this.policy.insuranceCompanies(decision.options.companies, true)}`, nextPriceState: state };
+    if (decision.action === 'INVALID_INSURANCE_CLASS') return { reply: `لا يوجد سعر مسجل لهذه الفئة.\n${this.policy.insuranceClasses(decision.options.classes, true)}`, nextPriceState: state };
     return { reply: this.prompt(decision, state, catalog), nextPriceState: state, handoff: decision.action === 'HANDOFF_TO_BOOKING' };
   }
   async quote(decision, state, catalog) { const cash = decision.action === 'QUOTE_CASH_PRICE'; const method = (catalog.paymentMethods || []).find((x) => String(x.code).toLowerCase() === (cash ? 'cash' : 'insurance'));

@@ -279,13 +279,12 @@ class ShadenEngine {
       this.policy
     );
     if (nextState.priceInquiry || isPriceInquiry(priceText, this.policy)) {
-      const decision = this.priceStateMachine.decide({
+      return this.priceStateMachine.prepare({
         message: priceText,
         currentSlots: {},
         persistedPriceState: nextState.priceInquiry,
         catalog: safeData,
-      });
-      return this.priceDecisionExecutor.execute(decision, safeData).then((result) => {
+      }, this.priceService).then(decision => this.priceDecisionExecutor.execute(decision, safeData)).then((result) => {
         nextState.priceInquiry = result.nextPriceState;
         if (!result.nextPriceState) delete nextState.priceInquiry;
         if (result.handoff) {

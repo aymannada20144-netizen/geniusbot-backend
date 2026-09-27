@@ -4,6 +4,17 @@
 class PriceStateMachine {
   constructor({ policy }) { this.policy = policy; }
 
+  async prepare(input, priceService) {
+    const preliminary = this.decide(input);
+    const serviceId = preliminary.nextPriceState?.selected_service_id;
+    const method = (input.catalog.paymentMethods || []).find(item => item.code === 'insurance');
+    if (!serviceId || !method || typeof priceService?.listApplicableInsuranceOptions !== 'function') return preliminary;
+    const applicable = await priceService.listApplicableInsuranceOptions({
+      clinicId: input.catalog.clinic.id, serviceId, paymentMethodId: method.id,
+    });
+    return this.decide({ ...input, catalog: { ...input.catalog, applicable } });
+  }
+
   decide({ message, currentSlots = {}, persistedPriceState = null, catalog = {} }) {
     const text = String(message?.text ?? message ?? '');
     const p = this.policy;
@@ -34,7 +45,9 @@ class PriceStateMachine {
       Object.assign(slots, { selected_insurance_company_id: null, selected_insurance_company_name: null, selected_insurance_class_id: null, selected_insurance_class_name: null, resolved_insurance_price: null });
     }
     const resolved = this.toState(slots, catalog);
-    const common = this.decisionBase(base, current, resolved, invalidatedSlots);
+    const common = { ...this.decisionBase(base, current, resolved, invalidatedSlots),
+      options: { companies: catalog.applicable?.companies || catalog.insuranceCompanies || [],
+        classes: this.classesFor(resolved.selected_insurance_company_id, catalog) } };
 
     if (this.isGeneralInquiry(text) && !current.service) {
       return this.withAction(common, 'ASK_PAYMENT_METHOD', this.empty());
@@ -53,6 +66,9 @@ class PriceStateMachine {
       return this.withAction(common, 'QUOTE_CASH_PRICE', { ...resolved, state: 'awaiting_price_booking_confirmation' });
     }
     if (resolved.selected_insurance_company_id) {
+      if (!common.options.companies.some(item => item.id === resolved.selected_insurance_company_id)) {
+        return this.withAction(common, 'INVALID_INSURANCE_COMPANY', { ...resolved, selected_insurance_class_id: null, selected_insurance_class_name: null, state: 'awaiting_price_insurance_company' });
+      }
       const validClasses = this.classesFor(resolved.selected_insurance_company_id, catalog);
       if (current.insuranceClass && !validClasses.some((x) => x.id === current.insuranceClass.id)) {
         return this.withAction(common, 'INVALID_INSURANCE_CLASS', { ...resolved, selected_insurance_class_id: null, selected_insurance_class_name: null, resolved_insurance_price: null, state: 'awaiting_price_insurance_class' });
@@ -72,7 +88,7 @@ class PriceStateMachine {
   normalise(value) { return value && value.intent === 'price_inquiry' ? { ...this.empty(), ...value } : this.empty(); }
   toState(s) { return { ...this.empty(), state: s.state || 'awaiting_price_payment_method', selected_service_id: s.service?.id || s.selected_service_id || null, selected_service_name: s.service?.name || s.selected_service_name || null, selected_payment_method: s.payment || s.selected_payment_method || null, selected_insurance_company_id: s.company?.id || s.selected_insurance_company_id || null, selected_insurance_company_name: s.company?.name || s.selected_insurance_company_name || null, selected_insurance_class_id: s.insuranceClass?.id || s.selected_insurance_class_id || null, selected_insurance_class_name: s.insuranceClass?.name || s.selected_insurance_class_name || null, resolved_cash_price: s.cashPrice || s.resolved_cash_price || null, resolved_insurance_price: s.insurancePrice || s.resolved_insurance_price || null, currency: s.currency || null }; }
   missing(s) { return ['selected_service_id', 'selected_payment_method', ...(s.selected_payment_method === 'insurance' ? ['selected_insurance_company_id', 'selected_insurance_class_id'] : [])].filter((k) => !s[k]); }
-  classesFor(companyId, catalog) { return (catalog.insuranceClasses || []).filter((x) => x.insuranceCompanyId === companyId && x.isAccepted !== false); }
+  classesFor(companyId, catalog) { return (catalog.applicable?.classes || catalog.insuranceClasses || []).filter((x) => x.insuranceCompanyId === companyId && x.isAccepted !== false); }
   extract(text, catalog) { const n = this.policy.normalize(text); const match = (items) => (items || []).filter((x) => this.compact(n).includes(this.compact(x.name)) || this.compact(x.name).includes(this.compact(n)));
     const one = (items) => { const v = match(items); return v.length === 1 ? v[0] : null; };
     const service = one(catalog.services); const company = one(catalog.insuranceCompanies); const insuranceClass = one(catalog.insuranceClasses);
