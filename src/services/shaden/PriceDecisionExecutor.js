@@ -4,6 +4,7 @@ class PriceDecisionExecutor {
   constructor({ priceService, policy, clock = { now: () => new Date() } }) { this.priceService = priceService; this.policy = policy; this.clock = clock; }
   async execute(decision, catalog) {
     if (!decision?.action) throw new TypeError('Price decision action is required.');
+    if (decision.dismissed) return { reply: 'تمام 🌸 أنا معك إذا احتجتِ أي خدمة أخرى.', nextPriceState: null };
     if (decision.action === 'QUOTE_CASH_PRICE' && decision.evidence !== 'CURRENT') throw new Error('Cash quote requires CURRENT explicit evidence.');
     const state = { ...decision.nextPriceState };
     if (QUOTE_ACTIONS.has(decision.action)) return this.quote(decision, state, catalog);

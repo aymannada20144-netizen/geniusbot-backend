@@ -287,6 +287,7 @@ class ShadenEngine {
       });
       return this.priceDecisionExecutor.execute(decision, safeData).then((result) => {
         nextState.priceInquiry = result.nextPriceState;
+        if (!result.nextPriceState) delete nextState.priceInquiry;
         if (result.handoff) {
           return normalizeLegacyReply(handoffPriceToBooking({
             state: nextState, flow: result.nextPriceState, data: safeData,

@@ -9,6 +9,9 @@ class PriceStateMachine {
     const p = this.policy;
     const current = { ...this.extract(text, catalog), ...currentSlots };
     const base = this.normalise(persistedPriceState);
+    const companyId = current.company?.id || base.selected_insurance_company_id;
+    const scoped = this.extract(text, { insuranceClasses: (catalog.insuranceClasses || []).filter(item => item.insuranceCompanyId === companyId) });
+    if (!currentSlots.insuranceClass && scoped.insuranceClass) current.insuranceClass = scoped.insuranceClass;
     // Current message always wins; a new service/company invalidates dependent data.
     const slots = { ...base, ...current };
     const invalidatedSlots = [];
@@ -36,6 +39,10 @@ class PriceStateMachine {
     if (this.isGeneralInquiry(text) && !current.service) {
       return this.withAction(common, 'ASK_PAYMENT_METHOD', this.empty());
     }
+    if (base.state === 'awaiting_price_booking_confirmation' &&
+        this.policy.normalize(text).split(' ')[0] === 'لا' && !Object.keys(current).length) {
+      return this.withAction({ ...common, dismissed: true }, 'OFFER_BOOKING', null);
+    }
     if (this.bookingConfirmation(text) && base.state === 'awaiting_price_booking_confirmation' &&
         (base.resolved_cash_price || base.resolved_insurance_price)) {
       return { ...common, kind: 'PRICE', owner: 'PriceStateMachine', action: 'HANDOFF_TO_BOOKING', nextPriceState: base };
@@ -57,7 +64,7 @@ class PriceStateMachine {
     return this.withAction(common, 'ASK_PAYMENT_METHOD', { ...resolved, state: 'awaiting_price_payment_method' });
   }
 
-  withAction(decision, action, nextPriceState) { return { ...decision, action, nextPriceState, resolvedSlots: nextPriceState, missingSlots: this.missing(nextPriceState) }; }
+  withAction(decision, action, nextPriceState) { return { ...decision, action, nextPriceState, resolvedSlots: nextPriceState, missingSlots: nextPriceState ? this.missing(nextPriceState) : [] }; }
   decisionBase(persisted, current, resolved, invalidatedSlots) {
     return { kind: 'PRICE', owner: 'PriceStateMachine', action: 'ASK_PAYMENT_METHOD', currentSlots: current, persistedSlots: persisted, resolvedSlots: resolved, missingSlots: this.missing(resolved), invalidatedSlots, provenance: Object.fromEntries(Object.keys(current).map((k) => [k, 'CURRENT'])), evidence: current.cash ? 'CURRENT' : null };
   }
