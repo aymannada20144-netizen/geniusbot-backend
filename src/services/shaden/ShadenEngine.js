@@ -15,6 +15,7 @@ const {
 } = require('../../contracts/shaden/InternalHandlerResult');
 const PriceStateMachine = require('./PriceStateMachine');
 const PriceDecisionExecutor = require('./PriceDecisionExecutor');
+const { adapt: adaptPriceState, legacyProjection } = require('./LegacyPriceStateAdapter');
 
 class ShadenEngine {
   constructor({
@@ -194,6 +195,8 @@ class ShadenEngine {
         clinicData?.serviceBranchAssignments || [],
     };
 
+    if (nextState.priceInquiry) nextState.priceInquiry = adaptPriceState(nextState.priceInquiry, safeData);
+
     if (PriceStateMachine.owns(message, nextState, safeData)) {
       return this.priceStateMachine.prepare({
         message,
@@ -207,7 +210,7 @@ class ShadenEngine {
         if (!completed.nextPriceState) delete nextState.priceInquiry;
         if (completed.action === 'HANDOFF_TO_BOOKING') {
           return normalizeLegacyReply(handoffPriceToBooking({
-            state: nextState, flow: completed.nextPriceState, data: safeData,
+            state: nextState, flow: legacyProjection(completed.nextPriceState, safeData), data: safeData,
             policy: this.policy, bookingContext,
           }), nextState);
         }
@@ -5129,7 +5132,7 @@ function handoffPriceToBooking({ state, flow, data, policy, bookingContext }) {
   const service = data.services.find((item) =>
     item.id === flow.selected_service_id
   );
-  if (!service || !flow.selected_payment_method_id || flow.quoteCompleted !== true) {
+  if (!service || !flow.selected_payment_method_id || !Number.isFinite(flow.amount)) {
     throw new TypeError('Booking handoff requires a completed price decision.');
   }
   const booking = emptyBookingState();

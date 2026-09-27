@@ -1,6 +1,8 @@
 'use strict';
 const { matches } = require('./PriceCatalogMatcher');
 const PriceInput = require('./PriceInput');
+const { adapt, legacyProjection } = require('./LegacyPriceStateAdapter');
+const { reduce } = require('./PriceStateReducer');
 
 // The only component allowed to turn a price conversation into a decision.
 class PriceStateMachine {
@@ -12,9 +14,9 @@ class PriceStateMachine {
 
   async prepare(input, priceService) {
     const preliminary = this.decide(input);
-    const serviceId = preliminary.nextPriceState?.selected_service_id;
+    const serviceId = preliminary.nextPriceState?.service?.id;
     const method = (input.catalog.paymentMethods || []).find(item => item.code === 'insurance');
-    if (!serviceId || preliminary.nextPriceState.selected_payment_method !== 'insurance' ||
+    if (!serviceId || preliminary.nextPriceState.paymentMethod?.code !== 'insurance' ||
         preliminary.action === 'HANDOFF_TO_BOOKING' || preliminary.sideInquiry || !method ||
         typeof priceService?.listApplicableInsuranceOptions !== 'function') return preliminary;
     let applicable;
@@ -29,19 +31,32 @@ class PriceStateMachine {
   }
 
   decide({ message, currentSlots = {}, persistedPriceState = null, catalog = {} }) {
+    this.catalog = catalog;
     const text = PriceInput.normalizeInput(message, catalog);
     const extracted = this.extract(text, catalog);
     const supplied = this.groundSlots(currentSlots, catalog);
     const current = { ...extracted, ...supplied };
     // The slot contract cannot manufacture explicit cash evidence.
     if (!extracted.cash) delete current.cash;
-    const base = this.normalise(persistedPriceState);
+    const cashMethod = (catalog.paymentMethods || []).find(item => item.code === 'cash');
+    const insuranceMethod = (catalog.paymentMethods || []).find(item => item.code === 'insurance');
+    // This is the sole merge point for persisted price state and catalog-grounded
+    // current slots.  The reducer applies the parent/dependent invalidation graph.
+    const reduced = reduce(persistedPriceState, {
+      service: current.service,
+      paymentMethod: current.cash && !current.company ? cashMethod :
+        (current.company || current.insurance ? insuranceMethod : null),
+      insuranceCompany: current.company,
+      insuranceClass: current.insuranceClass,
+      insurancePaymentMethod: insuranceMethod,
+    }, catalog);
+    const base = { ...this.empty(), ...legacyProjection(reduced.state, catalog) };
     const companyId = current.company?.id || base.selected_insurance_company_id;
     const scoped = this.extract(text, { insuranceClasses: (catalog.insuranceClasses || []).filter(item => item.insuranceCompanyId === companyId) });
     if (!supplied.insuranceClass && scoped.insuranceClass) current.insuranceClass = scoped.insuranceClass;
     // Current message always wins; a new service/company invalidates dependent data.
     const slots = { ...base, ...current };
-    const invalidatedSlots = [];
+    const invalidatedSlots = [...reduced.invalidated];
     if (current.service && current.service.id !== base.selected_service_id) {
       for (const key of ['payment', 'company', 'insuranceClass', 'cashPrice', 'insurancePrice']) delete slots[key];
       Object.assign(slots, { selected_payment_method: null, selected_insurance_company_id: null, selected_insurance_company_name: null, selected_insurance_class_id: null, selected_insurance_class_name: null, resolved_cash_price: null, resolved_insurance_price: null });
@@ -96,7 +111,7 @@ class PriceStateMachine {
     }
     if (this.bookingConfirmation(text) && base.state === 'awaiting_price_booking_confirmation' &&
         base.quoteCompleted === true && Number.isFinite(base.amount) && !Object.keys(current).length) {
-      return { ...common, kind: 'PRICE', owner: 'PriceStateMachine', action: 'HANDOFF_TO_BOOKING', nextPriceState: base };
+      return this.withAction({ ...common, kind: 'PRICE', owner: 'PriceStateMachine' }, 'HANDOFF_TO_BOOKING', base);
     }
     if (!resolved.selected_service_id) return this.withAction(common, 'ASK_PAYMENT_METHOD', this.empty());
     if (!catalog.services.some(item => item.id === resolved.selected_service_id)) return this.withAction(common, 'ASK_PAYMENT_METHOD', this.empty());
@@ -128,8 +143,9 @@ class PriceStateMachine {
   }
 
   withAction(decision, action, nextPriceState) {
-    return { ...decision, action, nextPriceState, resolvedSlots: nextPriceState,
-      missingSlots: nextPriceState ? this.missing(nextPriceState) : [] };
+    const v2 = nextPriceState ? adapt(nextPriceState, this.catalog) : null;
+    return { ...decision, action, nextPriceState: v2, resolvedSlots: v2,
+      missingSlots: v2 ? this.missing(legacyProjection(v2, this.catalog)) : [] };
   }
   clarification(state) {
     if (state.quoteCompleted) return 'OFFER_BOOKING';
@@ -151,7 +167,7 @@ class PriceStateMachine {
   }
   complete(decision, outcome) {
     if (outcome.type === 'NO_LOOKUP') return decision;
-    const state = { ...decision.nextPriceState, resolved_cash_price: null, resolved_insurance_price: null,
+    const state = { ...legacyProjection(decision.nextPriceState, this.catalog), resolved_cash_price: null, resolved_insurance_price: null,
       amount: null, currency: null, quoteCompleted: false };
     if (outcome.type === 'QUOTE_FAILED') {
       state.state = 'price_inquiry_ready';
@@ -178,7 +194,7 @@ class PriceStateMachine {
       evidence: current.cash && !current.company ? 'CURRENT' : null };
   }
   empty() { return { intent: 'price_inquiry', state: 'awaiting_price_service', selected_service_id: null, selected_service_name: null, selected_payment_method: null, selected_insurance_company_id: null, selected_insurance_company_name: null, selected_insurance_class_id: null, selected_insurance_class_name: null, resolved_cash_price: null, resolved_insurance_price: null, currency: null }; }
-  normalise(value) { return value && value.intent === 'price_inquiry' ? { ...this.empty(), ...value } : this.empty(); }
+  normalise(value) { return value ? { ...this.empty(), ...legacyProjection(value, this.catalog) } : this.empty(); }
   toState(s) { return { ...this.empty(), state: s.state || 'awaiting_price_payment_method', selected_service_id: s.service?.id || s.selected_service_id || null, selected_service_name: s.service?.name || s.selected_service_name || null, selected_payment_method: s.payment || s.selected_payment_method || null, selected_insurance_company_id: s.company?.id || s.selected_insurance_company_id || null, selected_insurance_company_name: s.company?.name || s.selected_insurance_company_name || null, selected_insurance_class_id: s.insuranceClass?.id || s.selected_insurance_class_id || null, selected_insurance_class_name: s.insuranceClass?.name || s.selected_insurance_class_name || null, resolved_cash_price: s.cashPrice || s.resolved_cash_price || null, resolved_insurance_price: s.insurancePrice || s.resolved_insurance_price || null, currency: s.currency || null, amount: s.amount ?? null, quoteCompleted: s.quoteCompleted === true }; }
   missing(s) { return ['selected_service_id', 'selected_payment_method', ...(s.selected_payment_method === 'insurance' ? ['selected_insurance_company_id', 'selected_insurance_class_id'] : [])].filter((k) => !s[k]); }
   classesFor(companyId, catalog) { return (catalog.applicable?.classes || catalog.insuranceClasses || []).filter((x) => x.insuranceCompanyId === companyId && x.isAccepted !== false); }
