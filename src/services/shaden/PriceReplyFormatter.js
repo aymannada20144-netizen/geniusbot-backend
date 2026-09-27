@@ -6,6 +6,9 @@ class PriceReplyFormatter {
   format(d, catalog) {
     const s = d.nextPriceState;
     const o = d.options || {};
+    if (d.sideInquiry?.type === 'branches') return this.policy.branches(catalog.branches, catalog.clinic);
+    if (d.sideInquiry?.type === 'working_hours') return this.policy.allWorkingHours(catalog);
+    if (d.sideInquiry?.type === 'services') return this.policy.services(catalog.services, catalog.clinic);
     if (d.dismissed) return 'تمام 🌸 أنا معك إذا احتجتِ أي خدمة أخرى.';
     switch (d.action) {
       case 'ASK_PAYMENT_METHOD': return s.selected_service_id ? 'هل الدفع كاش أم تأمين؟' : `${d.unknownService ? 'لم أتعرف على الخدمة.\n' : ''}${this.policy.services(o.services || catalog.services, catalog.clinic)}\nاختاري خدمة واحدة لمعرفة سعرها.`;
