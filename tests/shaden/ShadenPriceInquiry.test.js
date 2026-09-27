@@ -22,24 +22,26 @@ const IDS = Object.freeze({
 });
 
 describe('Shaden persisted price inquiry flow', () => {
-  test('lists services then accepts a short service reply', async () => {
+  test('service reply stays neutral until a payment method is explicit', async () => {
     const session = harness();
     let result = await session.send('ما أسعار الخدمات');
     assert.equal(result.nextState.priceInquiry.state, 'awaiting_price_service');
     result = await session.send('فيلر', result.nextState);
-    assert.match(result.reply, /500/);
+    assert.equal(result.nextState.priceInquiry.selected_service_id, IDS.filler);
+    assert.equal(result.nextState.priceInquiry.selected_payment_method, null);
+    assert.equal(session.calls.length, 0);
   });
 
-  test('resolves a direct service price question', async () => {
+  test('direct service price question asks for a payment method', async () => {
     const result = await harness().send('كم سعر الفيلر؟');
-    assert.match(result.reply, /سعر فيلر كاش 500 ريال/);
+    assert.match(result.reply, /كاش أم تأمين/);
   });
 
-  test('returns the cash price first', async () => {
+  test('does not select or look up cash without CURRENT cash evidence', async () => {
     const session = harness();
     const result = await session.send('سعر البوتوكس');
-    assert.equal(session.calls[0].paymentMethodId, IDS.cash);
-    assert.equal(result.nextState.priceInquiry.resolved_cash_price, '500.00');
+    assert.equal(session.calls.length, 0);
+    assert.equal(result.nextState.priceInquiry.selected_payment_method, null);
   });
 
   test('does not list insurance prices before insurance details', async () => {
@@ -94,32 +96,21 @@ describe('Shaden persisted price inquiry flow', () => {
     assert.match(result.reply, /210 ريال/);
   });
 
-  test('rejected class offers conversion and agreement uses cached cash price', async () => {
+  test('rejected insurance class remains insurance and lists valid classes', async () => {
     const session = harness();
     let result = await toInsuranceClass(session);
     result = await session.send('C', result.nextState);
-    assert.equal(result.nextState.priceInquiry.state, 'awaiting_price_cash_confirmation');
-    assert.match(result.reply, /500/);
-    result = await session.send('نعم', result.nextState);
-    assert.equal(result.nextState.priceInquiry.selected_payment_method, 'cash');
-    assert.equal(result.nextState.priceInquiry.state, 'awaiting_price_booking_confirmation');
-    assert.equal(result.nextState.priceInquiry.selected_insurance_company_id, null);
+    assert.equal(result.nextState.priceInquiry.state, 'awaiting_price_insurance_class');
+    assert.equal(result.nextState.priceInquiry.selected_payment_method, 'insurance');
+    assert.equal(result.nextState.priceInquiry.selected_insurance_company_id, IDS.company);
     assert.equal(result.nextState.priceInquiry.selected_insurance_class_id, null);
-    assert.equal(session.calls.length, 1);
-    result = await session.send('نعم', result.nextState);
-    assert.equal(result.nextState.priceInquiry, undefined);
-    assert.equal(result.nextState.booking.serviceId, IDS.filler);
-    assert.equal(result.nextState.booking.paymentMethodCode, 'cash');
-    assert.equal(result.nextState.booking.insuranceCompanyId, null);
-    assert.equal(result.nextState.booking.insuranceClassId, null);
-    assert.equal(result.nextState.booking.quotedPrice, '500.00');
-    assert.equal(result.nextState.booking.currency, 'SAR');
-    assert.doesNotMatch(result.reply, /يمكنكِ اختيار كاش/);
+    assert.equal(session.calls.length, 0);
+    assert.doesNotMatch(result.reply, /كاش|500/);
   });
 
-  test('handles a missing cash price without invention', async () => {
-    const result = await harness({ failCash: true }).send('سعر الفيلر');
-    assert.match(result.reply, /غير متاح حاليًا/);
+  test('missing explicit cash price produces no invented amount', async () => {
+    const result = await harness({ failCash: true }).send('سعر الفيلر كاش');
+    assert.match(result.reply, /لا يوجد سعر مسجل/);
     assert.doesNotMatch(result.reply, /500|210/);
   });
 

@@ -22,12 +22,16 @@ class PriceStateMachine {
       Object.assign(slots, { selected_insurance_class_id: null, selected_insurance_class_name: null, resolved_insurance_price: null });
       invalidatedSlots.push('insuranceClass', 'price');
     }
-    if (current.company) slots.payment = 'insurance';
+    if (current.company || current.insurance) slots.payment = 'insurance';
     if (current.cash) slots.payment = 'cash';
     const resolved = this.toState(slots, catalog);
     const common = this.decisionBase(base, current, resolved, invalidatedSlots);
 
-    if (this.bookingConfirmation(text) && base.state === 'awaiting_price_booking_confirmation') {
+    if (this.isGeneralInquiry(text) && !current.service) {
+      return this.withAction(common, 'ASK_PAYMENT_METHOD', this.empty());
+    }
+    if (this.bookingConfirmation(text) && base.state === 'awaiting_price_booking_confirmation' &&
+        (base.resolved_cash_price || base.resolved_insurance_price)) {
       return { ...common, kind: 'PRICE', owner: 'PriceStateMachine', action: 'HANDOFF_TO_BOOKING', nextPriceState: base };
     }
     if (!resolved.selected_service_id) return this.withAction(common, 'ASK_PAYMENT_METHOD', this.empty());
@@ -62,5 +66,6 @@ class PriceStateMachine {
     return { ...(service ? { service } : {}), ...(company ? { company } : {}), ...(insuranceClass ? { insuranceClass } : {}), ...( /(كاش|نقدي)/.test(n) ? { cash: true } : {}), ...( /(تامين|تأمين)/.test(n) ? { insurance: true } : {}) }; }
   compact(value) { return this.policy.normalize(String(value || '')).replace(/ال/g, '').replace(/[^\p{L}\p{N}]/gu, ''); }
   bookingConfirmation(text) { return /^(نعم|اي|ايوه|ايوا|تمام|موافق|اكيد|احجز|احجزي|حجز|ابدأ الحجز)$/.test(this.policy.normalize(text).trim()); }
+  isGeneralInquiry(text) { return /^(?:ما )?اسعار(?: الخدمات| خدماتكم|كم)?$/.test(this.policy.normalize(text).trim().replace(/\s+/g, ' ')); }
 }
 module.exports = PriceStateMachine;
