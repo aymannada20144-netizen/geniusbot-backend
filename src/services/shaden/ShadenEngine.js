@@ -5730,6 +5730,10 @@ function handoffPriceToBooking({ state, flow, data, policy, bookingContext }) {
   }
   const insurance = flow.selected_payment_method === 'insurance';
   const booking = emptyBookingState();
+  const reply = advanceFromServiceSelection(booking, service, data, policy);
+  // The price boundary transfers an already resolved scope after booking's
+  // service transition has cleared its own dependent fields.
+  booking.serviceId = service.id;
   booking.paymentMethodId = paymentMethod.id;
   booking.insuranceCompanyId = insurance
     ? flow.selected_insurance_company_id
@@ -5747,7 +5751,7 @@ function handoffPriceToBooking({ state, flow, data, policy, bookingContext }) {
   booking.patientId = bookingContext?.patientId || null;
   state.booking = booking;
   delete state.priceInquiry;
-  return advanceFromServiceSelection(booking, service, data, policy);
+  return reply;
 }
 
 function priceServiceChoice(services, clinic, policy) {
