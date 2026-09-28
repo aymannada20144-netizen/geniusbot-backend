@@ -66,6 +66,7 @@ describe('Shaden Phase 1.2 public runtime', () => {
     const baseline = createSession();
     const shadowFailure = createSession({ runtimeOptions: {
       conversationEnabled: true,
+      semanticMode: 'SHADOW',
       semanticProvider: new OpenRouterSemanticProvider({
         apiKey: 'test-key', model: 'semantic-test', timeoutMs: 123,
         setTimeoutImpl(callback) { deadline = callback; return 'timer'; },
@@ -82,16 +83,43 @@ describe('Shaden Phase 1.2 public runtime', () => {
 
     const expected = await baseline.send('الخدمات');
     const actualPromise = shadowFailure.send('الخدمات');
+    const actual = await actualPromise;
     for (let index = 0; index < 20 && !deadline; index += 1) await Promise.resolve();
     assert.equal(typeof deadline, 'function');
     deadline();
-    const actual = await actualPromise;
+    for (let index = 0; index < 20 && warnings.length === 0; index += 1) await Promise.resolve();
     assert.equal(actual.replyText, expected.replyText);
     assert.deepEqual(shadowFailure.persisted(), baseline.persisted());
     assert.deepEqual(warnings, [{
       event: 'SHADEN_SEMANTIC_SHADOW_FAILURE', model: 'semantic-test',
       finishReason: null, contentLength: 0, parseStage: 'deadline_exhausted', retryCount: 0,
     }]);
+  });
+
+  test('shadow mode bounds hanging observations and names ACTIVE separately', async () => {
+    const harness = createHarness(null);
+    const events = [];
+    let calls = 0;
+    const runtime = createShadenEngine({ ...harness.dependencies,
+      conversationEnabled: true,
+      semanticMode: 'SHADOW',
+      semanticProvider: { async completeJson() {
+        calls += 1;
+        return new Promise(() => {});
+      } },
+      conversationProvider: { async complete() { throw new Error('tool path must not run'); } },
+      logger: { info(value) { events.push(value); }, warn() {} },
+    });
+    for (let index = 0; index < 5; index += 1) {
+      await runtime.processMessage({
+        channel: 'whatsapp', waMessageId: `shadow-${index}`,
+        senderPhone: '+966500000001', receiverPhone: '+966500000002',
+        messageType: 'text', text: 'الخدمات', rawPayload: {},
+      });
+    }
+    assert.equal(calls, 4);
+    assert.ok(events.some((event) => event.event === 'SHADEN_SEMANTIC_SHADOW_SKIPPED'));
+    assert.throws(() => createShadenEngine({ semanticMode: 'invalid' }), /semanticMode/u);
   });
 
   test('reuses one anonymous conversation through the real repository', async () => {

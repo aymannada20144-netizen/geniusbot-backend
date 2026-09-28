@@ -44,9 +44,14 @@ function createShadenEngine({
   conversationEnabled = false, conversationApiKey = null, conversationBaseUrl = null, conversationModel = null,
   conversationProvider = null,
   semanticProvider = null,
+  semanticMode = null,
   candidateGrounder: injectedCandidateGrounder = null,
   semanticCandidateResolver: injectedSemanticCandidateResolver = null,
 } = {}) {
+  if (semanticMode !== null && !['SHADOW', 'ACTIVE'].includes(semanticMode)) {
+    throw new TypeError('semanticMode must be SHADOW or ACTIVE');
+  }
+  const resolvedSemanticMode = semanticMode || (semanticProvider ? 'ACTIVE' : 'SHADOW');
   const clinics = clinicService || new ClinicService(clinicRepository);
   const conversations = conversationService ||
     new ConversationService(conversationRepository);
@@ -123,6 +128,8 @@ function createShadenEngine({
     knowledgeBaseRepository &&
     typeof knowledgeBaseRepository.findDiscoveryRows === 'function'
   );
+  const shadowTasks = new Set();
+  const semanticActive = resolvedSemanticMode === 'ACTIVE';
 
   return {
     async processMessage(rawMessage) {
@@ -178,7 +185,7 @@ function createShadenEngine({
       let semanticMeaning = null;
       let operationalServiceConstraint = null;
       let operationalBookingConstraint = null;
-      if (semanticInterpreter && message.inputProvenance?.trusted !== true) {
+      if (semanticActive && semanticInterpreter && message.inputProvenance?.trusted !== true) {
         try {
           const semanticResult = await semanticInterpreter.interpret({
             currentMessage: message.text,
@@ -536,6 +543,11 @@ function createShadenEngine({
         });
         logger.info({ event: 'STATE_PERSISTED', rescheduleStep: nextState?.reschedule?.step || null });
       }
+      if (!semanticActive) {
+        scheduleSemanticShadowObservation({
+          shadowTasks, semanticInterpreter, message, logger,
+        });
+      }
       return {
         replyText: sideQueryAnswered ? `${sideAnswer}\n\n${reply}` : reply,
         state: sideQueryEligible
@@ -545,6 +557,48 @@ function createShadenEngine({
       };
     },
   };
+}
+
+const MAX_CONCURRENT_SEMANTIC_SHADOW_TASKS = 4;
+
+function scheduleSemanticShadowObservation({ shadowTasks, semanticInterpreter, message, logger }) {
+  if (!semanticInterpreter || message.inputProvenance?.trusted === true) return;
+  if (shadowTasks.size >= MAX_CONCURRENT_SEMANTIC_SHADOW_TASKS) {
+    logger.info({ event: 'SHADEN_SEMANTIC_SHADOW_SKIPPED', reason: 'capacity' });
+    return;
+  }
+  const task = (async () => {
+    try {
+      const result = await semanticInterpreter.interpret({
+        currentMessage: message.text,
+        contextTurns: [],
+      });
+      logger.info({
+        event: 'SHADEN_SEMANTIC_SHADOW_OBSERVED',
+        contractValid: result.contractValid,
+        model: result.model || null,
+        finishReason: result.metadata?.finishReason || null,
+        contentLength: Number(result.metadata?.contentLength) || 0,
+        parseStage: result.metadata?.parseStage || 'complete',
+        retryCount: Number(result.metadata?.retryCount) || 0,
+      });
+    } catch (error) {
+      const metadata = error?.metadata || {};
+      logger.warn({
+        event: 'SHADEN_SEMANTIC_SHADOW_FAILURE',
+        model: metadata.model || null,
+        finishReason: metadata.finishReason || null,
+        contentLength: Number(metadata.contentLength) || 0,
+        parseStage: metadata.parseStage || 'unknown',
+        retryCount: Number(metadata.retryCount) || 0,
+      });
+    }
+  })();
+  shadowTasks.add(task);
+  task.then(
+    () => shadowTasks.delete(task),
+    () => shadowTasks.delete(task)
+  ).catch(() => {});
 }
 
 function buildIdentityTrace({
