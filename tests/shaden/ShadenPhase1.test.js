@@ -57,6 +57,35 @@ describe('Shaden Phase 1.2 public runtime', () => {
     assert.doesNotMatch(result.replyText, /undefined|null|يا\s+🌸/u);
   });
 
+  test('semantic shadow retry failure leaves the deterministic result and state unchanged without tools', async () => {
+    const warnings = [];
+    const baseline = createSession();
+    const shadowFailure = createSession({ runtimeOptions: {
+      conversationEnabled: true,
+      semanticProvider: { async completeJson() {
+        const error = new Error('invalid JSON');
+        error.metadata = {
+          model: 'semantic-test', finishReason: 'length', contentLength: 12,
+          parseStage: 'json_parse', retryCount: 1,
+        };
+        throw error;
+      } },
+      conversationProvider: { async complete() {
+        throw new Error('shadow failure must not invoke conversation tools');
+      } },
+      logger: { info() {}, warn(value) { warnings.push(value); } },
+    } });
+
+    const expected = await baseline.send('الخدمات');
+    const actual = await shadowFailure.send('الخدمات');
+    assert.equal(actual.replyText, expected.replyText);
+    assert.deepEqual(shadowFailure.persisted(), baseline.persisted());
+    assert.deepEqual(warnings, [{
+      event: 'SHADEN_SEMANTIC_SHADOW_FAILURE', model: 'semantic-test',
+      finishReason: 'length', contentLength: 12, parseStage: 'json_parse', retryCount: 1,
+    }]);
+  });
+
   test('reuses one anonymous conversation through the real repository', async () => {
     const database = createConversationDatabase();
     const repository = new ConversationRepository(database);

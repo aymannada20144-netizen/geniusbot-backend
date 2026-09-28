@@ -310,11 +310,14 @@ function createShadenEngine({
             }
           }
         } catch (error) {
+          const metadata = error?.metadata || {};
           logger.warn({
             event: 'SHADEN_SEMANTIC_SHADOW_FAILURE',
-            conversationId: conversation.id,
-            messageId: message.externalMessageId,
-            error: error?.message || String(error),
+            model: metadata.model || null,
+            finishReason: metadata.finishReason || null,
+            contentLength: Number(metadata.contentLength) || 0,
+            parseStage: metadata.parseStage || 'unknown',
+            retryCount: Number(metadata.retryCount) || 0,
           });
         }
       }
