@@ -44,14 +44,14 @@ function createShadenEngine({
   conversationEnabled = false, conversationApiKey = null, conversationBaseUrl = null, conversationModel = null,
   conversationProvider = null,
   semanticProvider = null,
-  semanticMode = null,
+  semanticMode = 'SHADOW',
   candidateGrounder: injectedCandidateGrounder = null,
   semanticCandidateResolver: injectedSemanticCandidateResolver = null,
 } = {}) {
-  if (semanticMode !== null && !['SHADOW', 'ACTIVE'].includes(semanticMode)) {
+  if (!['SHADOW', 'ACTIVE'].includes(semanticMode)) {
     throw new TypeError('semanticMode must be SHADOW or ACTIVE');
   }
-  const resolvedSemanticMode = semanticMode || (semanticProvider ? 'ACTIVE' : 'SHADOW');
+  const resolvedSemanticMode = semanticMode;
   const clinics = clinicService || new ClinicService(clinicRepository);
   const conversations = conversationService ||
     new ConversationService(conversationRepository);

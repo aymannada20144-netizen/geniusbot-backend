@@ -1,6 +1,8 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 const { describe, test } = require('node:test');
 const createShadenEngine = require(
   '../../src/services/shaden/createShadenEngine'
@@ -13,6 +15,15 @@ const ConversationRepository = require(
 );
 
 describe('Shaden Phase 1.2 public runtime', () => {
+  test('WhatsApp production composition explicitly selects SHADOW semantic mode', () => {
+    const appSource = fs.readFileSync(path.join(__dirname, '../../src/app.js'), 'utf8');
+    assert.match(appSource, /createShadenEngine\(\{[\s\S]*?semanticMode:\s*'SHADOW'/u);
+    assert.match(
+      appSource,
+      /event:\s*'SHADEN_WHATSAPP_COMPOSITION',[\s\S]*?semanticMode:\s*'SHADOW'/u
+    );
+  });
+
   test('runtime preserves registered customer identity and keeps deterministic replies out of the LLM', async () => {
     const patient = { id: 'patient-1', full_name: 'سامي عبدالله' };
     const harness = createHarness(null, patient);
@@ -66,7 +77,6 @@ describe('Shaden Phase 1.2 public runtime', () => {
     const baseline = createSession();
     const shadowFailure = createSession({ runtimeOptions: {
       conversationEnabled: true,
-      semanticMode: 'SHADOW',
       semanticProvider: new OpenRouterSemanticProvider({
         apiKey: 'test-key', model: 'semantic-test', timeoutMs: 123,
         setTimeoutImpl(callback) { deadline = callback; return 'timer'; },
