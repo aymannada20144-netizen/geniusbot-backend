@@ -197,6 +197,7 @@ function runtimeHarness(options = {}) {
     catalogService: { async list() { return []; } },
     clinicConfigurationSource: { async get() { return {}; } },
     conversationEnabled: true,
+    semanticMode: 'ACTIVE',
     semanticProvider: {
       async completeJson() {
         return { result: harness.semanticResult, model: 'semantic-test', usage: {}, rawContent: '{}' };
@@ -289,6 +290,7 @@ function failedExecutionRuntimeHarness() {
     } },
     clinicConfigurationSource: { async get() { return {}; } },
     conversationEnabled: true,
+    semanticMode: 'ACTIVE',
     semanticProvider: { async completeJson() {
       return {
         result: { status: 'UNDERSTOOD', goal: 'ASK', subjects: [{ kind: 'SERVICE_OR_NEED', surface: 'نعم', source: 'CURRENT' }], constraints: [] },

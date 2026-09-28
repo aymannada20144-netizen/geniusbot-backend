@@ -70,6 +70,7 @@ class SemanticInterpreterV1 {
       model: response.model,
       usage: response.usage,
       rawContent: response.rawContent,
+      metadata: response.metadata || null,
     });
   }
 }

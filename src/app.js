@@ -219,6 +219,7 @@ async function buildApp() {
     knowledgeService,
     knowledgeBaseRepository: bookingRepositories.knowledgeBase,
     conversationEnabled: env.conversation.enabled,
+    semanticMode: 'SHADOW',
     conversationApiKey: env.conversation.openRouterApiKey,
     conversationBaseUrl: env.conversation.openRouterBaseUrl,
     conversationModel: env.conversation.model,
@@ -232,6 +233,7 @@ async function buildApp() {
   });
   app.log.info({
     event: 'SHADEN_WHATSAPP_COMPOSITION',
+    semanticMode: 'SHADOW',
     route: env.conversation.enabled
       ? 'LLM_CONVERSATION_WITH_OPERATIONAL_CORE'
       : 'DETERMINISTIC',

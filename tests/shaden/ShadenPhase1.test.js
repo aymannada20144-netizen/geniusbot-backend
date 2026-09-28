@@ -1,15 +1,29 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 const { describe, test } = require('node:test');
 const createShadenEngine = require(
   '../../src/services/shaden/createShadenEngine'
+);
+const OpenRouterSemanticProvider = require(
+  '../../src/services/shaden/semanticV1/OpenRouterSemanticProvider'
 );
 const ConversationRepository = require(
   '../../src/repositories/ConversationRepository'
 );
 
 describe('Shaden Phase 1.2 public runtime', () => {
+  test('WhatsApp production composition explicitly selects SHADOW semantic mode', () => {
+    const appSource = fs.readFileSync(path.join(__dirname, '../../src/app.js'), 'utf8');
+    assert.match(appSource, /createShadenEngine\(\{[\s\S]*?semanticMode:\s*'SHADOW'/u);
+    assert.match(
+      appSource,
+      /event:\s*'SHADEN_WHATSAPP_COMPOSITION',[\s\S]*?semanticMode:\s*'SHADOW'/u
+    );
+  });
+
   test('runtime preserves registered customer identity and keeps deterministic replies out of the LLM', async () => {
     const patient = { id: 'patient-1', full_name: 'سامي عبدالله' };
     const harness = createHarness(null, patient);
@@ -55,6 +69,67 @@ describe('Shaden Phase 1.2 public runtime', () => {
       senderPhone: '+966500000001', receiverPhone: '+966500000002', messageType: 'text',
       text: 'السلام عليكم', rawPayload: {} });
     assert.doesNotMatch(result.replyText, /undefined|null|يا\s+🌸/u);
+  });
+
+  test('semantic shadow retry failure leaves the deterministic result and state unchanged without tools', async () => {
+    const warnings = [];
+    let deadline = null;
+    const baseline = createSession();
+    const shadowFailure = createSession({ runtimeOptions: {
+      conversationEnabled: true,
+      semanticProvider: new OpenRouterSemanticProvider({
+        apiKey: 'test-key', model: 'semantic-test', timeoutMs: 123,
+        setTimeoutImpl(callback) { deadline = callback; return 'timer'; },
+        clearTimeoutImpl() {},
+        fetchImpl: async (_url, options) => new Promise((_resolve, reject) => {
+          options.signal.addEventListener('abort', () => reject(new Error('aborted')));
+        }),
+      }),
+      conversationProvider: { async complete() {
+        throw new Error('shadow failure must not invoke conversation tools');
+      } },
+      logger: { info() {}, warn(value) { warnings.push(value); } },
+    } });
+
+    const expected = await baseline.send('الخدمات');
+    const actualPromise = shadowFailure.send('الخدمات');
+    const actual = await actualPromise;
+    for (let index = 0; index < 20 && !deadline; index += 1) await Promise.resolve();
+    assert.equal(typeof deadline, 'function');
+    deadline();
+    for (let index = 0; index < 20 && warnings.length === 0; index += 1) await Promise.resolve();
+    assert.equal(actual.replyText, expected.replyText);
+    assert.deepEqual(shadowFailure.persisted(), baseline.persisted());
+    assert.deepEqual(warnings, [{
+      event: 'SHADEN_SEMANTIC_SHADOW_FAILURE', model: 'semantic-test',
+      finishReason: null, contentLength: 0, parseStage: 'deadline_exhausted', retryCount: 0,
+    }]);
+  });
+
+  test('shadow mode bounds hanging observations and names ACTIVE separately', async () => {
+    const harness = createHarness(null);
+    const events = [];
+    let calls = 0;
+    const runtime = createShadenEngine({ ...harness.dependencies,
+      conversationEnabled: true,
+      semanticMode: 'SHADOW',
+      semanticProvider: { async completeJson() {
+        calls += 1;
+        return new Promise(() => {});
+      } },
+      conversationProvider: { async complete() { throw new Error('tool path must not run'); } },
+      logger: { info(value) { events.push(value); }, warn() {} },
+    });
+    for (let index = 0; index < 5; index += 1) {
+      await runtime.processMessage({
+        channel: 'whatsapp', waMessageId: `shadow-${index}`,
+        senderPhone: '+966500000001', receiverPhone: '+966500000002',
+        messageType: 'text', text: 'الخدمات', rawPayload: {},
+      });
+    }
+    assert.equal(calls, 4);
+    assert.ok(events.some((event) => event.event === 'SHADEN_SEMANTIC_SHADOW_SKIPPED'));
+    assert.throws(() => createShadenEngine({ semanticMode: 'invalid' }), /semanticMode/u);
   });
 
   test('reuses one anonymous conversation through the real repository', async () => {

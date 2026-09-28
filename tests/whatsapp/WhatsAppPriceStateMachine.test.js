@@ -131,6 +131,7 @@ function harness({ conversationEnabled = false, missingInsuranceMethod = false, 
   const logs = [];
   const logger = { info(entry) { logs.push(entry); }, warn() {}, error() {} };
   const runtime = createRuntime({
+    semanticMode: conversationEnabled ? 'ACTIVE' : 'SHADOW',
     clinicService: { async resolveWhatsAppClinic() { return f.catalog.clinic; } },
     conversationService: {
       async findOrCreateForChannel({ channelIdentity }) { return { id: channelIdentity, botEnabled: true }; },
