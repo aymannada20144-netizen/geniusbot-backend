@@ -2,6 +2,7 @@
 const ShadenDataProvider = require('./ShadenDataProvider');
 const ShadenPolicy = require('./ShadenPolicy');
 const ShadenEngine = require('./ShadenEngine');
+const PriceStateMachine = require('./PriceStateMachine');
 const OperationalIntentBridge = require('./OperationalIntentBridge');
 const {
   lifecycleMetadataFrom,
@@ -171,7 +172,7 @@ function createShadenEngine({
         identityContext, preservedData,
       }));
       const clinicData = await dataProvider.load(clinic);
-      const deterministicInquiry = policy.recognize(message.text);
+      let deterministicInquiry = policy.recognize(message.text);
       let operationalInquiry = null;
 
       let semanticMeaning = null;
@@ -318,8 +319,9 @@ function createShadenEngine({
         }
       }
 
+      deterministicInquiry = PriceStateMachine.currentInquiry(deterministicInquiry, semanticMeaning);
       const operationalOwner = shouldUseOperationalCore(
-        message, preservedData.shaden, operationalInquiry || deterministicInquiry
+        message, preservedData.shaden, operationalInquiry || deterministicInquiry, clinicData
       ) || (semanticMeaning?.status === 'UNDERSTOOD' && semanticMeaning.goal === 'ACT'
         ? 'UNRESOLVED_OPERATIONAL_ACT' : null);
       let conversationalResult = null;
@@ -645,7 +647,8 @@ function idleState(value, policy) {
   if (value && typeof value === 'object' && value.version === 1) return structuredClone(value);
   return policy.initialState();
 }
-function shouldUseOperationalCore(message, state, inquiry) {
+function shouldUseOperationalCore(message, state, inquiry, catalog) {
+  if (PriceStateMachine.owns(message, state, catalog, inquiry)) return 'PRICE_STATE_MACHINE';
   if (message?.inputProvenance?.trusted === true) return 'TRUSTED_MACHINE_INPUT';
   if (activeOperationalOwner(state)) return 'ACTIVE_OPERATIONAL_STATE';
   return OPERATIONAL_INQUIRY_TYPES.has(inquiry?.type)

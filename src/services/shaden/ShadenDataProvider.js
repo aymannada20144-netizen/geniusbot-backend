@@ -58,7 +58,7 @@ class ShadenDataProvider {
       services: enrichServices(active(services), active(specialties)),
       paymentMethods: active(paymentMethods).map((method) => ({
         ...named(method),
-        code: method.code || null,
+        code: typeof method.code === 'string' ? method.code.trim().toLowerCase() : null,
       })),
       insuranceCompanies: active(insuranceCompanies).map(named),
       insuranceClasses: insuranceClasses.map((item) => ({

@@ -13,6 +13,9 @@ const {
   lifecycleMetadataFrom,
   operationalDispositionFrom,
 } = require('../../contracts/shaden/InternalHandlerResult');
+const PriceStateMachine = require('./PriceStateMachine');
+const PriceDecisionExecutor = require('./PriceDecisionExecutor');
+const { legacyProjection } = require('./LegacyPriceStateAdapter');
 
 class ShadenEngine {
   constructor({
@@ -27,6 +30,10 @@ class ShadenEngine {
     this.bookingEngine = bookingEngine;
     this.appointmentService = appointmentService;
     this.priceService = priceService;
+    this.priceStateMachine = new PriceStateMachine({ policy });
+    this.priceDecisionExecutor = new PriceDecisionExecutor({
+      priceService, policy, clock: clock && typeof clock.now === 'function' ? clock : { now: () => new Date() },
+    });
     this.logger = logger;
     this.clock = clock && typeof clock.now === 'function'
       ? clock
@@ -44,6 +51,7 @@ class ShadenEngine {
     resolveChangeServiceTarget = null,
     operationalServiceConstraint = null,
     operationalBookingConstraint = null,
+    priceOwnershipChecked = false,
   }) {
     const nextState = normalizeState(currentState, this.policy);
     const canonicalCustomerName = patientIdentity?.patient
@@ -54,7 +62,7 @@ class ShadenEngine {
     const interactiveReplyId = message && typeof message === 'object'
       ? message.rawPayload?.value
       : null;
-    let inquiry = this.policy.recognize(text);
+    let inquiry = PriceStateMachine.currentInquiry(this.policy.recognize(text), semanticMeaning);
     if (semanticMeaning?.status === 'UNDERSTOOD' && semanticMeaning.goal === 'ACT' &&
         message?.inputProvenance?.trusted !== true &&
         !EXPLICIT_APPOINTMENT_INTERRUPTS.has(inquiry.type) && operationalInquiry &&
@@ -188,6 +196,45 @@ class ShadenEngine {
         clinicData?.serviceBranchAssignments || [],
     };
 
+
+    if (!priceOwnershipChecked && ((!nextState.booking && nextState.priceInquiry) || PriceStateMachine.owns(message, nextState, safeData, inquiry))) {
+      const beforeVersion = nextState.priceInquiry?.schemaVersion || (nextState.priceInquiry ? 1 : null);
+      return this.priceStateMachine.prepare({
+        message,
+        currentSlots: {},
+        currentInquiry: inquiry,
+        persistedPriceState: nextState.priceInquiry,
+        activeBooking: nextState.booking,
+        catalog: safeData,
+      }, this.priceService).then(async decision => {
+        if (decision.action === 'YIELD') {
+          this.logPriceTransition({ beforeVersion, currentGroundedSlots: {}, invalidatedSlots: [],
+            afterState: nextState.priceInquiry, action: 'YIELD' });
+          return this.handle({ message, currentState, clinicData, bookingContext, patientIdentity,
+            semanticMeaning, operationalInquiry, resolveChangeServiceTarget,
+            operationalServiceConstraint, operationalBookingConstraint, priceOwnershipChecked: true });
+        }
+        const outcome = await this.priceDecisionExecutor.execute(decision);
+        const completed = this.priceStateMachine.complete(decision, outcome);
+        this.logPriceTransition({
+          beforeVersion,
+          currentGroundedSlots: completed.currentSlots,
+          invalidatedSlots: completed.invalidatedSlots,
+          afterState: completed.nextPriceState,
+          action: completed.action,
+        });
+        nextState.priceInquiry = completed.nextPriceState;
+        if (!completed.nextPriceState) delete nextState.priceInquiry;
+        if (completed.action === 'HANDOFF_TO_BOOKING') {
+          return normalizeLegacyReply(handoffPriceToBooking({
+            state: nextState, flow: legacyProjection(completed.nextPriceState, safeData), data: safeData,
+            policy: this.policy, bookingContext,
+          }), nextState);
+        }
+        return normalizeLegacyReply(this.priceDecisionExecutor.render(completed, safeData), nextState);
+      });
+    }
+
     const knownPatientId = patientIdentity?.patient?.id || null;
     if (
       inquiry.type === 'change_branch_request' ||
@@ -267,22 +314,6 @@ class ShadenEngine {
       );
     }
 
-    const priceText = normalizePriceKeyboardInput(
-      text,
-      safeData.services,
-      this.policy
-    );
-    if (nextState.priceInquiry || isPriceInquiry(priceText, this.policy)) {
-      return handlePriceInquiry({
-        text: priceText,
-        state: nextState,
-        data: safeData,
-        policy: this.policy,
-        priceService: this.priceService,
-        now: this.clock.now(),
-        bookingContext,
-      }).then((result) => normalizeLegacyReply(result, nextState));
-    }
 
     if (canonicalCustomerName && nextState.step === 'customer_name') {
       nextState.step = null;
@@ -525,6 +556,26 @@ class ShadenEngine {
       case 'booking': return this.policy.bookingChooseService(data.services, data.clinic);
       default: return this.policy.unknown();
     }
+  }
+
+  logPriceTransition({ beforeVersion, currentGroundedSlots, invalidatedSlots, afterState, action }) {
+    const ids = (slots) => Object.fromEntries([
+      ['serviceId', slots?.serviceId], ['paymentMethod', slots?.paymentMethod], ['paymentMethodId', slots?.paymentMethodId],
+      ['insuranceCompanyId', slots?.insuranceCompanyId], ['insuranceClassId', slots?.insuranceClassId],
+    ].filter(([, value]) => value));
+    this.logger.info({
+      event: 'SHADEN_PRICE_STATE_TRANSITION',
+      beforeVersion,
+      currentGroundedSlots: ids(currentGroundedSlots),
+      invalidatedSlots: [...new Set(invalidatedSlots || [])],
+      afterState: afterState ? {
+        schemaVersion: afterState.schemaVersion, status: afterState.status,
+        pendingSlot: afterState.pendingSlot,
+        slots: ids(afterState),
+        hasQuote: Boolean(afterState.quote),
+      } : null,
+      action,
+    });
   }
 }
 
@@ -4706,8 +4757,7 @@ function normalizeState(state, policy) {
   const normalized = { version: 1, mode: 'idle', step: state.step === 'customer_name' ? 'customer_name' : null, customer: { name: typeof state.customer?.name === 'string' && state.customer.name.trim() ? state.customer.name.trim() : null }, context: state.context && typeof state.context === 'object' ? structuredClone(state.context) : null, options: [] };
   const booking = normalizeBookingState(state);
   if (booking) normalized.booking = booking;
-  const priceInquiry = normalizePriceInquiryState(state.priceInquiry);
-  if (priceInquiry) normalized.priceInquiry = priceInquiry;
+  if (state.priceInquiry) normalized.priceInquiry = structuredClone(state.priceInquiry);
   const cancellation = normalizeCancellationState(state);
   if (cancellation) normalized.cancellation = cancellation;
   const reschedule = normalizeRescheduleState(state.reschedule);
@@ -5114,655 +5164,35 @@ function isNullableTimestamp(value) {
     (typeof value === 'string' && Number.isFinite(Date.parse(value)));
 }
 
-const PRICE_STATES = new Set([
-  'awaiting_price_service',
-  'awaiting_price_payment_method',
-  'awaiting_price_insurance_company',
-  'awaiting_price_insurance_class',
-  'awaiting_price_cash_confirmation',
-  'awaiting_price_booking_confirmation',
-  'price_inquiry_ready',
-]);
-
-function normalizePriceInquiryState(value) {
-  if (!isPlainObject(value) || value.intent !== 'price_inquiry' ||
-      !PRICE_STATES.has(value.state)) return null;
-  const fields = [
-    'selected_service_id', 'selected_service_name',
-    'selected_payment_method', 'selected_insurance_company_id',
-    'selected_insurance_company_name', 'selected_insurance_class_id',
-    'selected_insurance_class_name', 'resolved_cash_price',
-    'resolved_insurance_price', 'currency',
-  ];
-  const normalized = { intent: 'price_inquiry', state: value.state };
-  for (const field of fields) {
-    normalized[field] = typeof value[field] === 'string' && value[field].trim()
-      ? value[field].trim()
-      : null;
-  }
-  return normalized;
-}
-
-async function handlePriceInquiry({
-  text, state, data, policy, priceService, now, bookingContext,
-}) {
-  let flow = state.priceInquiry;
-  if (isExplicitGeneralPriceInquiry(text, policy)) {
-    flow = emptyPriceInquiryState();
-    state.priceInquiry = flow;
-    return priceServiceChoice(data.services, data.clinic, policy);
-  }
-  if (flow && isPriceInquiry(text, policy)) {
-    const requestedText = extractPriceServiceText(text, policy);
-    const requestedServices = requestedText
-      ? matchingServices(requestedText, data.services, policy)
-      : [];
-    if (requestedServices.length === 1) {
-      flow = emptyPriceInquiryState();
-      state.priceInquiry = flow;
-      selectPriceService(flow, requestedServices[0]);
-      return resolveCashPrice({ flow, data, priceService, now, policy });
-    }
-    if (!requestedText || isGenericPriceSubject(requestedText, policy)) {
-      flow = emptyPriceInquiryState();
-      state.priceInquiry = flow;
-      return priceServiceChoice(data.services, data.clinic, policy);
-    }
-    if (requestedServices.length > 1) {
-      flow = emptyPriceInquiryState();
-      state.priceInquiry = flow;
-      return priceServiceChoice(requestedServices, data.clinic, policy);
-    }
-  }
-  if (!flow) {
-    flow = emptyPriceInquiryState();
-    state.priceInquiry = flow;
-    const serviceText = extractPriceServiceText(text, policy);
-    if (!serviceText) return priceServiceChoice(data.services, data.clinic, policy);
-    const matches = matchingServices(serviceText, data.services, policy);
-    if (matches.length !== 1) {
-      return matches.length > 1
-        ? priceServiceChoice(matches, data.clinic, policy)
-        : unknownPriceService(data.services, data.clinic, policy);
-    }
-    selectPriceService(flow, matches[0]);
-    return resolveCashPrice({ flow, data, priceService, now, policy });
-  }
-
-  if (!validSelectedService(flow, data.services)) {
-    clearPriceSelection(flow);
-    const serviceMatches = matchingServices(text, data.services, policy);
-    if (serviceMatches.length === 1) {
-      selectPriceService(flow, serviceMatches[0]);
-      return resolveCashPrice({ flow, data, priceService, now, policy });
-    }
-    return serviceMatches.length > 1
-      ? priceServiceChoice(serviceMatches, data.clinic, policy)
-      : priceServiceChoice(data.services, data.clinic, policy);
-  }
-
-  if (flow.state === 'awaiting_price_cash_confirmation') {
-    if (isAffirmative(text, policy)) {
-      flow.selected_payment_method = 'cash';
-      flow.selected_insurance_company_id = null;
-      flow.selected_insurance_company_name = null;
-      flow.selected_insurance_class_id = null;
-      flow.selected_insurance_class_name = null;
-      flow.resolved_insurance_price = null;
-      flow.state = 'awaiting_price_booking_confirmation';
-      return cashBookingReply(flow);
-    }
-    if (isNegative(text, policy)) {
-      return 'تمام 🌸 يمكنني عرض خيارات تأمين أخرى أو تحويلك للموظف المختص.';
-    }
-  }
-
-  if (flow.state === 'awaiting_price_booking_confirmation') {
-    if (isBookingConfirmation(text, policy)) {
-      return handoffPriceToBooking({
-        state, flow, data, policy, bookingContext,
-      });
-    }
-    if (isNegative(text, policy)) {
-      delete state.priceInquiry;
-      return 'تمام 🌸 أنا معك إذا احتجتِ أي خدمة أخرى.';
-    }
-  }
-
-  const compoundReply = await handleCompoundPriceInput({
-    text, flow, data, policy, priceService, now,
-  });
-  if (compoundReply) return compoundReply;
-
-  switch (flow.state) {
-    case 'awaiting_price_service': {
-      const matches = matchingServices(text, data.services, policy);
-      if (matches.length !== 1) {
-        return matches.length > 1
-          ? priceServiceChoice(matches, data.clinic, policy)
-          : unknownPriceService(data.services, data.clinic, policy);
-      }
-      selectPriceService(flow, matches[0]);
-      return resolveCashPrice({ flow, data, priceService, now, policy });
-    }
-    case 'awaiting_price_payment_method': {
-      const method = paymentChoice(text, data.paymentMethods, policy);
-      if (!method) return policy.paymentMethods(data.paymentMethods, true);
-      flow.selected_payment_method = method.code;
-      if (method.code === 'cash') {
-        flow.state = 'awaiting_price_booking_confirmation';
-        return cashBookingReply(flow);
-      }
-      const options = await pricedInsuranceOptions({
-        flow, data, priceService,
-      });
-      flow.state = 'awaiting_price_insurance_company';
-      return policy.insuranceCompanies(options.companies, true);
-    }
-    case 'awaiting_price_insurance_company': {
-      const options = await pricedInsuranceOptions({ flow, data, priceService });
-      const matches = matchingNamed(
-        contextualSelectionText(text, policy), options.companies, policy
-      );
-      if (matches.length !== 1) {
-        return unpricedCompanyReply(flow, options.companies);
-      }
-      flow.selected_insurance_company_id = matches[0].id;
-      flow.selected_insurance_company_name = matches[0].name;
-      flow.selected_insurance_class_id = null;
-      flow.selected_insurance_class_name = null;
-      flow.resolved_insurance_price = null;
-      flow.state = 'awaiting_price_insurance_class';
-      const companyOptions = await pricedInsuranceOptions({
-        flow, data, priceService, insuranceCompanyId: matches[0].id,
-      });
-      return policy.insuranceClasses(companyOptions.classes, true);
-    }
-    case 'awaiting_price_insurance_class': {
-      const options = await pricedInsuranceOptions({
-        flow, data, priceService,
-        insuranceCompanyId: flow.selected_insurance_company_id,
-      });
-      const matches = matchingNamed(
-        contextualSelectionText(text, policy), options.classes, policy
-      );
-      if (matches.length !== 1) {
-        const masterMatches = matchingNamed(
-          contextualSelectionText(text, policy),
-          data.insuranceClasses.filter((item) =>
-            item.insuranceCompanyId === flow.selected_insurance_company_id
-          ),
-          policy
-        );
-        if (masterMatches.length === 1 && !masterMatches[0].isAccepted) {
-          flow.state = 'awaiting_price_cash_confirmation';
-          return rejectedInsuranceClassReply(flow);
-        }
-        return unpricedClassReply(flow, text, options.classes);
-      }
-      const selected = matches[0];
-      flow.selected_insurance_class_id = selected.id;
-      flow.selected_insurance_class_name = selected.name;
-      return resolveInsurancePrice({ flow, data, priceService, now });
-    }
-    case 'awaiting_price_cash_confirmation':
-      return 'تمام 🌸 يمكنني تحويل طلبك للموظف المختص.';
-    case 'price_inquiry_ready':
-      return continueReadyPriceInquiry({
-        text, state, flow, data, policy, priceService, now, bookingContext,
-      });
-    case 'awaiting_price_booking_confirmation':
-      return 'هل ترغبين في حجز موعد؟ 🌸';
-    default:
-      return priceServiceChoice(data.services, data.clinic, policy);
-  }
-}
-
-function emptyPriceInquiryState() {
-  return {
-    intent: 'price_inquiry', state: 'awaiting_price_service',
-    selected_service_id: null, selected_service_name: null,
-    selected_payment_method: null, selected_insurance_company_id: null,
-    selected_insurance_company_name: null, selected_insurance_class_id: null,
-    selected_insurance_class_name: null, resolved_cash_price: null,
-    resolved_insurance_price: null, currency: null,
-  };
-}
-
-function validSelectedService(flow, services) {
-  return typeof flow?.selected_service_id === 'string' &&
-    flow.selected_service_id.trim().length > 0 &&
-    services.some((service) => service.id === flow.selected_service_id);
-}
-
-function clearPriceSelection(flow) {
-  Object.assign(flow, {
-    state: 'awaiting_price_service',
-    selected_service_id: null,
-    selected_service_name: null,
-    selected_payment_method: null,
-    selected_insurance_company_id: null,
-    selected_insurance_company_name: null,
-    selected_insurance_class_id: null,
-    selected_insurance_class_name: null,
-    resolved_cash_price: null,
-    resolved_insurance_price: null,
-    currency: null,
-  });
-}
-
-function isPriceInquiry(text, policy) {
-  const normalized = policy.normalize(text);
-  return /(سعر|اسعار|تكلفه|تكلفة|بكم|بكام)/.test(normalized);
-}
-
-function isExplicitGeneralPriceInquiry(text, policy) {
-  const normalized = policy.normalize(text).trim().replace(/\s+/g, ' ');
-  return /^(?:ما )?اسعار(?: الخدمات| خدماتكم|كم)$/.test(normalized);
-}
-
-function extractPriceServiceText(text, policy) {
-  const normalized = policy.normalize(text)
-    .replace(/(ما|كم|اريد|معرفه|معرفة|سعر|اسعار|الخدمات|الخدمه|الخدمة|خدمه|خدمة|تكلفه|تكلفة|بكم|بكام|كاش|نقدي)/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-  return normalized.length > 1 ? normalized : null;
-}
-
-function matchingServices(value, services, policy) {
-  return matchingNamed(value, services, policy);
-}
-
-function matchingNamed(value, items, policy) {
-  const needle = compactArabic(value, policy);
-  if (!needle) return [];
-  return items.filter((item) => [
-    item.name,
-    ...(Array.isArray(item.aliases) ? item.aliases : []),
-  ].some((candidate) => {
-    const name = compactArabic(candidate, policy);
-    return name && (
-      name === needle || name.includes(needle) || needle.includes(name)
-    );
-  }));
-}
-
-function compactArabic(value, policy) {
-  return normalizeServiceAliases(policy.normalize(value))
-    .replace(/ال/g, '')
-    .replace(/[^\p{L}\p{N}]/gu, '');
-}
-
-function normalizeServiceAliases(value) {
-  return String(value || '').replace(/بوتكس/g, 'بوتوكس');
-}
-
-function isGenericPriceSubject(value, policy) {
-  return /^(خدمه|خدمة|خدمات)?$/.test(policy.normalize(value).trim());
-}
-
-async function handleCompoundPriceInput({
-  text, flow, data, policy, priceService, now,
-}) {
-  const normalized = policy.normalize(text);
-  const cashRequested = /(كاش|نقدي)/.test(normalized);
-  const insuranceRequested = /(تامين|تأمين)/.test(normalized);
-  if (cashRequested) {
-    flow.selected_payment_method = 'cash';
-    flow.selected_insurance_company_id = null;
-    flow.selected_insurance_company_name = null;
-    flow.selected_insurance_class_id = null;
-    flow.selected_insurance_class_name = null;
-    flow.resolved_insurance_price = null;
-    flow.state = 'awaiting_price_booking_confirmation';
-    return flow.resolved_cash_price
-      ? cashBookingReply(flow)
-      : resolveCashPrice({ flow, data, priceService, now, policy });
-  }
-
-  const options = await pricedInsuranceOptions({ flow, data, priceService });
-  const companyMatches = matchingContained(text, options.companies, policy);
-  const company = companyMatches.length === 1 ? companyMatches[0] : null;
-  const companyId = company?.id || flow.selected_insurance_company_id;
-  const classOptions = companyId
-    ? (await pricedInsuranceOptions({
-      flow, data, priceService, insuranceCompanyId: companyId,
-    })).classes
-    : options.classes;
-  const classMatches = matchingContained(text, classOptions, policy);
-  const insuranceContext = insuranceRequested || companyMatches.length > 0 ||
-    classMatches.length > 0;
-  if (!insuranceContext) return null;
-
-  flow.selected_payment_method = 'insurance';
-  if (company) {
-    if (flow.selected_insurance_company_id !== company.id) {
-      flow.selected_insurance_class_id = null;
-      flow.selected_insurance_class_name = null;
-      flow.resolved_insurance_price = null;
-    }
-    flow.selected_insurance_company_id = company.id;
-    flow.selected_insurance_company_name = company.name;
-  }
-
-  const selectedClass = classMatches.length === 1 ? classMatches[0] : null;
-  if (selectedClass && !flow.selected_insurance_company_id) {
-    flow.selected_insurance_class_id = selectedClass.id;
-    flow.selected_insurance_class_name = selectedClass.name;
-    flow.state = 'awaiting_price_insurance_company';
-    return policy.insuranceCompanies(options.companies, true);
-  }
-  if (!flow.selected_insurance_company_id) {
-    flow.state = 'awaiting_price_insurance_company';
-    return policy.insuranceCompanies(options.companies, true);
-  }
-  if (selectedClass) {
-    flow.selected_insurance_class_id = selectedClass.id;
-    flow.selected_insurance_class_name = selectedClass.name;
-    return resolveInsurancePrice({ flow, data, priceService, now });
-  }
-  if (flow.selected_insurance_class_id && company &&
-      classOptions.some((item) => item.id === flow.selected_insurance_class_id)) {
-    return resolveInsurancePrice({ flow, data, priceService, now });
-  }
-  flow.selected_insurance_class_id = null;
-  flow.selected_insurance_class_name = null;
-  flow.state = 'awaiting_price_insurance_class';
-  return policy.insuranceClasses(classOptions, true);
-}
-
-function matchingContained(value, items, policy) {
-  const input = compactArabic(value, policy);
-  return items.filter((item) => {
-    const name = compactArabic(item.name, policy);
-    return name && input.includes(name);
-  });
-}
-
-function normalizePriceKeyboardInput(text, services, policy) {
-  const raw = String(text || '');
-  const latinCount = (raw.match(/[a-z]/gi) || []).length;
-  const nonSpaceCount = (raw.match(/\S/g) || []).length;
-  if (!nonSpaceCount || latinCount / nonSpaceCount < 0.75) return raw;
-  const converted = [...raw.toLowerCase()].map((character) =>
-    ARABIC_KEYBOARD[character] ?? character
-  ).join('');
-  if (!isPriceInquiry(converted, policy)) return raw;
-  const subject = extractPriceServiceText(converted, policy);
-  if (!subject || isGenericPriceSubject(subject, policy) ||
-      matchingServices(subject, services, policy).length > 0) {
-    return converted;
-  }
-  return raw;
-}
-
-const ARABIC_KEYBOARD = Object.freeze({
-  q: 'ض', w: 'ص', e: 'ث', r: 'ق', t: 'ف', y: 'غ', u: 'ع', i: 'ه', o: 'خ', p: 'ح',
-  '[': 'ج', ']': 'د', a: 'ش', s: 'س', d: 'ي', f: 'ب', g: 'ل', h: 'ا', j: 'ت',
-  k: 'ن', l: 'م', ';': 'ك', "'": 'ط', z: 'ئ', x: 'ء', c: 'ؤ', v: 'ر', b: 'لا',
-  n: 'ى', m: 'ة', ',': 'و', '.': 'ز', '/': 'ظ',
-});
-
-function selectPriceService(flow, service) {
-  flow.selected_service_id = service.id;
-  flow.selected_service_name = service.name;
-}
-
-async function resolveCashPrice({ flow, data, priceService, now, policy }) {
-  const cash = data.paymentMethods.find((item) =>
-    String(item.code || '').toLowerCase() === 'cash'
-  );
-  if (!cash || !priceService) return unavailableCashReply();
-  try {
-    const price = await priceService.resolvePrice({
-      clinicId: data.clinic.id,
-      serviceId: flow.selected_service_id,
-      paymentMethodId: cash.id,
-      bookingDate: now,
-    });
-    flow.resolved_cash_price = String(price.price);
-    flow.currency = price.currency || 'SAR';
-    flow.state = 'awaiting_price_payment_method';
-    return `سعر ${flow.selected_service_name} كاش ${displayPrice(price.price)} ريال 🌸\nهل الدفع كاش أم تأمين؟`;
-  } catch {
-    flow.state = 'awaiting_price_service';
-    return unavailableCashReply();
-  }
-}
-
-async function resolveInsurancePrice({ flow, data, priceService, now }) {
-  const insurance = data.paymentMethods.find((item) =>
-    String(item.code || '').toLowerCase() === 'insurance'
-  );
-  if (!insurance || !priceService) return unavailableInsuranceReply();
-  try {
-    const price = await priceService.resolvePrice({
-      clinicId: data.clinic.id,
-      serviceId: flow.selected_service_id,
-      paymentMethodId: insurance.id,
-      insuranceCompanyId: flow.selected_insurance_company_id,
-      insuranceClassId: flow.selected_insurance_class_id,
-      bookingDate: now,
-    });
-    flow.selected_payment_method = 'insurance';
-    flow.resolved_insurance_price = String(price.price);
-    flow.currency = price.currency || flow.currency || 'SAR';
-    flow.state = 'awaiting_price_booking_confirmation';
-    return `سعر ${flow.selected_service_name} على ${flow.selected_insurance_company_name} فئة ${flow.selected_insurance_class_name} هو ${displayPrice(price.price)} ريال 🌸\nهل ترغبين في حجز موعد؟`;
-  } catch {
-    flow.state = 'awaiting_price_cash_confirmation';
-    return unavailableInsuranceReply();
-  }
-}
-
-async function pricedInsuranceOptions({
-  flow, data, priceService, insuranceCompanyId = null,
-}) {
-  if (!validSelectedService(flow, data.services)) {
-    return { companies: [], classes: [] };
-  }
-  const insurance = data.paymentMethods.find((item) =>
-    String(item.code || '').toLowerCase() === 'insurance'
-  );
-  if (!insurance ||
-      typeof priceService?.listApplicableInsuranceOptions !== 'function') {
-    return { companies: [], classes: [] };
-  }
-  return priceService.listApplicableInsuranceOptions({
-    clinicId: data.clinic.id,
-    serviceId: flow.selected_service_id,
-    paymentMethodId: insurance.id,
-    insuranceCompanyId,
-  });
-}
-
-async function continueReadyPriceInquiry({
-  text, state, flow, data, policy, priceService, now, bookingContext,
-}) {
-  const normalized = policy.normalize(text);
-  if (/حجز/.test(normalized)) {
-    return handoffPriceToBooking({
-      state, flow, data, policy, bookingContext,
-    });
-  }
-  if (/(كاش|نقدي)/.test(normalized)) {
-    flow.selected_payment_method = 'cash';
-    flow.resolved_insurance_price = null;
-    flow.state = 'awaiting_price_booking_confirmation';
-    if (flow.resolved_cash_price) return cashBookingReply(flow);
-    return resolveCashPrice({ flow, data, priceService, now, policy });
-  }
-
-  const scoped = await pricedInsuranceOptions({ flow, data, priceService });
-  const selection = contextualSelectionText(text, policy);
-  const companyMatches = matchingNamed(selection, scoped.companies, policy);
-  if (companyMatches.length === 1) {
-    const company = companyMatches[0];
-    flow.selected_payment_method = 'insurance';
-    flow.selected_insurance_company_id = company.id;
-    flow.selected_insurance_company_name = company.name;
-    flow.selected_insurance_class_id = null;
-    flow.selected_insurance_class_name = null;
-    flow.resolved_insurance_price = null;
-    flow.state = 'awaiting_price_insurance_class';
-    const options = await pricedInsuranceOptions({
-      flow, data, priceService, insuranceCompanyId: company.id,
-    });
-    return policy.insuranceClasses(options.classes, true);
-  }
-
-  if (flow.selected_insurance_company_id) {
-    const options = await pricedInsuranceOptions({
-      flow, data, priceService,
-      insuranceCompanyId: flow.selected_insurance_company_id,
-    });
-    const classMatches = matchingNamed(selection, options.classes, policy);
-    if (classMatches.length === 1) {
-      flow.selected_payment_method = 'insurance';
-      flow.selected_insurance_class_id = classMatches[0].id;
-      flow.selected_insurance_class_name = classMatches[0].name;
-      return resolveInsurancePrice({ flow, data, priceService, now });
-    }
-    const masterClass = matchingNamed(selection, data.insuranceClasses, policy);
-    if (masterClass.length) {
-      if (masterClass.length === 1 && !masterClass[0].isAccepted) {
-        flow.state = 'awaiting_price_cash_confirmation';
-        return rejectedInsuranceClassReply(flow);
-      }
-      return unpricedClassReply(flow, text, options.classes);
-    }
-  }
-
-  const masterCompany = matchingNamed(selection, data.insuranceCompanies, policy);
-  if (masterCompany.length) return unpricedCompanyReply(flow, scoped.companies);
-
-  const serviceMatches = matchingServices(selection, data.services, policy);
-  if (serviceMatches.length === 1) {
-    selectPriceService(flow, serviceMatches[0]);
-    flow.selected_payment_method = null;
-    flow.selected_insurance_company_id = null;
-    flow.selected_insurance_company_name = null;
-    flow.selected_insurance_class_id = null;
-    flow.selected_insurance_class_name = null;
-    flow.resolved_insurance_price = null;
-    return resolveCashPrice({ flow, data, priceService, now, policy });
-  }
-
-  return 'يمكنكِ اختيار كاش، شركة تأمين، فئة أخرى، أو بدء الحجز 🌸';
-}
-
-function contextualSelectionText(text, policy) {
-  return policy.normalize(text)
-    .replace(/(ما|طيب|طب|ولو|و لو|فئه|فئة|سعرها|سعر|على|كم|بكم|بكام|هو|هي)/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-function unpricedCompanyReply(flow, companies) {
-  return `لا يوجد سعر مسجل لـ${flow.selected_service_name} على شركة التأمين المطلوبة حاليًا 🌸\nالشركات المتاحة:\n${formatNames(companies)}`;
-}
-
-function unpricedClassReply(flow, text, classes) {
-  const requested = String(text || '').trim();
-  return `لا يوجد سعر مسجل لـ${flow.selected_service_name} على ${flow.selected_insurance_company_name || 'شركة التأمين'} فئة ${requested} حاليًا 🌸\nالفئات المتاحة:\n${formatNames(classes)}`;
-}
-
-function rejectedInsuranceClassReply(flow) {
-  return `نعتذر، هذه الفئة غير مشمولة لدينا حاليًا 🌸\nيمكننا إكمال الطلب كاش بسعر ${displayPrice(flow.resolved_cash_price)} ${flow.currency || 'SAR'}.\nهل ترغبين في المتابعة كاش؟`;
-}
-
-function paymentChoice(text, methods, policy) {
-  const normalized = policy.normalize(text);
-  const code = /(كاش|نقدي)/.test(normalized)
-    ? 'cash'
-    : /(تامين|تأمين)/.test(normalized) ? 'insurance' : null;
-  return code ? methods.find((item) => String(item.code).toLowerCase() === code) || null : null;
-}
-
-function classesForCompany(data, companyId) {
-  return data.insuranceClasses.filter((item) =>
-    item.insuranceCompanyId === companyId
-  );
-}
-
-function isAffirmative(text, policy) {
-  return /^(نعم|اي|ايوه|ايوا|تمام|موافق|اكيد|احجز|احجزي|ابغى احجز|اريد الحجز)$/.test(
-    policy.normalize(text).trim()
-  );
-}
-
-function isNegative(text, policy) {
-  return /^(لا|مش الان|مو الان|لاحقا|لا شكرا)$/.test(
-    policy.normalize(text).trim()
-  );
-}
-
-function isBookingConfirmation(text, policy) {
-  return isAffirmative(text, policy) || /^(حجز|ابدأ الحجز)$/.test(
-    policy.normalize(text).trim()
-  );
-}
 
 function handoffPriceToBooking({ state, flow, data, policy, bookingContext }) {
+  if (state.booking) throw new TypeError('A price handoff cannot replace an active booking.');
   const service = data.services.find((item) =>
     item.id === flow.selected_service_id
   );
-  const paymentMethod = data.paymentMethods.find((item) =>
-    String(item.code || '').toLowerCase() === flow.selected_payment_method
-  );
-  if (!service || !paymentMethod) {
-    return priceServiceChoice(data.services, data.clinic, policy);
+  if (!service || !flow.selected_payment_method_id || !Number.isFinite(flow.amount)) {
+    throw new TypeError('Booking handoff requires a completed price decision.');
   }
-  const insurance = flow.selected_payment_method === 'insurance';
+
   const booking = emptyBookingState();
-  booking.paymentMethodId = paymentMethod.id;
-  booking.insuranceCompanyId = insurance
-    ? flow.selected_insurance_company_id
-    : null;
-  booking.insuranceClassId = insurance
-    ? flow.selected_insurance_class_id
-    : null;
+  const reply = advanceFromServiceSelection(booking, service, data, policy);
+  // The price boundary transfers an already resolved scope after booking's
+  // service transition has cleared its own dependent fields.
+  booking.serviceId = service.id;
+  booking.paymentMethodId = flow.selected_payment_method_id;
+  booking.insuranceCompanyId = flow.selected_insurance_company_id;
+  booking.insuranceClassId = flow.selected_insurance_class_id;
   booking.serviceName = flow.selected_service_name;
   booking.paymentMethodCode = flow.selected_payment_method;
-  booking.quotedPrice = insurance
-    ? flow.resolved_insurance_price
-    : flow.resolved_cash_price;
+  booking.quotedPrice = flow.quotedPrice;
   booking.currency = flow.currency;
   booking.clinicId = bookingContext?.clinicId || data.clinic.id || null;
   booking.patientId = bookingContext?.patientId || null;
   state.booking = booking;
   delete state.priceInquiry;
-  return advanceFromServiceSelection(booking, service, data, policy);
+  return reply;
 }
 
-function priceServiceChoice(services, clinic, policy) {
-  return `${policy.services(services, clinic)}\nاختاري خدمة واحدة لمعرفة سعرها.`;
-}
-
-function unknownPriceService(services, clinic, policy) {
-  return `لم أتعرف على الخدمة.\n${priceServiceChoice(services, clinic, policy)}`;
-}
-
-function formatNames(items) {
-  return items.length ? items.map((item) => `▪️ ${item.name}`).join('\n') : 'لا توجد خيارات متاحة حاليًا.';
-}
-
-function displayPrice(value) {
-  const number = Number(value);
-  return Number.isFinite(number) ? String(number) : String(value || '');
-}
-
-function cashBookingReply(flow) {
-  return `تمام 🌸\nسعر ${flow.selected_service_name} كاش ${displayPrice(flow.resolved_cash_price)} ريال.\nهل ترغبين في حجز موعد؟`;
-}
-
-function unavailableCashReply() {
-  return 'سعر هذه الخدمة غير متاح حاليًا 🌸\nيمكنني تحويل طلبك للموظف المختص.';
-}
-
-function unavailableInsuranceReply() {
-  return 'لا يوجد سعر تأمين مسجل لهذه الخدمة على الشركة والفئة المحددتين حاليًا 🌸\nيمكننا إكمال الطلب كاش أو تحويلك للموظف المختص.';
-}
 
 const BOOKING_FIELDS = Object.freeze([
   'step',
@@ -6059,7 +5489,6 @@ ShadenEngine.clearCancellationState = clearCancellationState;
 ShadenEngine.replaceCancellationState = replaceCancellationState;
 ShadenEngine.recordCancellationVerificationFailure =
   recordCancellationVerificationFailure;
-ShadenEngine.matchingServices = matchingServices;
 ShadenEngine.normalizeEngineReply = normalizeEngineReply;
 ShadenEngine.FLOW_LIFECYCLE_STEPS = Object.freeze({
   booking: Object.freeze([...BOOKING_STEPS]),
