@@ -172,7 +172,7 @@ function createShadenEngine({
         identityContext, preservedData,
       }));
       const clinicData = await dataProvider.load(clinic);
-      const deterministicInquiry = policy.recognize(message.text);
+      let deterministicInquiry = policy.recognize(message.text);
       let operationalInquiry = null;
 
       let semanticMeaning = null;
@@ -319,6 +319,7 @@ function createShadenEngine({
         }
       }
 
+      deterministicInquiry = PriceStateMachine.currentInquiry(deterministicInquiry, semanticMeaning);
       const operationalOwner = shouldUseOperationalCore(
         message, preservedData.shaden, operationalInquiry || deterministicInquiry, clinicData
       ) || (semanticMeaning?.status === 'UNDERSTOOD' && semanticMeaning.goal === 'ACT'
@@ -647,7 +648,7 @@ function idleState(value, policy) {
   return policy.initialState();
 }
 function shouldUseOperationalCore(message, state, inquiry, catalog) {
-  if (PriceStateMachine.owns(message, state, catalog)) return 'PRICE_STATE_MACHINE';
+  if (PriceStateMachine.owns(message, state, catalog, inquiry)) return 'PRICE_STATE_MACHINE';
   if (message?.inputProvenance?.trusted === true) return 'TRUSTED_MACHINE_INPUT';
   if (activeOperationalOwner(state)) return 'ACTIVE_OPERATIONAL_STATE';
   return OPERATIONAL_INQUIRY_TYPES.has(inquiry?.type)

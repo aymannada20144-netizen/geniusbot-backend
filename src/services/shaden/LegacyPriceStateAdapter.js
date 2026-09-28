@@ -1,122 +1,71 @@
 'use strict';
-
 const PriceState = require('./PriceState');
 const { SCHEMA_VERSION } = PriceState;
+const entity = (items, id) => (items || []).find(item => item.id === id);
 
-function emptyPriceState() {
-  return PriceState.create();
-}
-
+// Only ingress accepts historical object/V1 contracts. All outputs use IDs.
 function adapt(value, catalog = {}) {
-  if (value?.schemaVersion === SCHEMA_VERSION) return sanitize(value, catalog);
-  const state = emptyPriceState();
-  if (!value || typeof value !== 'object') return state;
-  state.service = entity(catalog.services, value.selected_service_id);
-  state.paymentMethod = payment(catalog.paymentMethods, value.selected_payment_method);
-  state.insuranceCompany = entity(catalog.insuranceCompanies, value.selected_insurance_company_id);
-  state.insuranceClass = insuranceClass(catalog.insuranceClasses, value.selected_insurance_class_id, state.insuranceCompany?.id);
-  const rawAmount = state.paymentMethod?.code === 'cash'
-    ? value.resolved_cash_price : value.resolved_insurance_price;
-  if (state.service && state.paymentMethod && value.quoteCompleted === true && finite(rawAmount) && typeof value.currency === 'string') {
-    state.quote = { amount: Number(rawAmount), currency: value.currency, rawAmount: String(rawAmount) };
-  }
-  // A failed lookup is a terminal price result for this scope.  Preserve that
-  // fact across the V1 -> V2 boundary so an unrelated reply cannot re-run it.
-  state.status = value.state === 'price_inquiry_ready' ? 'price_not_found' : status(value.state, state);
+  const v = value || {};
+  const state = PriceState.create();
+  state.serviceId = entity(catalog.services, v.serviceId ?? v.service?.id ?? v.selected_service_id)?.id || null;
+  state.insuranceCompanyId = entity(catalog.insuranceCompanies,
+    v.insuranceCompanyId ?? v.insuranceCompany?.id ?? v.selected_insurance_company_id)?.id || null;
+  const requested = typeof v.paymentMethod === 'string' ? v.paymentMethod :
+    v.paymentMethod?.code ?? v.selected_payment_method;
+  state.paymentMethod = state.insuranceCompanyId ? 'insurance' :
+    ['cash', 'insurance'].includes(requested) ? requested : null;
+  state.paymentMethodId = (catalog.paymentMethods || []).find(x => x.code === state.paymentMethod)?.id || null;
+  const cls = entity(catalog.insuranceClasses, v.insuranceClassId ?? v.insuranceClass?.id ?? v.selected_insurance_class_id);
+  state.insuranceClassId = cls && cls.isAccepted !== false && state.insuranceCompanyId &&
+    cls.insuranceCompanyId === state.insuranceCompanyId ? cls.id : null;
+  const raw = state.paymentMethod === 'cash' ? v.resolved_cash_price : v.resolved_insurance_price;
+  const quote = v.quote || (v.quoteCompleted === true && raw != null ?
+    { amount: Number(raw), currency: v.currency, rawAmount: String(raw) } : null);
+  if (quote && Number.isFinite(quote.amount) && typeof quote.currency === 'string' &&
+      state.serviceId && state.paymentMethod && requested === state.paymentMethod &&
+      (state.paymentMethod !== 'insurance' || state.insuranceClassId)) state.quote = { ...quote };
   state.pendingSlot = pending(state);
-  state.provenance = Object.fromEntries(Object.entries({
-    service: state.service, paymentMethod: state.paymentMethod,
-    insuranceCompany: state.insuranceCompany, insuranceClass: state.insuranceClass,
-  }).filter(([, entry]) => entry).map(([key]) => [key, 'PERSISTED']));
-  return exposeLegacyReadOnlyFields(state);
-}
-
-function sanitize(value, catalog = {}) {
-  const state = emptyPriceState();
-  state.service = entity(catalog.services, value.service?.id);
-  state.paymentMethod = payment(catalog.paymentMethods, value.paymentMethod?.code || value.paymentMethod?.id);
-  state.insuranceCompany = entity(catalog.insuranceCompanies, value.insuranceCompany?.id);
-  state.insuranceClass = insuranceClass(catalog.insuranceClasses, value.insuranceClass?.id, state.insuranceCompany?.id);
-  if (state.paymentMethod?.code !== 'insurance') {
-    state.insuranceCompany = null;
-    state.insuranceClass = null;
+  state.status = state.quote ? 'quoted' :
+    (v.status === 'price_not_found' || v.state === 'price_inquiry_ready') ? 'price_not_found' :
+      'awaiting_' + (state.pendingSlot || 'service');
+  if (state.insuranceCompanyId && !state.insuranceClassId) state.status = 'awaiting_insuranceClass';
+  for (const key of ['serviceId', 'paymentMethod', 'insuranceCompanyId', 'insuranceClassId']) {
+    if (state[key]) state.provenance[key] = v.provenance?.[key] || 'PERSISTED';
   }
-  if (state.paymentMethod?.code === 'insurance' && !state.insuranceCompany) state.insuranceClass = null;
-  if (value.quote && finite(value.quote.amount) && typeof value.quote.currency === 'string' &&
-      state.service && state.paymentMethod && (state.paymentMethod.code !== 'insurance' || state.insuranceClass)) {
-    state.quote = { amount: Number(value.quote.amount), currency: value.quote.currency,
-      rawAmount: String(value.quote.rawAmount ?? value.quote.amount) };
-  }
-  state.status = typeof value.status === 'string' ? value.status : status(null, state);
-  state.pendingSlot = pending(state);
-  for (const key of ['service', 'paymentMethod', 'insuranceCompany', 'insuranceClass']) {
-    if (state[key] && value.provenance?.[key] === 'CURRENT') state.provenance[key] = 'CURRENT';
-    else if (state[key]) state.provenance[key] = 'PERSISTED';
-  }
-  return exposeLegacyReadOnlyFields(state);
+  return expose(state, catalog);
 }
-
-function entity(items, id) { return (items || []).find(item => item.id === id) || null; }
-function payment(items, value) { return (items || []).find(item => item.id === value || item.code === value) || null; }
-function insuranceClass(items, id, companyId) {
-  const item = entity(items, id);
-  return companyId && item && item.isAccepted !== false && item.insuranceCompanyId === companyId ? item : null;
+function pending(s) {
+  if (!s.serviceId) return 'service';
+  if (!s.paymentMethod) return 'paymentMethod';
+  if (s.paymentMethod === 'insurance' && !s.insuranceCompanyId) return 'insuranceCompany';
+  if (s.paymentMethod === 'insurance' && !s.insuranceClassId) return 'insuranceClass';
+  return s.quote ? 'bookingConfirmation' : null;
 }
-function finite(value) { return Number.isFinite(Number(value)); }
-function pending(state) {
-  if (!state.service) return 'service';
-  if (!state.paymentMethod) return 'paymentMethod';
-  if (state.paymentMethod.code === 'insurance' && !state.insuranceCompany) return 'insuranceCompany';
-  if (state.paymentMethod.code === 'insurance' && !state.insuranceClass) return 'insuranceClass';
-  return state.quote ? 'bookingConfirmation' : null;
-}
-function status(legacy, state) {
-  if (state.quote) return 'quoted';
-  return `awaiting_${pending(state) || 'service'}`;
-}
-
-function legacyProjection(value, catalog) {
-  const state = value?.schemaVersion === SCHEMA_VERSION
-    ? value
-    : adapt(value, catalog);
+function legacyProjection(value, catalog = {}) {
+  const s = value && Object.hasOwn(value, 'serviceId') ? value : adapt(value, catalog);
   return {
-    intent: 'price_inquiry', state: state.status === 'quoted'
-      ? 'awaiting_price_booking_confirmation'
-      : state.status === 'price_not_found'
-        ? 'price_inquiry_ready'
-        : `awaiting_price_${state.pendingSlot === 'paymentMethod' ? 'payment_method' :
-        state.pendingSlot === 'insuranceCompany' ? 'insurance_company' :
-          state.pendingSlot === 'insuranceClass' ? 'insurance_class' : 'service'}`,
-    selected_service_id: state.service?.id || null,
-    selected_service_name: state.service?.name || null,
-    selected_payment_method: state.paymentMethod?.code || null,
-    selected_payment_method_id: state.paymentMethod?.id || null,
-    selected_insurance_company_id: state.insuranceCompany?.id || null,
-    selected_insurance_company_name: state.insuranceCompany?.name || null,
-    selected_insurance_class_id: state.insuranceClass?.id || null,
-    selected_insurance_class_name: state.insuranceClass?.name || null,
-    resolved_cash_price: state.paymentMethod?.code === 'cash' ? state.quote?.rawAmount || null : null,
-    resolved_insurance_price: state.paymentMethod?.code === 'insurance' ? state.quote?.rawAmount || null : null,
-    currency: state.quote?.currency || null,
-    amount: state.quote?.amount ?? null,
-    quoteCompleted: Boolean(state.quote),
-    quotedPrice: state.quote?.rawAmount || null,
+    intent: 'price_inquiry', state: s.status === 'quoted' ? 'awaiting_price_booking_confirmation' :
+      s.status === 'price_not_found' ? 'price_inquiry_ready' : 'awaiting_price_' +
+        ({ paymentMethod: 'payment_method', insuranceCompany: 'insurance_company', insuranceClass: 'insurance_class' }[s.pendingSlot] || 'service'),
+    selected_service_id: s.serviceId, selected_service_name: entity(catalog.services, s.serviceId)?.name || null,
+    selected_payment_method: s.paymentMethod, selected_payment_method_id: s.paymentMethodId,
+    selected_insurance_company_id: s.insuranceCompanyId,
+    selected_insurance_company_name: entity(catalog.insuranceCompanies, s.insuranceCompanyId)?.name || null,
+    selected_insurance_class_id: s.insuranceClassId,
+    selected_insurance_class_name: entity(catalog.insuranceClasses, s.insuranceClassId)?.name || null,
+    resolved_cash_price: s.paymentMethod === 'cash' ? s.quote?.rawAmount || null : null,
+    resolved_insurance_price: s.paymentMethod === 'insurance' ? s.quote?.rawAmount || null : null,
+    amount: s.quote?.amount ?? null, currency: s.quote?.currency || null,
+    quoteCompleted: Boolean(s.quote), quotedPrice: s.quote?.rawAmount || null,
   };
 }
-
-// Transitional in-memory read surface for callers compiled against V1. These
-// properties are non-enumerable, so persistence remains the V2 schema only.
-function exposeLegacyReadOnlyFields(state) {
-  const projection = () => legacyProjection(state, {});
-  for (const key of ['intent', 'state', 'selected_service_id', 'selected_service_name',
-    'selected_payment_method', 'selected_insurance_company_id', 'selected_insurance_company_name',
-    'selected_insurance_class_id', 'selected_insurance_class_name', 'resolved_cash_price',
-    'resolved_insurance_price', 'currency', 'amount', 'quoteCompleted', 'quotedPrice']) {
-    if (Object.prototype.hasOwnProperty.call(state, key)) continue;
+function expose(state, catalog) {
+  // Presentation compatibility only; these fields never enter JSON persistence.
+  for (const key of Object.keys(legacyProjection(state, catalog))) {
     Object.defineProperty(state, key, { enumerable: false, configurable: true,
-      get: () => projection()[key] });
+      get: () => legacyProjection(state, catalog)[key] });
   }
   return state;
 }
-
-module.exports = Object.freeze({ SCHEMA_VERSION, emptyPriceState, adapt, sanitize, pending, legacyProjection });
+module.exports = Object.freeze({ SCHEMA_VERSION, emptyPriceState: PriceState.create,
+  adapt, sanitize: adapt, pending, legacyProjection });

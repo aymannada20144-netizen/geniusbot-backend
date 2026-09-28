@@ -1,7 +1,7 @@
 'use strict';
 
 const PriceReplyFormatter = require('./PriceReplyFormatter');
-const ACTIONS = new Set(['ASK_PAYMENT_METHOD', 'ASK_INSURANCE_COMPANY', 'ASK_INSURANCE_CLASS',
+const ACTIONS = new Set(['YIELD', 'ASK_PAYMENT_METHOD', 'ASK_INSURANCE_COMPANY', 'ASK_INSURANCE_CLASS',
   'INVALID_INSURANCE_COMPANY', 'INVALID_INSURANCE_CLASS', 'QUOTE_CASH_PRICE',
   'QUOTE_INSURANCE_PRICE', 'PRICE_NOT_FOUND', 'OFFER_BOOKING', 'HANDOFF_TO_BOOKING']);
 
@@ -19,7 +19,8 @@ class PriceDecisionExecutor {
     if (!['QUOTE_CASH_PRICE', 'QUOTE_INSURANCE_PRICE'].includes(decision.action)) return { type: 'NO_LOOKUP' };
     const cash = decision.action === 'QUOTE_CASH_PRICE';
     if (cash && (decision.evidence !== 'CURRENT' || decision.currentSlots.cash !== true ||
-        decision.currentSlots.company || decision.provenance.cash !== 'CURRENT')) {
+        decision.currentSlots.company || decision.currentSlots.insuranceCompanyId ||
+        decision.nextPriceState?.insuranceCompanyId || decision.provenance.cash !== 'CURRENT')) {
       throw new TypeError('Cash quote requires explicit CURRENT evidence.');
     }
     const request = decision.lookup;

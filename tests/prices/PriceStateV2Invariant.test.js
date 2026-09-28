@@ -39,9 +39,9 @@ test('legacy cash plus CURRENT insurer reduces to current insurance scope', asyn
   const [cash, insurance] = h.catalog.paymentMethods;
   const [company] = h.catalog.insuranceCompanies;
   const result = await h.decide(legacy({ service, payment: cash }), { insuranceCompanyId: company.id });
-  assert.equal(result.nextPriceState.paymentMethod.id, insurance.id);
-  assert.equal(result.nextPriceState.insuranceCompany.id, company.id);
-  assert.equal(result.nextPriceState.insuranceClass, null);
+  assert.equal(result.nextPriceState.paymentMethodId, insurance.id);
+  assert.equal(result.nextPriceState.insuranceCompanyId, company.id);
+  assert.equal(result.nextPriceState.insuranceClassId, null);
   assert.equal(result.nextPriceState.quote, null);
 });
 
@@ -52,8 +52,8 @@ test('CURRENT insurer overrides legacy insurer and invalidates dependent class',
   const [first, second] = h.catalog.insuranceCompanies;
   const previous = h.catalog.insuranceClasses.find(x => x.insuranceCompanyId === first.id);
   const result = await h.decide(legacy({ service, payment: insurance, company: first, insuranceClass: previous }), { insuranceCompanyId: second.id });
-  assert.equal(result.nextPriceState.insuranceCompany.id, second.id);
-  assert.equal(result.nextPriceState.insuranceClass, null);
+  assert.equal(result.nextPriceState.insuranceCompanyId, second.id);
+  assert.equal(result.nextPriceState.insuranceClassId, null);
   assert.equal(result.nextPriceState.quote, null);
 });
 
@@ -64,8 +64,8 @@ test('legacy class is discarded when its parent company changes', () => {
   const [first, second] = h.catalog.insuranceCompanies;
   const oldClass = h.catalog.insuranceClasses.find(x => x.insuranceCompanyId === first.id);
   const v2 = adapt(legacy({ service, payment: insurance, company: second, insuranceClass: oldClass }), h.catalog);
-  assert.equal(v2.insuranceCompany.id, second.id);
-  assert.equal(v2.insuranceClass, null);
+  assert.equal(v2.insuranceCompanyId, second.id);
+  assert.equal(v2.insuranceClassId, null);
 });
 
 test('corrupt legacy state retains only catalog-provable entities', () => {
@@ -73,10 +73,10 @@ test('corrupt legacy state retains only catalog-provable entities', () => {
   const state = adapt({ intent: 'price_inquiry', state: 'anything', selected_service_id: 'missing',
     selected_payment_method: 'cash', selected_insurance_company_id: 'missing', selected_insurance_class_id: 'missing',
     resolved_cash_price: '123', currency: 'SAR', quoteCompleted: true }, h.catalog);
-  assert.equal(state.service, null);
-  assert.equal(state.paymentMethod.code, 'cash');
-  assert.equal(state.insuranceCompany, null);
-  assert.equal(state.insuranceClass, null);
+  assert.equal(state.serviceId, null);
+  assert.equal(state.paymentMethod, 'cash');
+  assert.equal(state.insuranceCompanyId, null);
+  assert.equal(state.insuranceClassId, null);
   assert.equal(state.quote, null);
 });
 
@@ -86,7 +86,7 @@ test('new and serialized V2 conversations are deterministic', async () => {
   const direct = await h.decide(null, { serviceId: service.id });
   const serialized = JSON.parse(JSON.stringify(direct.nextPriceState));
   const repeated = await h.decide(serialized);
-  assert.equal(direct.action, repeated.action);
+  assert.equal(repeated.action, 'YIELD');
   assert.deepEqual(direct.nextPriceState, repeated.nextPriceState);
   assert.deepEqual(Object.keys(serialized).sort(), [...PriceState.FIELDS].sort());
 });

@@ -15,7 +15,7 @@ const {
 } = require('../../contracts/shaden/InternalHandlerResult');
 const PriceStateMachine = require('./PriceStateMachine');
 const PriceDecisionExecutor = require('./PriceDecisionExecutor');
-const { adapt: adaptPriceState, legacyProjection } = require('./LegacyPriceStateAdapter');
+const { legacyProjection } = require('./LegacyPriceStateAdapter');
 
 class ShadenEngine {
   constructor({
@@ -51,6 +51,7 @@ class ShadenEngine {
     resolveChangeServiceTarget = null,
     operationalServiceConstraint = null,
     operationalBookingConstraint = null,
+    priceOwnershipChecked = false,
   }) {
     const nextState = normalizeState(currentState, this.policy);
     const canonicalCustomerName = patientIdentity?.patient
@@ -61,7 +62,7 @@ class ShadenEngine {
     const interactiveReplyId = message && typeof message === 'object'
       ? message.rawPayload?.value
       : null;
-    let inquiry = this.policy.recognize(text);
+    let inquiry = PriceStateMachine.currentInquiry(this.policy.recognize(text), semanticMeaning);
     if (semanticMeaning?.status === 'UNDERSTOOD' && semanticMeaning.goal === 'ACT' &&
         message?.inputProvenance?.trusted !== true &&
         !EXPLICIT_APPOINTMENT_INTERRUPTS.has(inquiry.type) && operationalInquiry &&
@@ -195,17 +196,33 @@ class ShadenEngine {
         clinicData?.serviceBranchAssignments || [],
     };
 
-    if (nextState.priceInquiry) nextState.priceInquiry = adaptPriceState(nextState.priceInquiry, safeData);
 
-    if (PriceStateMachine.owns(message, nextState, safeData)) {
+    if (!priceOwnershipChecked && ((!nextState.booking && nextState.priceInquiry) || PriceStateMachine.owns(message, nextState, safeData, inquiry))) {
+      const beforeVersion = nextState.priceInquiry?.schemaVersion || (nextState.priceInquiry ? 1 : null);
       return this.priceStateMachine.prepare({
         message,
         currentSlots: {},
+        currentInquiry: inquiry,
         persistedPriceState: nextState.priceInquiry,
+        activeBooking: nextState.booking,
         catalog: safeData,
       }, this.priceService).then(async decision => {
+        if (decision.action === 'YIELD') {
+          this.logPriceTransition({ beforeVersion, currentGroundedSlots: {}, invalidatedSlots: [],
+            afterState: nextState.priceInquiry, action: 'YIELD' });
+          return this.handle({ message, currentState, clinicData, bookingContext, patientIdentity,
+            semanticMeaning, operationalInquiry, resolveChangeServiceTarget,
+            operationalServiceConstraint, operationalBookingConstraint, priceOwnershipChecked: true });
+        }
         const outcome = await this.priceDecisionExecutor.execute(decision);
         const completed = this.priceStateMachine.complete(decision, outcome);
+        this.logPriceTransition({
+          beforeVersion,
+          currentGroundedSlots: completed.currentSlots,
+          invalidatedSlots: completed.invalidatedSlots,
+          afterState: completed.nextPriceState,
+          action: completed.action,
+        });
         nextState.priceInquiry = completed.nextPriceState;
         if (!completed.nextPriceState) delete nextState.priceInquiry;
         if (completed.action === 'HANDOFF_TO_BOOKING') {
@@ -539,6 +556,26 @@ class ShadenEngine {
       case 'booking': return this.policy.bookingChooseService(data.services, data.clinic);
       default: return this.policy.unknown();
     }
+  }
+
+  logPriceTransition({ beforeVersion, currentGroundedSlots, invalidatedSlots, afterState, action }) {
+    const ids = (slots) => Object.fromEntries([
+      ['serviceId', slots?.serviceId], ['paymentMethod', slots?.paymentMethod], ['paymentMethodId', slots?.paymentMethodId],
+      ['insuranceCompanyId', slots?.insuranceCompanyId], ['insuranceClassId', slots?.insuranceClassId],
+    ].filter(([, value]) => value));
+    this.logger.info({
+      event: 'SHADEN_PRICE_STATE_TRANSITION',
+      beforeVersion,
+      currentGroundedSlots: ids(currentGroundedSlots),
+      invalidatedSlots: [...new Set(invalidatedSlots || [])],
+      afterState: afterState ? {
+        schemaVersion: afterState.schemaVersion, status: afterState.status,
+        pendingSlot: afterState.pendingSlot,
+        slots: ids(afterState),
+        hasQuote: Boolean(afterState.quote),
+      } : null,
+      action,
+    });
   }
 }
 
@@ -5129,12 +5166,14 @@ function isNullableTimestamp(value) {
 
 
 function handoffPriceToBooking({ state, flow, data, policy, bookingContext }) {
+  if (state.booking) throw new TypeError('A price handoff cannot replace an active booking.');
   const service = data.services.find((item) =>
     item.id === flow.selected_service_id
   );
   if (!service || !flow.selected_payment_method_id || !Number.isFinite(flow.amount)) {
     throw new TypeError('Booking handoff requires a completed price decision.');
   }
+
   const booking = emptyBookingState();
   const reply = advanceFromServiceSelection(booking, service, data, policy);
   // The price boundary transfers an already resolved scope after booking's

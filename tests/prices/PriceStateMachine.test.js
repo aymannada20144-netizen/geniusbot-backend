@@ -19,12 +19,53 @@ function session() {
   } };
 }
 
+test('quoted state yields typed other intents and unknown input without any catalog or price lookup', async () => {
+  const s = session();
+  const quoted = await s.turn(`سعر ${s.catalog.services[0].name} ${s.catalog.insuranceCompanies[0].name} K1`);
+  const stored = JSON.parse(JSON.stringify(quoted.nextPriceState));
+  let optionLookups = 0;
+  s.priceService.listApplicableInsuranceOptions = async () => { optionLookups++; throw new Error('Yield cannot fetch options'); };
+  for (const type of ['branches', 'services', 'specialties', 'availability_request', 'unknown']) {
+    const d = await s.machine.prepare({ message: 'طلب آخر', persistedPriceState: stored,
+      catalog: s.catalog, currentInquiry: { type } }, s.priceService);
+    assert.equal(d.action, 'YIELD');
+    assert.equal(d.preserveState, true);
+    assert.equal(d.nextPriceState, stored);
+    assert.deepEqual(d.nextPriceState.quote, quoted.nextPriceState.quote);
+    assert.equal(Machine.owns('طلب آخر', { priceInquiry: stored }, s.catalog, { type }), false);
+  }
+  assert.equal(optionLookups, 0);
+  assert.equal(s.calls.length, 1);
+});
+
+test('structured booking confirmation owns a quote but an active booking always blocks late handoff', async () => {
+  const s = session();
+  const quoted = await s.turn(`سعر ${s.catalog.services[0].name} ${s.catalog.insuranceCompanies[0].name} K1`);
+  const priceInquiry = quoted.nextPriceState;
+  const currentInquiry = { type: 'booking' };
+  const message = 'طلب موعد';
+  const accepted = await s.machine.prepare({ message, currentInquiry, persistedPriceState: priceInquiry,
+    catalog: s.catalog }, s.priceService);
+  assert.equal(accepted.action, 'HANDOFF_TO_BOOKING');
+  assert.equal(Machine.owns(message, { priceInquiry }, s.catalog, currentInquiry), true);
+  const activeBooking = { serviceId: priceInquiry.serviceId, step: 'branch' };
+  for (const text of [message, 'نعم', s.catalog.branches[0].name, 'شكرا', s.catalog.insuranceClasses[0].name]) {
+    assert.equal(Machine.owns(text, { priceInquiry, booking: activeBooking }, s.catalog, currentInquiry), false);
+    const decision = await s.machine.prepare({ message: text, currentInquiry, activeBooking,
+      persistedPriceState: priceInquiry, catalog: s.catalog }, s.priceService);
+    assert.equal(decision.action, 'YIELD');
+  }
+  assert.equal(Machine.owns(`سعر ${s.catalog.services[0].name}`, { priceInquiry, booking: activeBooking }, s.catalog), true);
+  assert.equal(s.calls.length, 1);
+});
+
 test('neutral service survives JSON without any price lookup', async () => {
   const s = session();
   const d = await s.turn(`سعر ${s.catalog.services[0].name}`);
   assert.equal(d.action, 'ASK_PAYMENT_METHOD');
   const next = await s.turn('UNKNOWN', JSON.parse(JSON.stringify(d.nextPriceState)));
-  assert.equal(next.nextPriceState.selected_payment_method, null);
+  assert.equal(next.action, 'YIELD');
+  assert.equal(next.nextPriceState.paymentMethod, null);
   assert.equal(s.calls.length, 0);
 });
 
@@ -69,11 +110,11 @@ test('company changes invalidate class; service changes invalidate quote scope',
 });
 
 for (const status of ['UNKNOWN', 'AMBIGUOUS', 'NOT_FOUND']) {
-  test(`${status} preserves pending class and asks clarification`, async () => {
+  test(`${status} without price evidence yields and preserves pending class`, async () => {
     const s = session();
     const first = await s.turn(`سعر ${s.catalog.services[0].name} ${s.catalog.insuranceCompanies[0].name}`);
     const next = await s.turn({ text: 'غير واضح', status }, first.nextPriceState);
-    assert.equal(next.action, 'ASK_INSURANCE_CLASS');
+    assert.equal(next.action, 'YIELD');
     assert.deepEqual(next.nextPriceState, first.nextPriceState);
     assert.equal(s.calls.length, 0);
   });
@@ -138,18 +179,18 @@ test('failed insurance lookup cannot be confirmed or retried by an unknown reply
   const failed = await s.turn(`سعر ${s.catalog.services[0].name} ${s.catalog.insuranceCompanies[0].name} K1`);
   assert.equal(failed.action, 'PRICE_NOT_FOUND');
   const next = await s.turn('نعم', failed.nextPriceState);
-  assert.equal(next.action, 'PRICE_NOT_FOUND');
+  assert.equal(next.action, 'YIELD');
   assert.equal(s.calls.length, 1);
 });
 
-test('unknown semantic status cannot quote a guessed class while waiting', async () => {
+test('exact catalog class outranks unknown semantic status while waiting', async () => {
   const s = session();
   const first = await s.turn(`سعر ${s.catalog.services[0].name} ${s.catalog.insuranceCompanies[0].name}`);
   for (const status of ['UNKNOWN', 'AMBIGUOUS', 'NOT_FOUND']) {
     const next = await s.turn({ text: 'K1', status }, first.nextPriceState);
-    assert.equal(next.action, 'ASK_INSURANCE_CLASS');
-    assert.deepEqual(next.nextPriceState, first.nextPriceState);
-    assert.equal(s.calls.length, 0);
+    assert.equal(next.action, 'QUOTE_INSURANCE_PRICE');
+    assert.equal(next.nextPriceState.insuranceCompanyId, first.nextPriceState.insuranceCompanyId);
+    assert.equal(next.nextPriceState.insuranceClassId, s.catalog.insuranceClasses[0].id);
   }
 });
 
