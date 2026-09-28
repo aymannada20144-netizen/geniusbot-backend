@@ -5,8 +5,10 @@ class OpenRouterSemanticProvider {
     apiKey,
     baseUrl,
     model,
-    timeoutMs = 30000,
+    timeoutMs = OpenRouterSemanticProvider.DEFAULT_TOTAL_TIMEOUT_MS,
     fetchImpl = globalThis.fetch,
+    setTimeoutImpl = setTimeout,
+    clearTimeoutImpl = clearTimeout,
   } = {}) {
     if (typeof apiKey !== 'string' || !apiKey.trim()) {
       throw new TypeError(
@@ -29,6 +31,8 @@ class OpenRouterSemanticProvider {
     this.model = model.trim();
     this.timeoutMs = timeoutMs;
     this.fetchImpl = fetchImpl;
+    this.setTimeoutImpl = setTimeoutImpl;
+    this.clearTimeoutImpl = clearTimeoutImpl;
   }
 
   async completeJson(messages) {
@@ -43,13 +47,13 @@ class OpenRouterSemanticProvider {
 
     const controller = new AbortController();
 
-    const timer = setTimeout(
+    const timer = this.setTimeoutImpl(
       () => controller.abort(),
       this.timeoutMs
     );
 
     try {
-      const firstResponse = await this.requestJson(messages, controller.signal);
+      const firstResponse = await this.requestJson(messages, controller.signal, 0);
 
       try {
         return parseStructuredOutput(firstResponse);
@@ -58,22 +62,25 @@ class OpenRouterSemanticProvider {
 
         const retryResponse = await this.requestJson(
           correctiveRetryMessages(messages),
-          controller.signal
+          controller.signal,
+          1
         );
 
         try {
-          return parseStructuredOutput(retryResponse, 1);
+          return parseStructuredOutput(retryResponse);
         } catch (retryError) {
           throw withRetryMetadata(retryError, 1);
         }
       }
     } finally {
-      clearTimeout(timer);
+      this.clearTimeoutImpl(timer);
     }
   }
 
-  async requestJson(messages, signal) {
-    const response = await this.fetchImpl(
+  async requestJson(messages, signal, retryCount) {
+    let response;
+    try {
+      response = await this.fetchImpl(
         `${this.baseUrl}/chat/completions`,
         {
           method: 'POST',
@@ -96,6 +103,15 @@ class OpenRouterSemanticProvider {
           signal,
         }
       );
+    } catch (error) {
+      if (signal?.aborted) {
+        throw new StructuredSemanticOutputError(
+          'OpenRouter semantic response exceeded the total deadline.',
+          deadlineMetadata(this.model, retryCount)
+        );
+      }
+      throw error;
+    }
 
       const body = await response.json();
 
@@ -113,7 +129,7 @@ class OpenRouterSemanticProvider {
       contentLength: typeof choice?.message?.content === 'string'
         ? choice.message.content.length : 0,
       parseStage: 'provider_content',
-      retryCount: 0,
+      retryCount,
     });
 
     const content = choice?.message?.content;
@@ -139,6 +155,8 @@ class OpenRouterSemanticProvider {
   }
 }
 
+OpenRouterSemanticProvider.DEFAULT_TOTAL_TIMEOUT_MS = 30000;
+
 class StructuredSemanticOutputError extends Error {
   constructor(message, metadata) {
     super(message);
@@ -147,8 +165,8 @@ class StructuredSemanticOutputError extends Error {
   }
 }
 
-function parseStructuredOutput(response, retryCount = 0) {
-  const metadata = { ...response.metadata, retryCount };
+function parseStructuredOutput(response) {
+  const metadata = { ...response.metadata };
   let result;
   try {
     result = JSON.parse(response.content);
@@ -171,6 +189,16 @@ function parseStructuredOutput(response, retryCount = 0) {
     usage: response.usage,
     metadata: Object.freeze({ ...metadata, parseStage: 'complete' }),
   });
+}
+
+function deadlineMetadata(model, retryCount) {
+  return {
+    model,
+    finishReason: null,
+    contentLength: 0,
+    parseStage: 'deadline_exhausted',
+    retryCount,
+  };
 }
 
 function correctiveRetryMessages(messages) {

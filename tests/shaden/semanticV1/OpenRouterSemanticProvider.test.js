@@ -44,6 +44,39 @@ test('truncated JSON fails after exactly one retry with safe parse metadata', as
   assert.equal(calls.length, 2);
 });
 
+test('one total deadline covers an invalid first response and a hanging retry without real sleep', async () => {
+  let deadline = null;
+  let timerCount = 0;
+  let calls = 0;
+  const provider = new OpenRouterSemanticProvider({
+    apiKey: 'test-key', model: 'semantic-test', timeoutMs: 123,
+    setTimeoutImpl(callback, timeoutMs) {
+      timerCount += 1;
+      assert.equal(timeoutMs, 123);
+      deadline = callback;
+      return 'timer';
+    },
+    clearTimeoutImpl() {},
+    fetchImpl: async (_url, options) => {
+      calls += 1;
+      if (calls === 1) return jsonResponse('{');
+      return new Promise((_resolve, reject) => {
+        options.signal.addEventListener('abort', () => reject(new Error('aborted')));
+      });
+    },
+  });
+  const completion = provider.completeJson(messages());
+  for (let index = 0; index < 20 && calls < 2; index += 1) await Promise.resolve();
+  assert.equal(calls, 2);
+  assert.equal(timerCount, 1);
+  deadline();
+  await assert.rejects(completion, (error) => {
+    assert.equal(error.metadata.parseStage, 'deadline_exhausted');
+    assert.equal(error.metadata.retryCount, 1);
+    return true;
+  });
+});
+
 test('prose before JSON is rejected rather than extracting arbitrary JSON, then retry can succeed', async () => {
   const provider = subject([
     jsonResponse('Here is the result: {}'),

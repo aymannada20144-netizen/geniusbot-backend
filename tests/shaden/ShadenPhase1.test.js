@@ -5,6 +5,9 @@ const { describe, test } = require('node:test');
 const createShadenEngine = require(
   '../../src/services/shaden/createShadenEngine'
 );
+const OpenRouterSemanticProvider = require(
+  '../../src/services/shaden/semanticV1/OpenRouterSemanticProvider'
+);
 const ConversationRepository = require(
   '../../src/repositories/ConversationRepository'
 );
@@ -59,17 +62,18 @@ describe('Shaden Phase 1.2 public runtime', () => {
 
   test('semantic shadow retry failure leaves the deterministic result and state unchanged without tools', async () => {
     const warnings = [];
+    let deadline = null;
     const baseline = createSession();
     const shadowFailure = createSession({ runtimeOptions: {
       conversationEnabled: true,
-      semanticProvider: { async completeJson() {
-        const error = new Error('invalid JSON');
-        error.metadata = {
-          model: 'semantic-test', finishReason: 'length', contentLength: 12,
-          parseStage: 'json_parse', retryCount: 1,
-        };
-        throw error;
-      } },
+      semanticProvider: new OpenRouterSemanticProvider({
+        apiKey: 'test-key', model: 'semantic-test', timeoutMs: 123,
+        setTimeoutImpl(callback) { deadline = callback; return 'timer'; },
+        clearTimeoutImpl() {},
+        fetchImpl: async (_url, options) => new Promise((_resolve, reject) => {
+          options.signal.addEventListener('abort', () => reject(new Error('aborted')));
+        }),
+      }),
       conversationProvider: { async complete() {
         throw new Error('shadow failure must not invoke conversation tools');
       } },
@@ -77,12 +81,16 @@ describe('Shaden Phase 1.2 public runtime', () => {
     } });
 
     const expected = await baseline.send('الخدمات');
-    const actual = await shadowFailure.send('الخدمات');
+    const actualPromise = shadowFailure.send('الخدمات');
+    for (let index = 0; index < 20 && !deadline; index += 1) await Promise.resolve();
+    assert.equal(typeof deadline, 'function');
+    deadline();
+    const actual = await actualPromise;
     assert.equal(actual.replyText, expected.replyText);
     assert.deepEqual(shadowFailure.persisted(), baseline.persisted());
     assert.deepEqual(warnings, [{
       event: 'SHADEN_SEMANTIC_SHADOW_FAILURE', model: 'semantic-test',
-      finishReason: 'length', contentLength: 12, parseStage: 'json_parse', retryCount: 1,
+      finishReason: null, contentLength: 0, parseStage: 'deadline_exhausted', retryCount: 0,
     }]);
   });
 
