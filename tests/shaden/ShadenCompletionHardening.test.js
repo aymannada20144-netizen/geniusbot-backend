@@ -1088,6 +1088,76 @@ describe('central no-active-branch response', () => {
     const result = new ShadenEngine().handle({ message: { text: 'هل لديكم فرع الدمام' }, currentState: idleState(), clinicData: clinicData() });
     assert.equal(result.reply, formatter.formatNoActiveBranches('الدمام'));
   });
+
+  test('catalog branch availability remains explicit across active, inactive, booking, and generic requests', () => {
+    const data = clinicData();
+    data.branches = [
+      { id: 'branch-active', name: 'الفرع المتاح', city: 'مدينة متاحة', is_active: true },
+      { id: 'branch-other', name: 'فرع آخر', city: 'مدينة أخرى', is_active: true },
+      { id: 'branch-inactive', name: 'الفرع المتوقف', city: 'الدمام', is_active: false },
+    ];
+    const engine = new ShadenEngine();
+
+    const active = engine.handle({
+      message: { text: 'فرع مدينة متاحة' }, currentState: idleState(), clinicData: data,
+    });
+    assert.match(active.reply, /مدينة متاحة/u);
+    assert.equal(active.nextState.booking, undefined);
+
+    const unavailable = engine.handle({
+      message: { text: 'فرع الدمام' }, currentState: idleState(), clinicData: data,
+    });
+    assert.match(unavailable.reply, /لا توجد لدينا فروع نشطة/u);
+    assert.equal(unavailable.interaction, undefined);
+    assert.equal(unavailable.nextState.booking, undefined);
+
+    const followedByBooking = engine.handle({
+      message: { text: 'أقدر أحجز في فرع الدمام؟' },
+      currentState: unavailable.nextState,
+      clinicData: data,
+    });
+    assert.match(followedByBooking.reply, /لا توجد لدينا فروع نشطة/u);
+    assert.equal(followedByBooking.interaction, undefined);
+    assert.equal(followedByBooking.nextState.booking, undefined);
+
+    const bookingState = activeBooking('branch');
+    bookingState.booking.city = 'مدينة متاحة';
+    const blocked = engine.handle({
+      message: { text: 'أقدر أحجز في فرع الدمام؟' }, currentState: bookingState, clinicData: data,
+    });
+    assert.match(blocked.reply, /لا توجد لدينا فروع نشطة/u);
+    assert.equal(blocked.interaction, undefined);
+    assert.equal(blocked.nextState.booking.branchId, null);
+    assert.equal(blocked.nextState.booking.city, 'مدينة متاحة');
+
+    const generic = engine.handle({
+      message: { text: 'ما الفروع؟' }, currentState: idleState(), clinicData: data,
+    });
+    assert.match(generic.reply, /الفرع المتاح/u);
+    assert.doesNotMatch(generic.reply, /الفرع المتوقف/u);
+
+    for (const text of [
+      'ليش كل ما أقول فرع تقول مافي؟',
+      'فرع كلام عشوائي',
+    ]) {
+      const conversational = engine.handle({
+        message: { text }, currentState: idleState(), clinicData: data,
+      });
+      assert.doesNotMatch(conversational.reply, /لا توجد لدينا فروع نشطة/u);
+    }
+
+    const inactiveSelection = engine.handle({
+      message: {
+        text: 'الفرع المتوقف', rawPayload: { value: 'branch:branch-inactive' },
+        inputProvenance: { trusted: true },
+      },
+      currentState: bookingState,
+      clinicData: data,
+    });
+    assert.equal(inactiveSelection.nextState.booking.branchId, null);
+    assert.equal(inactiveSelection.nextState.booking.step, 'branch');
+    assert.ok(inactiveSelection.interaction.options.every(({ id }) => id !== 'branch:branch-inactive'));
+  });
 });
 
 describe('incomplete insurance summary fails closed', () => {

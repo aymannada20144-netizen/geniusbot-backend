@@ -183,7 +183,7 @@ class ShadenEngine {
         name: 'شادن',
         gender: 'female',
       },
-      branches: clinicData?.branches || [],
+      branches: activeBranches(clinicData?.branches || []),
       specialties: clinicData?.specialties || [],
       services: clinicData?.services || [],
       paymentMethods: clinicData?.paymentMethods || [],
@@ -365,6 +365,24 @@ class ShadenEngine {
     }
 
     if (inquiry.type === 'booking' && !nextState.booking) {
+      const requestedLocation = resolveRequestedBranchLocation(inquiry, safeData, this.policy);
+      if (requestedLocation) {
+        if (requestedLocation.unavailable) {
+          return legacyEngineResult({
+            reply: this.policy.noActiveBranches(requestedLocation.label),
+            nextState,
+            operationalDisposition: 'OPERATIONAL_ONLY',
+          });
+        }
+        const locationInquiry = requestedLocation.branch
+          ? { type: 'branches', branchText: requestedLocation.label }
+          : { type: 'branches', city: requestedLocation.city };
+        return legacyEngineResult({
+          reply: this.replyFor(locationInquiry, safeData, customerName),
+          nextState,
+          operationalDisposition: 'OPERATIONAL_ONLY',
+        });
+      }
       nextState.booking = emptyBookingState();
       try {
         const initialPreference = parseBookingPreferredStart(text, null, this.policy, {
@@ -478,12 +496,16 @@ class ShadenEngine {
         return this.policy.changeProviderUnsupported();
 
       case 'branches':
-        if (inquiry.city) {
-          const branchesInCity = data.branches.filter(
-            b => this.policy.normalize(b.city) === this.policy.normalize(inquiry.city)
-          );
-          if (branchesInCity.length > 0) return `نعم، لدينا ${branchesInCity.length} فروع في ${this.policy.display(inquiry.city)}:\n${this.policy.branches(branchesInCity)}`;
-          return this.policy.noActiveBranches(inquiry.city);
+        {
+          const requestedLocation = resolveRequestedBranchLocation(inquiry, data, this.policy);
+          if (requestedLocation?.unavailable) return this.policy.noActiveBranches(requestedLocation.label);
+          if (requestedLocation?.branch) return this.policy.branches(data.branches, data.clinic);
+          if (requestedLocation?.city) {
+            const branchesInCity = branchesForCity(data.branches, requestedLocation.city, this.policy);
+            if (branchesInCity.length > 0) return `نعم، لدينا ${branchesInCity.length} فروع في ${this.policy.display(requestedLocation.city)}:\n${this.policy.branches(branchesInCity)}`;
+            return this.policy.noActiveBranches(requestedLocation.label);
+          }
+          if (inquiry.branchText) return this.policy.unknown();
         }
         return this.policy.branches(data.branches, data.clinic);
 
@@ -2414,6 +2436,53 @@ function handleBookingStep({
       policy,
       'OPERATIONAL_ONLY'
     );
+  }
+
+  const requestedLocation = resolveRequestedBranchLocation(inquiry, data, policy);
+  if (requestedLocation?.unavailable) {
+    return {
+      reply: policy.noActiveBranches(requestedLocation.label),
+      operationalDisposition: 'OPERATIONAL_ONLY',
+    };
+  }
+  if (requestedLocation?.branch) {
+    const serviceBranches = compatibleBranches(data, booking.serviceId);
+    if (!serviceBranches.some((item) => item.id === requestedLocation.branch.id)) {
+      booking.step = 'branch';
+      return branchListReply(
+        policy.bookingServiceNotOffered(),
+        branchesForCity(serviceBranches, booking.city, policy),
+        policy,
+        'OPERATIONAL_ONLY'
+      );
+    }
+    transitionBookingSelection(booking, 'city', requestedLocation.branch.city || booking.city);
+    transitionBookingSelection(booking, 'branchId', requestedLocation.branch.id);
+    booking.step = 'date_period';
+    return bookingDatePeriodListReply({
+      booking,
+      data,
+      policy,
+      bookingEngine,
+      bookingContext,
+      now,
+    });
+  }
+  if (requestedLocation?.city && policy.normalize(requestedLocation.city) !== policy.normalize(booking.city)) {
+    const serviceBranches = compatibleBranches(data, booking.serviceId);
+    const branches = branchesForCity(serviceBranches, requestedLocation.city, policy);
+    if (!branches.length) {
+      booking.step = 'branch';
+      return branchListReply(
+        policy.bookingServiceNotOffered(),
+        branchesForCity(serviceBranches, booking.city, policy),
+        policy,
+        'OPERATIONAL_ONLY'
+      );
+    }
+    transitionBookingSelection(booking, 'city', requestedLocation.city);
+    booking.step = 'branch';
+    return branchListReply(policy.bookingChooseBranch(branches), branches, policy);
   }
 
   const upstreamChange = handleBookingUpstreamChange({
@@ -4583,6 +4652,49 @@ function findBranchSelection(interactiveReplyId, text, branches, policy) {
       needle.includes(name) ||
       name.split(/[—-]/).some((part) => part.trim() === needle);
   }) || null;
+}
+
+function activeBranches(branches) {
+  return (Array.isArray(branches) ? branches : []).filter((branch) =>
+    branch?.isActive !== false && branch?.is_active !== false
+  );
+}
+
+function bookingLocationText(inquiry) {
+  if (inquiry?.type !== 'booking' || typeof inquiry.serviceText !== 'string') return null;
+  const value = inquiry.serviceText.trim();
+  const match = value.match(/^(?:في\s+)?فرع\s+(.+)$/u) || value.match(/^في\s+(.+)$/u);
+  return match?.[1]?.trim() || null;
+}
+
+function resolveRequestedBranchLocation(inquiry, data, policy) {
+  const supplied = inquiry?.city || inquiry?.branchText || bookingLocationText(inquiry);
+  const entity = inquiry?.city || locationEntity(supplied, policy);
+  const label = entity || supplied;
+  if (typeof label !== 'string' || !label.trim()) return null;
+  const normalized = policy.normalize(label);
+  const city = availableCities(data.branches, policy).find((item) =>
+    policy.normalize(item) === normalized
+  );
+  if (city) return { label, city };
+  const branch = data.branches.find((item) =>
+    matchesBranchLocationName(item, normalized, policy)
+  ) || null;
+  if (branch) return { label, branch };
+  return entity ? { label, unavailable: true } : null;
+}
+
+function matchesBranchLocationName(branch, normalizedRequest, policy) {
+  const catalogName = policy.normalize(policy.cleanBranchName(branch?.name));
+  return catalogName === normalizedRequest
+    || catalogName.replace(/^فرع\s+/u, '') === normalizedRequest;
+}
+
+function locationEntity(value, policy) {
+  if (typeof value !== 'string' || !value.trim()) return null;
+  const inquiry = policy.recognize(value);
+  return inquiry?.type === 'branches' && typeof inquiry.city === 'string'
+    ? inquiry.city : null;
 }
 
 function availableCities(branches, policy) {

@@ -179,7 +179,9 @@ function createShadenEngine({
         identityContext, preservedData,
       }));
       const clinicData = await dataProvider.load(clinic);
-      let deterministicInquiry = policy.recognize(message.text);
+      let deterministicInquiry = groundStructuredBranchInquiry(
+        policy.recognize(message.text), clinicData, policy
+      );
       let operationalInquiry = null;
 
       let semanticMeaning = null;
@@ -744,6 +746,27 @@ function shouldUseOperationalCore(message, state, inquiry, catalog) {
 function isStructuredReadOnlyInquiry(inquiry) {
   return STRUCTURED_READ_ONLY_INQUIRY_TYPES.has(inquiry?.type)
     ? 'STRUCTURED_READ_ONLY_FORMATTER' : null;
+}
+
+function groundStructuredBranchInquiry(inquiry, catalog, policy) {
+  if (inquiry?.type !== 'branches' || inquiry.city || !inquiry.branchText) return inquiry;
+  const branches = (catalog?.branches || []).filter((branch) =>
+    branch?.isActive !== false && branch?.is_active !== false
+  );
+  const needle = policy.normalize(inquiry.branchText);
+  const city = branches.find((branch) => policy.normalize(branch.city) === needle)?.city || null;
+  if (city) return { ...inquiry, city, branchText: null };
+  const branch = branches.find((item) => matchesBranchLocationName(item, needle, policy));
+  // A valid catalog branch proves this is a branch inquiry.  The structured
+  // formatter's existing contract for that inquiry remains the branch overview;
+  // only an ungrounded tail must yield out of deterministic routing.
+  return branch ? { ...inquiry, branchText: null } : { type: 'unknown' };
+}
+
+function matchesBranchLocationName(branch, normalizedRequest, policy) {
+  const catalogName = policy.normalize(policy.cleanBranchName(branch?.name));
+  return catalogName === normalizedRequest
+    || catalogName.replace(/^فرع\s+/u, '') === normalizedRequest;
 }
 
 function isBookingSideQueryEligible({

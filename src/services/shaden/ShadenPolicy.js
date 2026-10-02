@@ -221,7 +221,9 @@ class ShadenPolicy {
     const standaloneCity = extractCity(text);
     if (standaloneCity && text.length < 15) return { type: 'branches', city: standaloneCity };
    
-    if (/(فروع|الفروع|فرع|كم فرع)/.test(text)) return { type: 'branches', city: extractCity(text) };
+    if (/(فروع|الفروع|فرع|كم فرع)/.test(text)) {
+      return { type: 'branches', city: extractCity(text), branchText: extractBranchRequestText(text) };
+    }
 
     const serviceMatch = text.match(/^(?:هل لديكم|هل عندكم|هل يوجد|هل يوجد لديكم|هل متوفر|هل موجود|هل توفرون|هل تقدمون)\s+(.+)$/);
     if (serviceMatch) return { type: 'service_exists', value: serviceMatch[1] };
@@ -529,6 +531,10 @@ function recognizeCourtesy(text) { if (/^(?:الله )?يعطيك العافيه
 function isAcknowledgement(text) { return /^(?:تمام|اوكي|حسنا|طيب|ماشي|جميل|ممتاز)$/.test(text); }
 function isFarewell(text) { return /^(?:مع السلامه|الي اللقاء|اشوفك علي خير|نشوفك علي خير|في امان الله|تصبحي(?:n)? علي خير)$/.test(text); }
 function extractCity(text) { for (const c of SAUDI_CITIES) if (text.includes(c)) return c; return null; }
+function extractBranchRequestText(text) {
+  const match = String(text || '').match(/(?:^|\s)فرع\s+(.+?)(?:[؟?]|$)/u);
+  return match?.[1]?.replace(/^في\s+/u, '').trim() || null;
+}
 function extractBranchText(text) { const m = text.match(/فرع\s+(.+?)\s+(?:يوم|يعمل)/); return m?.[1] || null; }
 function displayDay(day) { return ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'][day] || 'اليوم المحدد'; }
 function time(value) { return value ? String(value).slice(0, 5) : 'غير محدد'; }

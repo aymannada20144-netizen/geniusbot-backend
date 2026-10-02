@@ -74,7 +74,8 @@ class PriceStateMachine {
     const service = byId(catalog.services, supplied.serviceId) || one(catalog.services);
     const company = byId(catalog.insuranceCompanies, supplied.insuranceCompanyId) || one(catalog.insuranceCompanies);
     const insuranceClass = byId(catalog.insuranceClasses, supplied.insuranceClassId) || one(catalog.insuranceClasses);
-    const explicitPayment = byId(catalog.paymentMethods, supplied.paymentMethodId) ||
+    const suppliedPayment = byId(catalog.paymentMethods, supplied.paymentMethodId);
+    const explicitPayment = suppliedPayment ||
       (supplied.paymentMethod && (catalog.paymentMethods || []).find((item) => item.code === supplied.paymentMethod || item.id === supplied.paymentMethod)) ||
       one(catalog.paymentMethods);
     if (service) result.serviceId = service.id;
@@ -85,9 +86,9 @@ class PriceStateMachine {
       result.insurance = true;
     } else if (explicitPayment?.code === 'cash' || /(كاش|نقدي)/.test(text)) {
       result.paymentMethod = 'cash';
-      // Cash is the one price slot that is not safely inferable from an ID
-      // supplied by another layer: quoting cash needs explicit surface evidence.
-      if (/(كاش|نقدي)/.test(text)) result.cash = true;
+      // A catalog ID from the trusted interactive boundary is explicit payment
+      // evidence. Text input still requires its own cash evidence below.
+      if (suppliedPayment?.code === 'cash' || /(كاش|نقدي)/.test(text)) result.cash = true;
     }
     return result;
   }

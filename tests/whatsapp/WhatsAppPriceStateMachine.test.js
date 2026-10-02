@@ -194,6 +194,18 @@ test('real controller/runtime persists neutral service and scopes two conversati
   assert.equal(h.calls.length, 2);
 });
 
+test('runtime yields ungrounded branch mentions instead of invoking the structured branch formatter', async () => {
+  const h = harness();
+  for (const text of ['ليش كل ما أقول فرع تقول مافي؟', 'فرع كلام عشوائي']) {
+    const result = await h.send(text);
+    assert.doesNotMatch(result.replyText, /لا توجد لدينا فروع نشطة/u);
+    assert.equal(h.sent.at(-1).interaction, undefined);
+    const route = h.logs.filter(entry => entry.event === 'SHADEN_CONVERSATION_ROUTE').at(-1);
+    assert.equal(route.owner, 'OPERATIONAL_CORE');
+    assert.equal(route.deterministicRecognizedType, 'unknown');
+  }
+});
+
 for (const company of catalogFixture().catalog.insuranceCompanies) {
   for (const item of catalogFixture().catalog.insuranceClasses.filter(x => x.insuranceCompanyId === company.id)) {
     test(`controller resolves exact catalog company/class ${item.id}`, async () => {
@@ -301,6 +313,71 @@ test('catalog-grounded replacements preserve independent slots and invalidate de
   assert.deepEqual(metaPayload.interactive.action.buttons.map(button => button.reply.id),
     outbound.interaction.options.map(option => option.id));
   assert.equal(secondCompanyClass.insuranceCompanyId, secondCompany.id);
+});
+
+test('trusted catalog payment IDs complete cash pricing, invalidate insurance scope, and leave untrusted IDs inert', async () => {
+  const startAtPaymentChoice = async (h, sender = '966500000088') => {
+    const service = h.catalog.services[0];
+    await h.send(`سعر ${service.name}`, sender);
+    return service;
+  };
+
+  const cashChoice = harness();
+  const service = await startAtPaymentChoice(cashChoice);
+  const cash = cashChoice.catalog.paymentMethods.find(item => item.code === 'cash');
+  const cashResult = await cashChoice.sendInteractive(cash.id, 'opaque-interactive-label', '966500000088');
+  const cashState = cashResult.state.data.shaden.priceInquiry;
+  assert.equal(cashChoice.logs.filter(entry => entry.event === 'SHADEN_PRICE_STATE_TRANSITION').at(-1).action,
+    'QUOTE_CASH_PRICE');
+  assert.equal(cashState.selected_service_id, service.id);
+  assert.equal(cashState.selected_payment_method, cash.code);
+  assert.equal(cashState.selected_payment_method_id, cash.id);
+  assert.equal(cashState.quoteCompleted, true);
+  assert.equal(cashChoice.calls.at(-1).paymentMethodId, cash.id);
+  assert.equal(cashChoice.calls.at(-1).insuranceCompanyId, undefined);
+  assert.equal(cashChoice.calls.at(-1).insuranceClassId, undefined);
+  assert.equal(cashChoice.sent.at(-1).decisionAction, 'QUOTE_CASH_PRICE');
+  assert.equal(cashChoice.sent.at(-1).interaction.purpose, 'confirm_price_booking');
+
+  const requote = harness();
+  const requoteService = requote.catalog.services[0];
+  const company = requote.catalog.insuranceCompanies[0];
+  const insuranceClass = requote.catalog.insuranceClasses.find(item => item.insuranceCompanyId === company.id);
+  const insurance = requote.catalog.paymentMethods.find(item => item.code === 'insurance');
+  const requoteCash = requote.catalog.paymentMethods.find(item => item.code === 'cash');
+  await requote.send(`سعر ${requoteService.name} ${company.name} ${insuranceClass.name}`, '966500000089');
+  const replacement = await requote.sendInteractive(requoteCash.id, 'opaque-interactive-label', '966500000089');
+  const replacementState = replacement.state.data.shaden.priceInquiry;
+  assert.equal(replacementState.selected_service_id, requoteService.id);
+  assert.equal(replacementState.selected_payment_method, requoteCash.code);
+  assert.equal(replacementState.selected_payment_method_id, requoteCash.id);
+  assert.equal(replacementState.selected_insurance_company_id, null);
+  assert.equal(replacementState.selected_insurance_class_id, null);
+  assert.ok(replacementState.resolved_insurance_price == null);
+  assert.equal(replacementState.quoteCompleted, true);
+  assert.equal(requote.logs.filter(entry => entry.event === 'SHADEN_PRICE_STATE_TRANSITION').at(-1).action,
+    'QUOTE_CASH_PRICE');
+  assert.equal(requote.calls.at(-1).paymentMethodId, requoteCash.id);
+  assert.equal(requote.calls.at(-1).insuranceCompanyId, undefined);
+  assert.equal(requote.calls.at(-1).insuranceClassId, undefined);
+
+  const insuranceChoice = harness();
+  await startAtPaymentChoice(insuranceChoice, '966500000090');
+  const insuranceResult = await insuranceChoice.sendInteractive(insurance.id, 'opaque-interactive-label', '966500000090');
+  assert.equal(insuranceChoice.logs.filter(entry => entry.event === 'SHADEN_PRICE_STATE_TRANSITION').at(-1).action,
+    'ASK_INSURANCE_COMPANY');
+  assert.equal(insuranceResult.state.data.shaden.priceInquiry.selected_payment_method, insurance.code);
+  assert.equal(insuranceResult.state.data.shaden.priceInquiry.selected_payment_method_id, insurance.id);
+
+  const untrusted = harness();
+  await startAtPaymentChoice(untrusted, '966500000091');
+  const untrustedResult = await untrusted.runtime.processMessage({
+    channel: 'whatsapp', waMessageId: 'untrusted-cash-id', senderPhone: '966500000091',
+    receiverPhone: '966500000099', metaPhoneNumberId: 'test', messageType: 'interactive',
+    text: 'opaque-interactive-label', rawPayload: cash.id, inputProvenance: { trusted: false },
+  });
+  assert.ok(untrustedResult.state.data.shaden.priceInquiry.selected_payment_method == null);
+  assert.equal(untrusted.calls.length, 0);
 });
 
 test('trusted booking decision IDs use existing price confirmation transitions without button-title parsing', async () => {
