@@ -24,6 +24,10 @@ class PriceStateMachine {
     const grounded = PriceStateMachine.groundCurrentSlots(message, catalog);
     if (Object.keys(grounded).length) return true;
     const normalized = adapt(price, catalog);
+    // A class label is interpreted within the insurer already selected by the
+    // active price state. This is catalog scope, not sentence interpretation.
+    if (normalized.insuranceCompanyId && matches(text,
+      (catalog.insuranceClasses || []).filter(x => x.insuranceCompanyId === normalized.insuranceCompanyId)).length === 1) return true;
     if (normalized.pendingSlot === 'insuranceClass' && PriceInput.tokens(text).includes('فئه')) return true;
     if (normalized.pendingSlot === 'insuranceClass' && matches(text,
       (catalog.insuranceClasses || []).filter(x => x.insuranceCompanyId === normalized.insuranceCompanyId)).length === 1) return true;
@@ -36,10 +40,10 @@ class PriceStateMachine {
     return words[0] === 'لا' && words.slice(1).every(word => ['شكرا', 'شكراً'].includes(word));
   }
 
-  static isBookingConfirmation(text, state, inquiry) {
+  static isBookingConfirmation(text, state, inquiry, bookingDecision = null) {
     return state?.status === 'quoted' && state.pendingSlot === 'bookingConfirmation' &&
       Number.isFinite(state.quote?.amount) && Boolean(state.serviceId && state.paymentMethodId) &&
-      (inquiry?.type === 'booking' || PriceInput.isApproval(text));
+      (bookingDecision === 'affirm' || inquiry?.type === 'booking' || PriceInput.isApproval(text));
   }
 
   static currentInquiry(inquiry, semanticMeaning) {
@@ -111,6 +115,7 @@ class PriceStateMachine {
     this.catalog = catalog;
     const text = PriceInput.normalizeInput(message, catalog);
     const inquiry = currentInquiry || this.policy.recognize(text);
+    const bookingDecision = currentSlots.bookingDecision || null;
     if ((activeBooking && !PriceInput.isPrice(text)) || (persistedPriceState && !Object.keys(currentSlots).length &&
         !PriceStateMachine.owns(message, { priceInquiry: persistedPriceState, booking: activeBooking }, catalog, inquiry))) {
       return { owner: 'PriceStateMachine', kind: 'PRICE', action: 'YIELD', preserveState: true,
@@ -126,7 +131,7 @@ class PriceStateMachine {
     if (current.cash !== true) delete current.cash;
     const persisted = adapt(persistedPriceState, catalog);
     if (!activeBooking && !PriceInput.isPrice(text) &&
-        PriceStateMachine.isBookingConfirmation(text, persisted, inquiry)) {
+        PriceStateMachine.isBookingConfirmation(text, persisted, inquiry, bookingDecision)) {
       const base = legacyProjection(persisted, catalog);
       return this.withAction(this.decisionBase(base, {}, base, []), 'HANDOFF_TO_BOOKING', persisted);
     }
@@ -163,10 +168,10 @@ class PriceStateMachine {
       return this.withAction(common, 'ASK_PAYMENT_METHOD', this.empty());
     }
     if (base.state === 'awaiting_price_booking_confirmation' &&
-        PriceStateMachine.isRejection(text) && !Object.keys(current).length) {
+        (bookingDecision === 'decline' || PriceStateMachine.isRejection(text)) && !Object.keys(current).length) {
       return this.withAction({ ...common, dismissed: true }, 'OFFER_BOOKING', null);
     }
-    if (!activeBooking && this.bookingConfirmation(text) && base.state === 'awaiting_price_booking_confirmation' &&
+    if (!activeBooking && (bookingDecision === 'affirm' || this.bookingConfirmation(text)) && base.state === 'awaiting_price_booking_confirmation' &&
         base.quoteCompleted === true && Number.isFinite(base.amount) && !Object.keys(current).length) {
       return this.withAction({ ...common, kind: 'PRICE', owner: 'PriceStateMachine' }, 'HANDOFF_TO_BOOKING', base);
     }

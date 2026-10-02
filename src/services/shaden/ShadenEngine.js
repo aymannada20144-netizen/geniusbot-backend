@@ -59,7 +59,7 @@ class ShadenEngine {
       : null;
     const customerName = canonicalCustomerName || nextState.customer.name;
     const text = message?.text ?? message;
-    const interactiveReplyId = message && typeof message === 'object'
+    const interactiveReplyId = message?.inputProvenance?.trusted === true && typeof message === 'object'
       ? message.rawPayload?.value
       : null;
     let inquiry = PriceStateMachine.currentInquiry(this.policy.recognize(text), semanticMeaning);
@@ -201,7 +201,7 @@ class ShadenEngine {
       const beforeVersion = nextState.priceInquiry?.schemaVersion || (nextState.priceInquiry ? 1 : null);
       return this.priceStateMachine.prepare({
         message,
-        currentSlots: {},
+        currentSlots: priceCurrentSlotsFromInteractiveReply(interactiveReplyId, safeData),
         currentInquiry: inquiry,
         persistedPriceState: nextState.priceInquiry,
         activeBooking: nextState.booking,
@@ -231,7 +231,8 @@ class ShadenEngine {
             policy: this.policy, bookingContext,
           }), nextState);
         }
-        return normalizeLegacyReply(this.priceDecisionExecutor.render(completed, safeData), nextState);
+        return normalizeLegacyReply({ reply: this.priceDecisionExecutor.render(completed, safeData),
+          decisionAction: completed.action, priceDecision: completed }, nextState);
       });
     }
 
@@ -3267,6 +3268,8 @@ function normalizeEngineReply(result, nextState) {
       reply: result.reply,
       nextState,
       ...(result.interaction ? { interaction: result.interaction } : {}),
+      ...(result.decisionAction ? { decisionAction: result.decisionAction } : {}),
+      ...(result.priceDecision ? { priceDecision: result.priceDecision } : {}),
       ...(result.notificationAttempted
         ? { notificationAttempted: true }
         : {}),
@@ -3367,6 +3370,18 @@ function normalizeLegacyReply(result, nextState) {
   const normalized = normalizeEngineReply(result, nextState);
   normalized.undeclaredLifecycleReason = 'legacy_undeclared';
   return normalized;
+}
+
+function priceCurrentSlotsFromInteractiveReply(interactiveReplyId, catalog) {
+  if (typeof interactiveReplyId !== 'string') return {};
+  if (interactiveReplyId === 'price-booking:yes') return { bookingDecision: 'affirm' };
+  if (interactiveReplyId === 'price-booking:no') return { bookingDecision: 'decline' };
+  const find = (items) => (items || []).find((item) => String(item.id) === interactiveReplyId);
+  const service = find(catalog.services); if (service) return { serviceId: service.id };
+  const company = find(catalog.insuranceCompanies); if (company) return { insuranceCompanyId: company.id, paymentMethod: 'insurance', insurance: true };
+  const insuranceClass = find(catalog.insuranceClasses); if (insuranceClass) return { insuranceClassId: insuranceClass.id };
+  const method = find(catalog.paymentMethods); if (method) return { paymentMethodId: method.id, paymentMethod: method.code };
+  return {};
 }
 
 function legacyEngineResult(result) {

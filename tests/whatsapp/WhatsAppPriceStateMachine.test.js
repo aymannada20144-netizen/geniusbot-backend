@@ -10,6 +10,7 @@ const Machine = require('../../src/services/shaden/PriceStateMachine');
 const { createRequire } = require('node:module');
 const Policy = require('../../src/services/shaden/ShadenPolicy');
 const { adapt } = require('../../src/services/shaden/LegacyPriceStateAdapter');
+const sendWhatsAppMessage = require('../../src/channels/whatsapp/sendWhatsAppMessage');
 
 test('typed branch question yields after quote and confirmation resumes the same persisted quote', async () => {
   const meaning = { status: 'UNKNOWN', goal: null, subjects: [], constraints: [] };
@@ -159,13 +160,19 @@ function harness({ conversationEnabled = false, missingInsuranceMethod = false, 
     return completion;
   } }, { logger });
   let number = 0;
-  return { ...f, states, sent, logs, writes, reads, async send(text, sender = '966500000011') {
+  const receive = async (message) => {
     await controller.receiveWebhook({ body: { object: 'whatsapp_business_account', entry: [{ changes: [{
       field: 'messages', value: { metadata: { phone_number_id: 'test', display_phone_number: '966500000099' },
-        messages: [{ from: sender, id: `in-${++number}`, type: 'text', text: { body: text } }] },
+        messages: [message] },
     }] }] } }, { code(status) { assert.equal(status, 200); return this; }, send() {} });
     assert.ok(completion, 'real controller must dispatch parsed webhook');
     return completion;
+  };
+  return { ...f, states, sent, logs, writes, reads, runtime, async send(text, sender = '966500000011') {
+    return receive({ from: sender, id: `in-${++number}`, type: 'text', text: { body: text } });
+  }, async sendInteractive(id, title, sender = '966500000011') {
+    return receive({ from: sender, id: `in-${++number}`, type: 'interactive',
+      interactive: { type: 'button_reply', button_reply: { id, title } } });
   } };
 }
 
@@ -253,6 +260,88 @@ test('controller invalidates old class and quote on company/service changes', as
   assert.equal(service.state.data.shaden.priceInquiry.selected_insurance_company_id, null);
   assert.equal(service.state.data.shaden.priceInquiry.selected_payment_method, null);
   assert.equal(h.calls.length, 2);
+});
+
+test('catalog-grounded replacements preserve independent slots and invalidate dependent price state', async () => {
+  const h = harness();
+  const service = h.catalog.services[0];
+  const [firstCompany, secondCompany] = h.catalog.insuranceCompanies;
+  const firstCompanyClasses = h.catalog.insuranceClasses.filter(item => item.insuranceCompanyId === firstCompany.id);
+  const secondCompanyClass = h.catalog.insuranceClasses.find(item => item.insuranceCompanyId === secondCompany.id);
+
+  await h.send(`سعر ${service.name} ${firstCompany.name} ${firstCompanyClasses[0].name}`);
+  const classReplacement = await h.send(firstCompanyClasses[1].name);
+  assert.equal(classReplacement.state.data.shaden.priceInquiry.selected_service_id, service.id);
+  assert.equal(classReplacement.state.data.shaden.priceInquiry.selected_insurance_company_id, firstCompany.id);
+  assert.equal(classReplacement.state.data.shaden.priceInquiry.selected_insurance_class_id, firstCompanyClasses[1].id);
+  assert.equal(classReplacement.state.data.shaden.priceInquiry.quoteCompleted, true);
+  assert.equal(h.calls.at(-1).insuranceClassId, firstCompanyClasses[1].id);
+
+  const companyReplacement = await h.send(secondCompany.name);
+  assert.equal(companyReplacement.state.data.shaden.priceInquiry.selected_service_id, service.id);
+  assert.equal(companyReplacement.state.data.shaden.priceInquiry.selected_insurance_company_id, secondCompany.id);
+  assert.equal(companyReplacement.state.data.shaden.priceInquiry.selected_insurance_class_id, null);
+  assert.equal(companyReplacement.state.data.shaden.priceInquiry.quoteCompleted, false);
+  assert.equal(h.logs.filter(entry => entry.event === 'SHADEN_PRICE_STATE_TRANSITION').at(-1).action, 'ASK_INSURANCE_CLASS');
+
+  const outbound = h.sent.at(-1);
+  assert.equal(outbound.body, companyReplacement.replyText);
+  assert.equal(outbound.interaction.purpose, 'select_insurance_class');
+  assert.deepEqual(outbound.interaction.options.map(option => option.id),
+    h.catalog.insuranceClasses.filter(item => item.insuranceCompanyId === secondCompany.id).map(item => item.id));
+
+  let metaPayload;
+  await sendWhatsAppMessage(outbound, { httpClient: { async post(_url, payload) {
+    metaPayload = payload;
+    return { status: 200, data: { messages: [{ id: 'wamid.structural' }] } };
+  } }, logger: { info() {} } });
+  assert.equal(metaPayload.type, 'interactive');
+  assert.equal(metaPayload.interactive.type, 'button');
+  assert.equal(metaPayload.interactive.body.text, outbound.body);
+  assert.deepEqual(metaPayload.interactive.action.buttons.map(button => button.reply.id),
+    outbound.interaction.options.map(option => option.id));
+  assert.equal(secondCompanyClass.insuranceCompanyId, secondCompany.id);
+});
+
+test('trusted booking decision IDs use existing price confirmation transitions without button-title parsing', async () => {
+  const quote = async () => {
+    const h = harness();
+    const [service] = h.catalog.services;
+    const [company] = h.catalog.insuranceCompanies;
+    const insuranceClass = h.catalog.insuranceClasses.find(item => item.insuranceCompanyId === company.id);
+    await h.send(`سعر ${service.name} ${company.name} ${insuranceClass.name}`);
+    return h;
+  };
+
+  const affirmative = await quote();
+  const accepted = await affirmative.sendInteractive('price-booking:yes', 'opaque-interactive-label');
+  assert.equal(accepted.state.data.shaden.priceInquiry, undefined);
+  assert.ok(accepted.state.data.shaden.booking);
+  assert.equal(affirmative.logs.filter(entry => entry.event === 'SHADEN_PRICE_STATE_TRANSITION').at(-1).action,
+    'HANDOFF_TO_BOOKING');
+
+  const negative = await quote();
+  const declined = await negative.sendInteractive('price-booking:no', 'opaque-interactive-label');
+  assert.equal(declined.state.data.shaden.priceInquiry, undefined);
+  assert.equal(declined.state.data.shaden.booking, undefined);
+  assert.equal(negative.sent.at(-1).interaction, undefined);
+  assert.match(declined.replyText, /أنا معك/u);
+  assert.doesNotMatch(declined.replyText, /لم أفهم طلبك بالكامل/u);
+
+  const malformed = await quote();
+  const ignored = await malformed.sendInteractive('price-booking:unexpected', 'opaque-interactive-label');
+  assert.equal(ignored.state.data.shaden.booking, undefined);
+  assert.ok(ignored.state.data.shaden.priceInquiry);
+
+  const untrusted = await quote();
+  const untrustedResult = await untrusted.runtime.processMessage({
+    channel: 'whatsapp', waMessageId: 'untrusted-booking-id', senderPhone: '966500000011',
+    receiverPhone: '966500000099', metaPhoneNumberId: 'test', messageType: 'interactive',
+    text: 'opaque-interactive-label', rawPayload: 'price-booking:yes',
+    inputProvenance: { trusted: false },
+  });
+  assert.equal(untrustedResult.state.data.shaden.booking, undefined);
+  assert.ok(untrustedResult.state.data.shaden.priceInquiry);
 });
 
 test('real controller replaces legacy cash quote with current catalog insurer before lookup', async () => {

@@ -451,8 +451,10 @@ function createShadenEngine({
           }
         }
       }
-      const { reply, nextState, interaction, notificationAttempted } =
+      const { reply, nextState, interaction, notificationAttempted, decisionAction, priceDecision } =
         userFacingHandlerResult(internalResult);
+      const outbound = createCanonicalOutbound({ to: message.senderId, body: reply,
+        decisionAction, interaction, priceDecision, catalog: clinicData });
       logger.info({
         event: 'SHADEN_CONVERSATION_ROUTE',
         conversationId: conversation.id,
@@ -503,19 +505,16 @@ function createShadenEngine({
       );
       logger.info({
         event: 'WHATSAPP_SEND_BEGIN',
-        interactionPresent: Boolean(interaction),
-        interactionType: interaction?.mode || null,
-        purpose: interaction?.purpose || null,
-        optionCount: Array.isArray(interaction?.options) ? interaction.options.length : 0,
-        firstOptionId: interaction?.options?.[0]?.id || null,
-        lastOptionId: interaction?.options?.at(-1)?.id || null,
+        interactionPresent: Boolean(outbound.interaction),
+        interactionType: outbound.interaction?.mode || null,
+        purpose: outbound.interaction?.purpose || null,
+        optionCount: Array.isArray(outbound.interaction?.options) ? outbound.interaction.options.length : 0,
+        firstOptionId: outbound.interaction?.options?.[0]?.id || null,
+        lastOptionId: outbound.interaction?.options?.at(-1)?.id || null,
       });
       let delivery;
       try {
-        delivery = await sendMessage({
-          to: message.senderId, body: reply,
-          ...(interaction ? { interaction } : {}),
-        });
+        delivery = await sendMessage(outbound);
         logger.info({ event: 'WHATSAPP_SEND_RESULT', success: true, metaMessageId: delivery?.messageId || null });
       } catch (error) {
         logger.info({ event: 'WHATSAPP_SEND_RESULT', success: false, errorCode: error?.code || error?.metaCode || null });
@@ -526,10 +525,10 @@ function createShadenEngine({
         waMessageId: delivery?.messageId || null,
         rawPayload: {
           delivery: delivery || null,
-          interaction: interaction ? {
-            version: interaction.version, mode: interaction.mode,
-            purpose: interaction.purpose,
-            optionIds: interaction.options.map((option) => option.id),
+          interaction: outbound.interaction ? {
+            version: outbound.interaction.version, mode: outbound.interaction.mode,
+            purpose: outbound.interaction.purpose,
+            optionIds: outbound.interaction.options.map((option) => option.id),
           } : null,
         },
       });
@@ -634,6 +633,37 @@ function buildIdentityTrace({
 function maskPhone(value) {
   const digits = String(value || '').replace(/\D/g, '');
   return digits ? `${digits.slice(0, 3)}******${digits.slice(-3)}` : null;
+}
+
+const INTERACTIVE_PRICE_ACTIONS = new Set(['ASK_PAYMENT_METHOD', 'ASK_INSURANCE_COMPANY',
+  'ASK_INSURANCE_CLASS', 'QUOTE_CASH_PRICE', 'QUOTE_INSURANCE_PRICE', 'OFFER_BOOKING']);
+function createCanonicalOutbound({ to, body, decisionAction = null, interaction = null, priceDecision = null, catalog = {} }) {
+  const dismissed = priceDecision?.dismissed === true;
+  const derived = dismissed ? null : interaction || interactionForPriceDecision(decisionAction, priceDecision, catalog, body);
+  if (INTERACTIVE_PRICE_ACTIONS.has(decisionAction) && !dismissed && !derived) {
+    throw new Error(`Shaden outbound invariant: ${decisionAction} requires interaction.`);
+  }
+  return Object.freeze({ version: 1, to, body, decisionAction, ...(derived ? { interaction: derived } : {}) });
+}
+function interactionForPriceDecision(action, decision, catalog, body) {
+  const option = (item) => ({ id: String(item.id), label: String(item.name) });
+  if (action === 'ASK_PAYMENT_METHOD') {
+    const options = (catalog.paymentMethods || []).slice(0, 3).map(option);
+    return options.length ? { version: 1, mode: 'reply_buttons', purpose: 'select_payment_method', displayText: body, options } : null;
+  }
+  if (action === 'ASK_INSURANCE_COMPANY') {
+    const options = (decision?.options?.companies || []).slice(0, 10).map(option);
+    return options.length ? { version: 1, mode: 'list', purpose: 'select_insurance_company', displayText: body, listPrompt: 'عرض الشركات', options } : null;
+  }
+  if (action === 'ASK_INSURANCE_CLASS') {
+    const options = (decision?.options?.classes || []).slice(0, 3).map(option);
+    return options.length ? { version: 1, mode: 'reply_buttons', purpose: 'select_insurance_class', displayText: body, options } : null;
+  }
+  if (['QUOTE_CASH_PRICE', 'QUOTE_INSURANCE_PRICE', 'OFFER_BOOKING'].includes(action)) {
+    return { version: 1, mode: 'reply_buttons', purpose: 'confirm_price_booking', displayText: body,
+      options: [{ id: 'price-booking:yes', label: 'حجز موعد' }, { id: 'price-booking:no', label: 'ليس الآن' }] };
+  }
+  return null;
 }
 function normalizeMessage(rawMessage) {
   const inputProvenance = normalizeInputProvenance(rawMessage.inputProvenance);

@@ -54,6 +54,8 @@ function userFacingHandlerResult(input) {
     reply: input.reply,
     nextState: input.nextState,
     ...(input.interaction ? { interaction: input.interaction } : {}),
+    ...(input.decisionAction ? { decisionAction: input.decisionAction } : {}),
+    ...(input.priceDecision ? { priceDecision: input.priceDecision } : {}),
     ...(input.notificationAttempted
       ? { notificationAttempted: true }
       : {}),
