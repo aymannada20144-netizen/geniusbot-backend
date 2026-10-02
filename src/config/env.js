@@ -1,5 +1,15 @@
 ﻿require('dotenv').config();
 
+function positiveIntegerEnv(name, defaultValue) {
+  const raw = process.env[name];
+  if (raw === undefined || raw === '') return defaultValue;
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < 1) {
+    throw new TypeError(`${name} must be a positive integer.`);
+  }
+  return value;
+}
+
 const requiredEnv = [
   'DATABASE_URL',
   'WHATSAPP_TOKEN',
@@ -27,6 +37,10 @@ module.exports = {
       : 2750,
 
   conversation: {
+    idleTimeoutMinutes: positiveIntegerEnv(
+      'CONVERSATION_IDLE_TIMEOUT_MINUTES',
+      60
+    ),
     enabled: String(process.env.SHADEN_SEMANTIC_CATALOG_SLICE_ENABLED || '')
       .trim().toLowerCase() === 'true',
     openRouterApiKey: process.env.OPENROUTER_API_KEY || null,

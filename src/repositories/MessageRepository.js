@@ -89,6 +89,7 @@ class MessageRepository extends BaseRepository {
     intentId = null,
     detectedIntentText = null,
     rawPayload = null,
+    queryable = null,
   } = {}) {
     this.#assertRequiredString(conversationId, 'conversationId');
     this.#assertRequiredString(waMessageId, 'waMessageId');
@@ -195,7 +196,7 @@ class MessageRepository extends BaseRepository {
       LIMIT 1
     `;
 
-    const result = await this.query(sql, [
+    const result = await (queryable || this).query(sql, [
       conversationId.trim(),
       waMessageId.trim(),
       normalizedMessageText,
@@ -405,6 +406,20 @@ class MessageRepository extends BaseRepository {
       WHERE conversation_id = $1 AND wa_message_id = $2
       LIMIT 1
     `, [conversationId.trim(), waMessageId.trim()]);
+    return result.rows[0] || null;
+  }
+
+  async findByWhatsAppMessageId(waMessageId, { queryable = null } = {}) {
+    this.#assertRequiredString(waMessageId, 'waMessageId');
+    const executor = queryable || this;
+    const result = await executor.query(`
+      SELECT id, conversation_id AS "conversationId", wa_message_id AS "waMessageId",
+        sender_type AS "senderType", message_text AS "messageText",
+        raw_payload AS "rawPayload", created_at AS "createdAt"
+      FROM ${this.fullTableName}
+      WHERE wa_message_id = $1
+      LIMIT 1
+    `, [waMessageId.trim()]);
     return result.rows[0] || null;
   }
 

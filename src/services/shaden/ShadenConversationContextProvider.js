@@ -5,7 +5,7 @@ const PatientIdentityConflictError = require(
 );
 
 class ShadenConversationContextProvider {
-  constructor({ patientService, patientRepository } = {}) {
+  constructor({ patientService, patientRepository, customerMemoryRepository = null } = {}) {
     this.patientService = patientService || (patientRepository ? {
       resolveChannelIdentity: (clinicId, channelIdentity) =>
         patientRepository.findByClinicAndChannelIdentity(
@@ -18,6 +18,7 @@ class ShadenConversationContextProvider {
         'ShadenConversationContextProvider requires patientService.resolveChannelIdentity().'
       );
     }
+    this.customerMemoryRepository = customerMemoryRepository;
   }
 
   async load({ clinicId, channelIdentity, conversation }) {
@@ -34,6 +35,12 @@ class ShadenConversationContextProvider {
       );
     }
     const displayName = normalizedDisplayName(patient?.full_name);
+    const memories = patient && typeof this.customerMemoryRepository?.listActive === 'function'
+      ? await this.customerMemoryRepository.listActive({ clinicId, patientId: patient.id })
+      : [];
+    const conversationTopics = patient && typeof this.customerMemoryRepository?.conversationTopics === 'function'
+      ? await this.customerMemoryRepository.conversationTopics({ clinicId, patientId: patient.id, currentConversationId: conversation?.id })
+      : {};
     return {
       patient: patient ? {
         id: patient.id,
@@ -48,8 +55,22 @@ class ShadenConversationContextProvider {
       } : null,
       customerName: displayName,
       customerNameSource: patient ? 'patients.full_name' : 'current_conversation_state',
+      // Context only: operational reducers must never read this as session state.
+      customerMemory: compactMemory(memories, conversationTopics),
     };
   }
+}
+
+function compactMemory(memories, topics = {}) {
+  const rows = Array.isArray(memories) ? memories : [];
+  return Object.freeze({
+    profile: [],
+    confirmedPreferences: rows.filter((row) => row.evidenceLevel !== 'contextual'),
+    recentTopics: rows.filter((row) => row.memoryType === 'discussed_service'),
+    recentCompletedActivities: rows.filter((row) => row.memoryType === 'completed_booking'),
+    currentConversationTopic: topics.currentConversationTopic?.value || null,
+    previousConversationTopic: topics.previousConversationTopic?.value || null,
+  });
 }
 
 function normalizedDisplayName(value) {

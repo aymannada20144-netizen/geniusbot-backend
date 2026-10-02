@@ -54,6 +54,79 @@ class ConversationRepository extends BaseRepository {
     });
   }
 
+  async findActiveForLifecycle({ clinicId, channel, channelIdentity, queryable } = {}) {
+    this.#requireString(clinicId, 'clinicId');
+    this.#requireString(channel, 'channel');
+    this.#requireString(channelIdentity, 'channelIdentity');
+    if (!queryable || typeof queryable.query !== 'function') {
+      throw new TypeError('Conversation lifecycle lookup requires a queryable transaction.');
+    }
+    const result = await queryable.query(`
+      SELECT c.id, c.clinic_id, c.patient_id, c.channel, c.channel_identity,
+        c.status, c.assigned_to_staff_id, c.bot_enabled, c.current_state,
+        c.state_payload, c.handover_at, c.handover_reason, c.started_at,
+        c.ended_at, c.last_customer_activity_at, c.closed_reason
+      FROM ${this.fullTableName} c
+      WHERE c.clinic_id = $1 AND c.channel = $2 AND c.status = 'open'
+        AND c.channel_identity = $3
+      ORDER BY c.started_at DESC
+      LIMIT 1
+      FOR UPDATE
+    `, [
+      clinicId.trim(),
+      channel.trim().toLowerCase(),
+      normalizeSaudiMobile(channelIdentity, 'channelIdentity'),
+    ]);
+    return result.rows[0] ? this.#mapConversation(result.rows[0]) : null;
+  }
+
+  async createForLifecycle({ clinicId, channel, channelIdentity, queryable } = {}) {
+    this.#requireString(clinicId, 'clinicId');
+    this.#requireString(channel, 'channel');
+    this.#requireString(channelIdentity, 'channelIdentity');
+    if (!queryable || typeof queryable.query !== 'function') {
+      throw new TypeError('Conversation lifecycle creation requires a queryable transaction.');
+    }
+    const normalizedIdentity = normalizeSaudiMobile(channelIdentity, 'channelIdentity');
+    const patientId = await this.#findPatientIdByChannelIdentity({
+      clinicId: clinicId.trim(), channelIdentity: normalizedIdentity, queryable,
+    });
+    const result = await queryable.query(`
+      INSERT INTO ${this.fullTableName} (
+        clinic_id, patient_id, channel, channel_identity, status, bot_enabled,
+        current_state, state_payload
+      ) VALUES ($1, $2, $3, $4, 'open', true, NULL, $5::jsonb)
+      RETURNING id, clinic_id, patient_id, channel, channel_identity, status,
+        assigned_to_staff_id, bot_enabled, current_state, state_payload,
+        handover_at, handover_reason, started_at, ended_at,
+        last_customer_activity_at, closed_reason
+    `, [
+      clinicId.trim(), patientId, channel.trim().toLowerCase(), normalizedIdentity,
+      JSON.stringify({ channelIdentity: normalizedIdentity }),
+    ]);
+    return this.#mapConversation(result.rows[0]);
+  }
+
+  async closeForLifecycle({ conversationId, reason, queryable } = {}) {
+    this.#requireString(conversationId, 'conversationId');
+    if (reason !== 'inactivity_timeout' && reason !== 'operator_close') {
+      throw new TypeError('Conversation lifecycle close reason is invalid.');
+    }
+    if (!queryable || typeof queryable.query !== 'function') {
+      throw new TypeError('Conversation lifecycle close requires a queryable transaction.');
+    }
+    const result = await queryable.query(`
+      UPDATE ${this.fullTableName}
+      SET status = 'closed', ended_at = NOW(), closed_reason = $2
+      WHERE id = $1 AND status = 'open'
+      RETURNING id, clinic_id, patient_id, channel, channel_identity, status,
+        assigned_to_staff_id, bot_enabled, current_state, state_payload,
+        handover_at, handover_reason, started_at, ended_at,
+        last_customer_activity_at, closed_reason
+    `, [conversationId.trim(), reason]);
+    return result.rows[0] ? this.#mapConversation(result.rows[0]) : null;
+  }
+
   async findForPatient(clinicId, patientId) {
     const result = await this.query(`
       SELECT c.*, p.full_name AS patient_name,
@@ -385,7 +458,8 @@ class ConversationRepository extends BaseRepository {
       UPDATE ${this.fullTableName}
       SET
         status = 'closed',
-        ended_at = NOW()
+        ended_at = NOW(),
+        closed_reason = 'operator_close'
       WHERE id = $1
         AND status = 'open'
       RETURNING
@@ -421,6 +495,7 @@ class ConversationRepository extends BaseRepository {
   async #findPatientIdByChannelIdentity({
     clinicId,
     channelIdentity,
+    queryable = null,
   }) {
     const sql = `
       SELECT id
@@ -434,7 +509,7 @@ class ConversationRepository extends BaseRepository {
       ORDER BY created_at ASC, id ASC
     `;
 
-    const result = await this.query(sql, [
+    const result = await (queryable || this).query(sql, [
       clinicId,
       normalizeSaudiMobileDigits(channelIdentity),
     ]);
@@ -460,6 +535,8 @@ class ConversationRepository extends BaseRepository {
       patientId: row.patient_id ?? null,
 
       channel: row.channel,
+
+      channelIdentity: row.channel_identity ?? row.state_payload?.channelIdentity ?? null,
 
       status: row.status,
 
@@ -487,6 +564,12 @@ class ConversationRepository extends BaseRepository {
 
       endedAt:
         row.ended_at ?? null,
+
+      lastCustomerActivityAt:
+        row.last_customer_activity_at ?? null,
+
+      closedReason:
+        row.closed_reason ?? null,
     };
   }
 

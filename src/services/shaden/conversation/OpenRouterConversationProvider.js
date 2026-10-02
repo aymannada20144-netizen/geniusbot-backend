@@ -62,6 +62,44 @@ class OpenRouterConversationProvider {
       clearTimeout(timer);
     }
   }
+
+  async completeTopicCandidate({ currentMessage, clinicName = null } = {}) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+    try {
+      const response = await fetch(`${this.baseUrl}/chat/completions`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${this.apiKey}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: this.model,
+          temperature: 0,
+          response_format: { type: 'json_object' },
+          messages: [
+            { role: 'system', content: topicCandidatePrompt(clinicName) },
+            { role: 'user', content: String(currentMessage || '') },
+          ],
+        }),
+        signal: controller.signal,
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body?.error?.message || `OpenRouter request failed with status ${response.status}`);
+      const content = body?.choices?.[0]?.message?.content;
+      if (typeof content !== 'string') return null;
+      try { return JSON.parse(content); } catch { return null; }
+    } finally {
+      clearTimeout(timer);
+    }
+  }
 }
 
-module.exports = OpenRouterConversationProvider;
+function topicCandidatePrompt(clinicName) {
+  return [
+    'استخرجي اقتراحًا صغيرًا لموضوع هذه الرسالة الحالية فقط.',
+    'أعيدي JSON فقط بالشكل {"shouldUpdateTopic":boolean,"topicText":string|null}.',
+    'اجعلي shouldUpdateTopic=false عندما لا تحتوي الرسالة على موضوع جوهري للمستخدمة، مثل التحية أو الشكر أو الإقرار أو الجواب المختصر أو سؤال عن ذاكرة المحادثة أو طلب متابعة حديث سابق أو طلب مساعدة/تنقل عام.',
+    'عند true، topicText يجب أن يكون وصفًا قصيرًا من ألفاظ الرسالة نفسها فقط، بلا تشخيص أو سبب أو معلومة مستنتجة أو صياغة رسالة كاملة.',
+    clinicName ? `سياق العيادة: ${clinicName}. لا تستخدميه لإضافة موضوع غير مذكور.` : '',
+  ].filter(Boolean).join(' ');
+}
+
+module.exports = Object.assign(OpenRouterConversationProvider, { topicCandidatePrompt });

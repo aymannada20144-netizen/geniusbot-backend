@@ -67,6 +67,7 @@ test('parser preserves the Meta interactive UUID as the trusted raw payload', ()
       messages: [{
         from: '966500000000', id: 'wamid.insurance-class', timestamp: '1700000000',
         type: 'interactive',
+        context: { id: 'wamid.outbound-origin' },
         interactive: { type: 'button_reply', button_reply: { id: optionId, title: 'VIP' } },
       }],
     },
@@ -74,6 +75,7 @@ test('parser preserves the Meta interactive UUID as the trusted raw payload', ()
 
   assert.equal(parsed.text, 'VIP');
   assert.equal(parsed.rawPayload, optionId);
+  assert.equal(parsed.interactionContextId, 'wamid.outbound-origin');
   assert.deepEqual(parsed.inputProvenance, {
     trusted: true, source: 'meta_whatsapp', kind: 'meta_interactive_button',
   });

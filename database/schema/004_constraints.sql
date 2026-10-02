@@ -787,9 +787,17 @@ SELECT geniusbot.add_constraint_if_missing(
     'chk_conversations_status',
     'CHECK (status IN (
         ''open'',
-        ''pending'',
-        ''resolved'',
-        ''closed''
+        ''closed'',
+        ''archived''
+    ))'
+);
+
+SELECT geniusbot.add_constraint_if_missing(
+    'conversations',
+    'chk_conversations_closed_reason',
+    'CHECK (closed_reason IS NULL OR closed_reason IN (
+        ''inactivity_timeout'',
+        ''operator_close''
     ))'
 );
 
@@ -1577,6 +1585,7 @@ DECLARE
         'fk_conversations_clinic',
         'fk_conversations_patient',
         'fk_conversations_assigned_staff',
+        'chk_conversations_closed_reason',
         'fk_messages_conversation',
         'fk_messages_intent',
         'fk_appointments_clinic',

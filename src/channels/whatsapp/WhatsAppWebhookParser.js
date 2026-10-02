@@ -51,6 +51,7 @@ class WhatsAppWebhookParser {
           // عندما يضغط العميل على زر
           rawMessage.text = msg.button.text;
           rawMessage.rawPayload = msg.button.payload;
+          rawMessage.interactionContextId = msg.context?.id || null;
           rawMessage.inputProvenance = trustedProvenance('meta_legacy_button');
           break;
 
@@ -59,10 +60,12 @@ class WhatsAppWebhookParser {
           if (msg.interactive.type === 'button_reply') {
             rawMessage.text = msg.interactive.button_reply.title;
             rawMessage.rawPayload = msg.interactive.button_reply.id;
+            rawMessage.interactionContextId = msg.context?.id || null;
             rawMessage.inputProvenance = trustedProvenance('meta_interactive_button');
           } else if (msg.interactive.type === 'list_reply') {
             rawMessage.text = msg.interactive.list_reply.title;
             rawMessage.rawPayload = msg.interactive.list_reply.id;
+            rawMessage.interactionContextId = msg.context?.id || null;
             rawMessage.inputProvenance = trustedProvenance('meta_interactive_list');
           }
           break;

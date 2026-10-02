@@ -9,6 +9,7 @@ const errorHandler = require('./core/middlewares/errorHandler');
 const sendWhatsAppMessage = require('./channels/whatsapp/sendWhatsAppMessage');
 const createRecoveryComposition = require('./modules/revenue/recovery/createRecoveryComposition');
 const ConversationRepository = require('./repositories/ConversationRepository');
+const CustomerMemoryRepository = require('./repositories/CustomerMemoryRepository');
 const MessageRepository = require('./repositories/MessageRepository');
 const createShadenEngine = require(
   './services/shaden/createShadenEngine'
@@ -185,12 +186,17 @@ async function buildApp() {
   const clinicRepository = bookingRepositories.clinics;
   const conversationRepository = new ConversationRepository(db);
   const messageRepository = new MessageRepository(db);
+  const customerMemoryRepository = new CustomerMemoryRepository(db);
   const clinicService = new ClinicService(
     clinicRepository,
     bookingRepositories.branches
   );
   const conversationService = new ConversationService(
-    conversationRepository
+    conversationRepository,
+    {
+      messageRepository,
+      idleTimeoutMinutes: env.conversation.idleTimeoutMinutes,
+    }
   );
   const patientService = new PatientService(bookingRepositories.patients);
   const priceService = new PriceService(bookingRepositories.prices);
@@ -208,6 +214,7 @@ async function buildApp() {
     conversationService,
     patientService,
     messageRepository,
+    customerMemoryRepository,
     catalogService,
     serviceRepository: bookingRepositories.services,
     branchRepository: bookingRepositories.branches,

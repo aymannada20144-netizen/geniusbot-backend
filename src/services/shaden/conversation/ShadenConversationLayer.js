@@ -15,11 +15,11 @@ class ShadenConversationLayer {
     this.logger = logger;
   }
 
-  async respond({ currentMessage, contextTurns = [], clinicData }) {
+  async respond({ currentMessage, contextTurns = [], clinicData, customerMemory = null }) {
     const domainTools = new ShadenReadOnlyTools({ clinicData });
     const currentUserMessage = String(currentMessage || '');
     const messages = [
-      { role: 'system', content: systemPrompt(clinicData) },
+      { role: 'system', content: systemPrompt(clinicData, customerMemory) },
       ...withoutCurrentTurn(boundedTurns(contextTurns), currentUserMessage),
       { role: 'user', content: currentUserMessage },
     ];
@@ -36,11 +36,16 @@ class ShadenConversationLayer {
         if (!completion.toolCalls.length) {
           const reply = sanitizeReply(completion.content);
           if (!reply) return technicalFailure('EMPTY_RESPONSE');
+          const conversationTopicCandidate = await this.topicCandidate({
+            currentUserMessage,
+            clinicData,
+          });
           return {
             status: 'ANSWERED',
             reply,
             model: completion.model,
             toolCallCount: executedCalls,
+            conversationTopicCandidate,
           };
         }
         if (executedCalls + completion.toolCalls.length > MAX_TOOL_CALLS) {
@@ -94,9 +99,25 @@ class ShadenConversationLayer {
     if (typeof this.logger?.info !== 'function') return;
     try { this.logger.info(entry); } catch {}
   }
+
+  async topicCandidate({ currentUserMessage, clinicData }) {
+    if (typeof this.provider.completeTopicCandidate !== 'function') return null;
+    try {
+      return validateTopicCandidate(
+        await this.provider.completeTopicCandidate({
+          currentMessage: currentUserMessage,
+          clinicName: clinicData?.clinic?.name || null,
+        }),
+        currentUserMessage
+      );
+    } catch (error) {
+      try { this.logger.warn({ event: 'SHADEN_CONVERSATION_TOPIC_CANDIDATE_FAILURE' }); } catch {}
+      return null;
+    }
+  }
 }
 
-function systemPrompt(data) {
+function systemPrompt(data, customerMemory = null) {
   const assistant = data.assistantIdentity?.name || 'شادن';
   const clinic = data.clinic?.name || 'العيادة';
   return [
@@ -107,8 +128,16 @@ function systemPrompt(data) {
     'بعد الأداة، استخدمي حصريًا الحقائق التي أعادتها في هذه الجولة. لا تخترعي خدمات أو عناوين أو روابط خرائط أو توفرًا أو آثار علاج أو ادعاءات طبية، ولا تعرضي أي معرفات داخلية.',
     'للأسئلة الطبية أو طلب النصيحة: لا تقدمي نصيحة طبية من عندك. استخدمي بيانات العيادة المتاحة عبر الأدوات، وإن لم تتضمن معلومة موثوقة فقولي طبيعيًا إن المعلومات الحالية لا تكفي.',
     'طلبات الحجز والإلغاء وتغيير المواعيد تنفذها أنظمة أخرى؛ لا تدّعي تنفيذها.',
+    memoryInstruction(customerMemory),
     'حافظي على تنسيق واتساب البسيط واللطيف دون إطالة.',
   ].join(' ');
+}
+function memoryInstruction(memory) {
+  const topics = Array.isArray(memory?.recentTopics) ? memory.recentTopics
+    .map((topic) => topic?.serviceName).filter(Boolean).slice(0, 3) : [];
+  const previous = memory?.previousConversationTopic?.topicText || null;
+  if (!topics.length && !previous) return '';
+  return `لديكِ سياق محدود من محادثات سابقة. موضوع المحادثة السابقة هو ${previous || 'غير متاح'}. والمواضيع الأخرى الحديثة هي ${topics.join('، ') || 'لا يوجد'}. عند سؤال المستخدمة عن آخر محادثة، اعتمدي موضوع المحادثة السابقة فقط. استخدميه فقط إذا أشارت المستخدمة صراحةً إلى حديث سابق. لا تذكريه في التحية العادية، ولا تعيدي تشغيل أي حجز أو تسعير أو اختيار سابق. إذا تعددت المواضيع فاذكريها أو اطلبي التوضيح ولا تفترضي موضوعًا واحدًا.`;
 }
 function boundedTurns(turns) {
   return (Array.isArray(turns) ? turns : []).slice(-4).filter((turn) =>
@@ -159,6 +188,30 @@ function safeLogText(value) {
     .replace(/\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b/giu, '[internal-id]')
     .replace(/[\u0000-\u001F\u007F]/gu, ' ').replace(/\s+/gu, ' ').trim().slice(0, 500);
 }
+function validateTopicCandidate(candidate, currentMessage) {
+  if (candidate?.shouldUpdateTopic !== true || typeof candidate.topicText !== 'string') return null;
+  const topicText = candidate.topicText.replace(/[\u0000-\u001F\u007F]/gu, ' ')
+    .replace(/\s+/gu, ' ').trim().slice(0, 240);
+  if (!topicText || !topicGroundedInMessage(topicText, currentMessage)) return null;
+  return Object.freeze({ shouldUpdateTopic: true, topicText });
+}
+function topicGroundedInMessage(topicText, currentMessage) {
+  const sourceTokens = normalizedTopicTokens(currentMessage);
+  const topicTokens = normalizedTopicTokens(topicText);
+  if (!sourceTokens.length || !topicTokens.length) return false;
+  if (topicTokens.join(' ') === sourceTokens.join(' ')) return false;
+  const source = new Set(sourceTokens);
+  // A compact topic may normalize wording, but it may not introduce an
+  // unsupported concept, diagnosis, or inferred cause.
+  return topicTokens.every((token) => source.has(token));
+}
+function normalizedTopicTokens(value) {
+  return String(value || '').normalize('NFKD')
+    .replace(/\p{M}/gu, '')
+    .toLocaleLowerCase()
+    .replace(/[أإآ]/gu, 'ا').replace(/ى/gu, 'ي').replace(/ة/gu, 'ه')
+    .match(/[\p{L}\p{N}]{2,}/gu) || [];
+}
 function technicalFailure(reason) {
   return {
     status: 'SAFE_FALLBACK', reply: TECHNICAL_FALLBACK,
@@ -168,5 +221,6 @@ function technicalFailure(reason) {
 
 module.exports = Object.assign(ShadenConversationLayer, {
   MAX_TOOL_CALLS, TECHNICAL_FALLBACK, FACT_FALLBACK, sanitizeReply,
-  withoutCurrentTurn, safeToolArguments, systemPrompt,
+  withoutCurrentTurn, safeToolArguments, systemPrompt, validateTopicCandidate,
+  topicGroundedInMessage,
 });

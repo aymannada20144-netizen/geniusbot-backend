@@ -38,6 +38,7 @@ function createShadenEngine({
   clinicRepository, conversationRepository, patientRepository,
   clinicService = null, conversationService = null, patientService = null,
   messageRepository, catalogService, serviceAssignmentRepository = null,
+  customerMemoryRepository = null,
   clinicConfigurationSource, bookingEngine, appointmentService = null,
   priceService = null, knowledgeService = null, knowledgeBaseRepository = null,
   logger = console, shadenEngine = null, sendMessage,
@@ -54,7 +55,10 @@ function createShadenEngine({
   const resolvedSemanticMode = semanticMode;
   const clinics = clinicService || new ClinicService(clinicRepository);
   const conversations = conversationService ||
-    new ConversationService(conversationRepository);
+    new ConversationService(conversationRepository, {
+      messageRepository,
+      idleTimeoutMinutes: 60,
+    });
   const patients = patientService || new PatientService(patientRepository);
   const policy = new ShadenPolicy();
   const dataProvider = new ShadenDataProvider({
@@ -65,6 +69,7 @@ function createShadenEngine({
   });
   const contextProvider = new ShadenConversationContextProvider({
     patientService: patients,
+    customerMemoryRepository,
   });
   const conversationLayer = conversationEnabled
     ? new ShadenConversationLayer({
@@ -149,10 +154,29 @@ function createShadenEngine({
         });
         throw new Error('WhatsApp clinic could not be resolved.');
       }
-      const conversation = await conversations.findOrCreateForChannel({
-        clinicId: clinic.id, channel: message.channel,
-        channelIdentity: message.senderId,
-      });
+      let conversation;
+      let persistedIncomingMessage;
+      if (typeof conversations.reserveInboundMessage === 'function' &&
+          typeof messageRepository?.findByWhatsAppMessageId === 'function') {
+        const reservation = await conversations.reserveInboundMessage({
+          clinicId: clinic.id, channel: message.channel,
+          channelIdentity: message.senderId, waMessageId: message.externalMessageId,
+          messageText: message.text, rawPayload: message.rawPayload,
+          ...(requiresInteractiveOrigin(message) ? {
+            interactiveOriginMessageId: message.interactionContextId,
+            interactiveOptionId: message.rawPayload?.value || null,
+          } : {}),
+        });
+        if (reservation.duplicate) return { duplicate: true };
+        if (reservation.staleInteraction) return { staleInteraction: true };
+        conversation = reservation.conversation;
+        persistedIncomingMessage = reservation.persistedIncomingMessage;
+      } else {
+        conversation = await conversations.findOrCreateForChannel({
+          clinicId: clinic.id, channel: message.channel,
+          channelIdentity: message.senderId,
+        });
+      }
       logger.info({
         event: 'SHADEN_RUNTIME_ENTRY', conversationId: conversation.id,
         messageId: message.externalMessageId,
@@ -162,16 +186,17 @@ function createShadenEngine({
       });
       latency.end('context_resolution', { conversationId: conversation.id });
       if (conversation.botEnabled === false) return { suppressed: true };
-      if (await messageRepository.findByExternalId(
-        conversation.id, message.externalMessageId
-      )) return { duplicate: true };
-
-      const persistedIncomingMessage = await messageRepository.saveIncomingMessage({
-        conversationId: conversation.id,
-        waMessageId: message.externalMessageId,
-        messageText: message.text,
-        rawPayload: message.rawPayload,
-      });
+      if (!persistedIncomingMessage) {
+        if (await messageRepository.findByExternalId(
+          conversation.id, message.externalMessageId
+        )) return { duplicate: true };
+        persistedIncomingMessage = await messageRepository.saveIncomingMessage({
+          conversationId: conversation.id,
+          waMessageId: message.externalMessageId,
+          messageText: message.text,
+          rawPayload: message.rawPayload,
+        });
+      }
       const persistedState = await conversations.loadState(conversation.id);
       const preservedData = stateData(persistedState?.data);
       console.info('Shaden patient identity trace.', buildIdentityTrace({
@@ -350,6 +375,7 @@ function createShadenEngine({
           currentMessage: message.text,
           contextTurns: context.turns,
           clinicData,
+          customerMemory: conversationalMemory(identityContext.customerMemory, clinicData),
         });
       }
       logger.info({
@@ -543,6 +569,17 @@ function createShadenEngine({
           current: 'shaden', data: { ...nextData, shaden: nextState },
         });
         logger.info({ event: 'STATE_PERSISTED', rescheduleStep: nextState?.reschedule?.step || null });
+        await persistStructuredCustomerMemory({
+          customerMemoryRepository,
+          clinicId: clinic.id,
+          patientId: identityContext.patient?.id || null,
+          conversationId: conversation.id,
+          messageId: persistedIncomingMessage.id,
+          nextState,
+          clinicData,
+          conversationTopicCandidate: conversationalOwned
+            ? conversationalResult?.conversationTopicCandidate : null,
+        });
       }
       if (!semanticActive) {
         scheduleSemanticShadowObservation({
@@ -682,7 +719,65 @@ function normalizeMessage(rawMessage) {
       typeof rawMessage.rawPayload === 'object'
       ? rawMessage.rawPayload : { value: rawMessage.rawPayload ?? null },
     ...(inputProvenance ? { inputProvenance } : {}),
+    interactionContextId: typeof rawMessage.interactionContextId === 'string'
+      && rawMessage.interactionContextId.trim()
+      ? rawMessage.interactionContextId.trim() : null,
   };
+}
+
+function requiresInteractiveOrigin(message) {
+  return ['meta_interactive_button', 'meta_interactive_list'].includes(
+    message.inputProvenance?.kind
+  );
+}
+function conversationalMemory(memory, clinicData) {
+  const services = new Map((clinicData?.services || []).map((service) => [service.id, service.name]));
+  return {
+    recentTopics: (memory?.recentTopics || []).map((topic) => ({
+      serviceName: services.get(topic?.value?.serviceId) || null,
+    })).filter((topic) => topic.serviceName),
+    previousConversationTopic: memory?.previousConversationTopic?.topicText
+      ? { topicText: memory.previousConversationTopic.topicText,
+        sourceKind: memory.previousConversationTopic.sourceKind || null } : null,
+  };
+}
+
+async function persistStructuredCustomerMemory({ customerMemoryRepository, clinicId,
+  patientId, conversationId, messageId, nextState, clinicData, conversationTopicCandidate = null }) {
+  if (!patientId || typeof customerMemoryRepository?.reconcile !== 'function') return;
+  const price = nextState?.priceInquiry;
+  if (price?.serviceId) {
+    const serviceName = (clinicData?.services || []).find((service) => service.id === price.serviceId)?.name || null;
+    await customerMemoryRepository.reconcile({
+      clinicId, patientId,
+      memoryKey: `discussed_service:${price.serviceId}`,
+      memoryType: 'discussed_service',
+      value: { serviceId: price.serviceId },
+      sourceConversationId: conversationId,
+      sourceMessageId: messageId,
+      evidenceLevel: 'contextual',
+    });
+    await customerMemoryRepository.reconcile({
+      clinicId, patientId,
+      memoryKey: `recent_conversation_topic:${conversationId}`,
+      memoryType: 'recent_conversation_topic',
+      value: { topicText: serviceName, sourceKind: 'structured_service', serviceId: price.serviceId, serviceName },
+      sourceConversationId: conversationId, sourceMessageId: messageId,
+      evidenceLevel: 'structured',
+    });
+  }
+  if (conversationTopicCandidate?.shouldUpdateTopic === true &&
+      typeof conversationTopicCandidate.topicText === 'string' &&
+      conversationTopicCandidate.topicText.trim()) {
+    await customerMemoryRepository.reconcile({
+      clinicId, patientId,
+      memoryKey: `recent_conversation_topic:${conversationId}`,
+      memoryType: 'recent_conversation_topic',
+      value: { topicText: conversationTopicCandidate.topicText, sourceKind: 'free_form', serviceId: null, serviceName: null },
+      sourceConversationId: conversationId, sourceMessageId: messageId,
+      evidenceLevel: 'contextual',
+    });
+  }
 }
 function normalizeInputProvenance(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
