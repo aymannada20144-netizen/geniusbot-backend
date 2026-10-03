@@ -14,6 +14,8 @@ const {
   operationalDispositionFrom,
 } = require('../../contracts/shaden/InternalHandlerResult');
 const PriceStateMachine = require('./PriceStateMachine');
+const PriceInput = require('./PriceInput');
+const { matches } = require('./PriceCatalogMatcher');
 const PriceDecisionExecutor = require('./PriceDecisionExecutor');
 const { legacyProjection } = require('./LegacyPriceStateAdapter');
 
@@ -197,14 +199,60 @@ class ShadenEngine {
     };
 
 
-    if (!priceOwnershipChecked && ((!nextState.booking && nextState.priceInquiry) || PriceStateMachine.owns(message, nextState, safeData, inquiry))) {
+    const explicitPriceDuringBooking = Boolean(nextState.booking &&
+      PriceInput.isPrice(PriceInput.normalizeInput(message, safeData)));
+    const priceCurrentSlots = priceCurrentSlotsFromInteractiveReply(interactiveReplyId, safeData);
+    const priceInput = PriceInput.normalizeInput(message, safeData);
+    const priceEntry = PriceInput.isPrice(priceInput);
+    if (priceEntry) {
+      const serviceMatches = matches(priceInput, safeData.services);
+      this.logger.info({ event: 'PRICE_INPUT_DIAGNOSTIC', normalizedText: priceInput,
+        isPrice: priceEntry, matchedPriceTokens: PriceInput.matchedPriceTokens(priceInput) });
+      this.logger.info({ event: 'PRICE_SERVICE_MATCH_DIAGNOSTIC', normalizedMatcherInput: priceInput,
+        serviceMatchCount: serviceMatches.length, matchedServiceIds: serviceMatches.map((item) => item.id) });
+    }
+    if (nextState.pendingBookingServiceChoice) {
+      const choice = pendingBookingServiceChoiceSelection(interactiveReplyId,
+        nextState.pendingBookingServiceChoice);
+      if (!choice) return legacyEngineResult({
+        ...bookingServiceScopeChoiceReply(nextState.pendingBookingServiceChoice, safeData), nextState,
+      });
+      const pending = nextState.pendingBookingServiceChoice;
+      delete nextState.pendingBookingServiceChoice;
+      if (choice === pending.existingBookingServiceId) {
+        nextState.activeOperationalOwner = 'booking';
+        delete nextState.bookingSuspendedByPrice;
+        return Promise.resolve(resumeBookingDraft({ state: nextState, data: safeData,
+          policy: this.policy, bookingContext, customerName, bookingEngine: this.bookingEngine,
+          now: this.clock.now() }))
+          .then((resumed) => normalizeLegacyReply(resumed, nextState));
+      }
+      return normalizeLegacyReply(handoffPriceToBooking({ state: nextState,
+        flow: legacyProjection(nextState.priceInquiry, safeData), data: safeData,
+        policy: this.policy, bookingContext }), nextState);
+    }
+    if (nextState.activeOperationalOwner === 'price' && nextState.bookingSuspendedByPrice &&
+        nextState.booking && nextState.priceInquiry && inquiry.type === 'booking' &&
+        !priceCurrentSlots.bookingDecision &&
+        nextState.booking.serviceId !== nextState.priceInquiry.serviceId) {
+      nextState.pendingBookingServiceChoice = {
+        existingBookingServiceId: nextState.booking.serviceId,
+        currentPriceServiceId: nextState.priceInquiry.serviceId,
+      };
+      return legacyEngineResult({
+        ...bookingServiceScopeChoiceReply(nextState.pendingBookingServiceChoice, safeData), nextState,
+      });
+    }
+    if (!priceOwnershipChecked && ((nextState.activeOperationalOwner === 'price' && nextState.priceInquiry) ||
+        (!nextState.booking && nextState.priceInquiry) || PriceStateMachine.owns(message, nextState, safeData, inquiry))) {
       const beforeVersion = nextState.priceInquiry?.schemaVersion || (nextState.priceInquiry ? 1 : null);
       return this.priceStateMachine.prepare({
         message,
-        currentSlots: priceCurrentSlotsFromInteractiveReply(interactiveReplyId, safeData),
+        currentSlots: priceCurrentSlots,
         currentInquiry: inquiry,
         persistedPriceState: nextState.priceInquiry,
         activeBooking: nextState.booking,
+        activeOperationalOwner: nextState.activeOperationalOwner,
         catalog: safeData,
       }, this.priceService).then(async decision => {
         if (decision.action === 'YIELD') {
@@ -225,11 +273,28 @@ class ShadenEngine {
         });
         nextState.priceInquiry = completed.nextPriceState;
         if (!completed.nextPriceState) delete nextState.priceInquiry;
+        if (explicitPriceDuringBooking && completed.nextPriceState) {
+          nextState.activeOperationalOwner = 'price';
+          nextState.bookingSuspendedByPrice = true;
+        }
+        if (completed.action === 'HANDOFF_TO_BOOKING' &&
+            shouldChooseBookingServiceScope(nextState, completed.nextPriceState)) {
+          nextState.pendingBookingServiceChoice = bookingServiceScopeChoice(nextState.booking,
+            completed.nextPriceState);
+          return legacyEngineResult({
+            ...bookingServiceScopeChoiceReply(nextState.pendingBookingServiceChoice, safeData), nextState,
+          });
+        }
         if (completed.action === 'HANDOFF_TO_BOOKING') {
           return normalizeLegacyReply(handoffPriceToBooking({
             state: nextState, flow: legacyProjection(completed.nextPriceState, safeData), data: safeData,
             policy: this.policy, bookingContext,
           }), nextState);
+        }
+        if (completed.action === 'OFFER_BOOKING' && nextState.bookingSuspendedByPrice &&
+            priceCurrentSlots.bookingDecision === 'decline') {
+          nextState.activeOperationalOwner = 'booking';
+          delete nextState.bookingSuspendedByPrice;
         }
         return normalizeLegacyReply({ reply: this.priceDecisionExecutor.render(completed, safeData),
           decisionAction: completed.action, priceDecision: completed }, nextState);
@@ -411,7 +476,7 @@ class ShadenEngine {
       return normalizeFlowReply(choice, nextState, 'booking');
     }
 
-    if (nextState.booking) {
+    if (nextState.booking && nextState.activeOperationalOwner !== 'price') {
       const bookingBeforeTurn = structuredClone(nextState.booking);
       const bookingReply = handleBookingStep({
         text,
@@ -4654,6 +4719,52 @@ function findBranchSelection(interactiveReplyId, text, branches, policy) {
   }) || null;
 }
 
+function pendingBookingServiceChoiceSelection(interactiveReplyId, pending) {
+  if (typeof interactiveReplyId !== 'string' || !pending) return null;
+  const prefix = 'booking-service-choice:';
+  if (!interactiveReplyId.startsWith(prefix)) return null;
+  const serviceId = interactiveReplyId.slice(prefix.length);
+  return [pending.existingBookingServiceId, pending.currentPriceServiceId].includes(serviceId)
+    ? serviceId : null;
+}
+
+function bookingServiceScopeChoice(booking, priceInquiry) {
+  return {
+    existingBookingServiceId: booking.serviceId,
+    currentPriceServiceId: priceInquiry.serviceId,
+  };
+}
+
+function shouldChooseBookingServiceScope(state, priceInquiry) {
+  return Boolean(state.booking && state.activeOperationalOwner === 'price' &&
+    state.bookingSuspendedByPrice === true && priceInquiry?.serviceId &&
+    state.booking.serviceId && state.booking.serviceId !== priceInquiry.serviceId);
+}
+
+function bookingServiceScopeChoiceReply(pending, data) {
+  const ids = [pending?.existingBookingServiceId, pending?.currentPriceServiceId];
+  const services = ids.map((id) => findById(data.services, id)).filter(Boolean);
+  const reply = 'حددي الخدمة التي ترغبين بإكمال الحجز عليها.';
+  return {
+    reply,
+    interaction: {
+      version: 1, mode: 'reply_buttons', purpose: 'select_booking_service_scope',
+      displayText: reply,
+      options: services.map((service) => ({
+        id: `booking-service-choice:${service.id}`,
+        label: service.name,
+      })),
+    },
+  };
+}
+
+function resumeBookingDraft({ state, data, policy, bookingContext, customerName, bookingEngine, now }) {
+  return handleBookingStep({ text: '', interactiveReplyId: null, inquiry: { type: 'unknown' },
+    data, state, policy, replyFor: () => '', bookingEngine, bookingContext,
+    customerName, now, semanticMeaning: null, trustedInput: true,
+    operationalServiceConstraint: null });
+}
+
 function activeBranches(branches) {
   return (Array.isArray(branches) ? branches : []).filter((branch) =>
     branch?.isActive !== false && branch?.is_active !== false
@@ -4885,6 +4996,23 @@ function normalizeState(state, policy) {
   const booking = normalizeBookingState(state);
   if (booking) normalized.booking = booking;
   if (state.priceInquiry) normalized.priceInquiry = structuredClone(state.priceInquiry);
+  if (state.activeOperationalOwner === 'price' && booking && state.priceInquiry) {
+    normalized.activeOperationalOwner = 'price';
+    if (state.bookingSuspendedByPrice === true) normalized.bookingSuspendedByPrice = true;
+    const pending = state.pendingBookingServiceChoice;
+    if (pending && pending.existingBookingServiceId === booking.serviceId &&
+        pending.currentPriceServiceId === state.priceInquiry.serviceId &&
+        pending.existingBookingServiceId !== pending.currentPriceServiceId) {
+      normalized.pendingBookingServiceChoice = {
+        existingBookingServiceId: pending.existingBookingServiceId,
+        currentPriceServiceId: pending.currentPriceServiceId,
+      };
+    }
+  } else if (booking) {
+    normalized.activeOperationalOwner = 'booking';
+  } else if (state.priceInquiry) {
+    normalized.activeOperationalOwner = 'price';
+  }
   const cancellation = normalizeCancellationState(state);
   if (cancellation) normalized.cancellation = cancellation;
   const reschedule = normalizeRescheduleState(state.reschedule);
@@ -5293,7 +5421,6 @@ function isNullableTimestamp(value) {
 
 
 function handoffPriceToBooking({ state, flow, data, policy, bookingContext }) {
-  if (state.booking) throw new TypeError('A price handoff cannot replace an active booking.');
   const service = data.services.find((item) =>
     item.id === flow.selected_service_id
   );
@@ -5301,7 +5428,12 @@ function handoffPriceToBooking({ state, flow, data, policy, bookingContext }) {
     throw new TypeError('Booking handoff requires a completed price decision.');
   }
 
-  const booking = emptyBookingState();
+  const retargetingSuspendedBooking = Boolean(state.booking &&
+    state.activeOperationalOwner === 'price' && state.bookingSuspendedByPrice === true);
+  if (state.booking && !retargetingSuspendedBooking) {
+    throw new TypeError('A price handoff cannot replace an active booking.');
+  }
+  const booking = retargetingSuspendedBooking ? state.booking : emptyBookingState();
   const reply = advanceFromServiceSelection(booking, service, data, policy);
   // The price boundary transfers an already resolved scope after booking's
   // service transition has cleared its own dependent fields.
@@ -5317,6 +5449,8 @@ function handoffPriceToBooking({ state, flow, data, policy, bookingContext }) {
   booking.patientId = bookingContext?.patientId || null;
   state.booking = booking;
   delete state.priceInquiry;
+  state.activeOperationalOwner = 'booking';
+  delete state.bookingSuspendedByPrice;
   return reply;
 }
 

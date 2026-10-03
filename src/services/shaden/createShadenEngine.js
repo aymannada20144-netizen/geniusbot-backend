@@ -674,7 +674,7 @@ function maskPhone(value) {
   return digits ? `${digits.slice(0, 3)}******${digits.slice(-3)}` : null;
 }
 
-const INTERACTIVE_PRICE_ACTIONS = new Set(['ASK_PAYMENT_METHOD', 'ASK_INSURANCE_COMPANY',
+const INTERACTIVE_PRICE_ACTIONS = new Set(['ASK_SERVICE', 'ASK_PAYMENT_METHOD', 'ASK_INSURANCE_COMPANY',
   'ASK_INSURANCE_CLASS', 'QUOTE_CASH_PRICE', 'QUOTE_INSURANCE_PRICE', 'OFFER_BOOKING']);
 function createCanonicalOutbound({ to, body, decisionAction = null, interaction = null, priceDecision = null, catalog = {} }) {
   const dismissed = priceDecision?.dismissed === true;
@@ -686,6 +686,10 @@ function createCanonicalOutbound({ to, body, decisionAction = null, interaction 
 }
 function interactionForPriceDecision(action, decision, catalog, body) {
   const option = (item) => ({ id: String(item.id), label: String(item.name) });
+  if (action === 'ASK_SERVICE') {
+    const options = (catalog.services || []).slice(0, 10).map(option);
+    return options.length ? { version: 1, mode: 'list', purpose: 'select_price_service', displayText: body, listPrompt: 'عرض الخدمات', options } : null;
+  }
   if (action === 'ASK_PAYMENT_METHOD') {
     const options = (catalog.paymentMethods || []).slice(0, 3).map(option);
     return options.length ? { version: 1, mode: 'reply_buttons', purpose: 'select_payment_method', displayText: body, options } : null;

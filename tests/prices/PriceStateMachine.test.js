@@ -3,6 +3,7 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const Machine = require('../../src/services/shaden/PriceStateMachine');
 const Executor = require('../../src/services/shaden/PriceDecisionExecutor');
+const ShadenEngine = require('../../src/services/shaden/ShadenEngine');
 const Policy = require('../../src/services/shaden/ShadenPolicy');
 const { catalogFixture } = require('./priceFixture');
 
@@ -18,6 +19,192 @@ function session() {
     return machine.complete(decision, await executor.execute(decision));
   } };
 }
+
+test('contextual replacement resolver emits only one non-current catalog entity', () => {
+  const resolve = Machine.resolveContextualReplacement;
+  assert.equal(resolve(['K1', 'K2'], 'K1'), 'K2');
+  assert.equal(resolve(['K1'], 'K1'), null);
+  assert.equal(resolve(['K1', 'K2', 'K3'], 'K1'), null);
+  assert.equal(resolve(['K2'], null), 'K2');
+  assert.equal(resolve(['K1', 'K2'], null), null);
+  assert.equal(resolve(['C1', 'C2'], 'C1'), 'C2');
+  assert.equal(resolve(['C1'], 'C1'), null);
+  assert.equal(resolve(['C1', 'C2', 'C3'], 'C1'), null);
+  assert.equal(resolve(['C2'], null), 'C2');
+  assert.equal(resolve(['C1', 'C2'], null), null);
+});
+
+test('quoted contextual text replacements reach the reducer as canonical slot deltas', async () => {
+  const s = session();
+  const service = s.catalog.services[0];
+  const [firstCompany, secondCompany] = s.catalog.insuranceCompanies;
+  const firstClasses = s.catalog.insuranceClasses.filter((item) => item.insuranceCompanyId === firstCompany.id);
+  const quoted = await s.turn(`سعر ${service.name} ${firstCompany.name} ${firstClasses[0].name}`);
+
+  const classText = `${firstClasses[0].name} ${firstClasses[1].name}`;
+  assert.equal(Machine.owns(classText, { priceInquiry: quoted.nextPriceState }, s.catalog), true);
+  const classReplacement = await s.turn(classText, quoted.nextPriceState);
+  assert.equal(classReplacement.currentSlots.insuranceClassId, firstClasses[1].id);
+  assert.equal(classReplacement.nextPriceState.serviceId, service.id);
+  assert.equal(classReplacement.nextPriceState.insuranceCompanyId, firstCompany.id);
+  assert.equal(classReplacement.nextPriceState.insuranceClassId, firstClasses[1].id);
+  assert.equal(classReplacement.invalidatedSlots.includes('quote'), true);
+  assert.equal(classReplacement.action, 'QUOTE_INSURANCE_PRICE');
+
+  const companyText = `${firstCompany.name} ${secondCompany.name}`;
+  assert.equal(Machine.owns(companyText, { priceInquiry: quoted.nextPriceState }, s.catalog), true);
+  const companyReplacement = await s.turn(companyText, quoted.nextPriceState);
+  assert.equal(companyReplacement.currentSlots.insuranceCompanyId, secondCompany.id);
+  assert.equal(companyReplacement.nextPriceState.serviceId, service.id);
+  assert.equal(companyReplacement.nextPriceState.paymentMethod, 'insurance');
+  assert.equal(companyReplacement.nextPriceState.insuranceCompanyId, secondCompany.id);
+  assert.equal(companyReplacement.nextPriceState.insuranceClassId, null);
+  assert.equal(companyReplacement.nextPriceState.quote, null);
+  assert.equal(companyReplacement.action, 'ASK_INSURANCE_CLASS');
+
+  const unrelated = await s.machine.prepare({ message: 'طلب غير متعلق', persistedPriceState: quoted.nextPriceState,
+    catalog: s.catalog, currentInquiry: { type: 'unknown' } }, s.priceService);
+  assert.equal(unrelated.action, 'YIELD');
+  assert.deepEqual(unrelated.nextPriceState, quoted.nextPriceState);
+});
+
+test('a price subflow suspends and retargets one existing booking draft only on canonical handoff', async () => {
+  const f = catalogFixture();
+  const engine = new ShadenEngine({ priceService: f.priceService });
+  const cash = f.catalog.paymentMethods.find((item) => item.code === 'cash');
+  const original = ShadenEngine.createBookingState();
+  Object.assign(original, {
+    step: 'date_period', specialtyId: 'preserved-specialty', serviceId: f.catalog.services[0].id,
+    city: 'old-city', branchId: 'old-branch', doctorId: 'old-doctor', roomId: 'old-room',
+    date: '2026-08-20', datePeriod: 'this_week', timePeriod: 'morning',
+    preferredStart: '2026-08-20T08:00:00.000Z', paymentMethodId: 'old-payment',
+    insuranceCompanyId: 'old-company', insuranceClassId: 'old-class',
+  });
+  const state = { version: 1, mode: 'idle', step: null, customer: { name: 'Patient' },
+    context: null, options: [], booking: original };
+  const started = await engine.handle({ message: { text: `سعر ${f.catalog.services[1].name}` },
+    currentState: state, clinicData: f.catalog });
+  assert.equal(started.nextState.activeOperationalOwner, 'price');
+  assert.equal(started.nextState.bookingSuspendedByPrice, true);
+  assert.equal(started.nextState.booking.serviceId, f.catalog.services[0].id);
+  assert.equal(started.nextState.priceInquiry.serviceId, f.catalog.services[1].id);
+
+  const quoted = await engine.handle({ message: { text: 'opaque', rawPayload: { value: cash.id },
+    inputProvenance: { trusted: true } }, currentState: started.nextState, clinicData: f.catalog });
+  assert.equal(quoted.nextState.activeOperationalOwner, 'price');
+  assert.equal(quoted.nextState.booking.serviceId, f.catalog.services[0].id);
+  assert.equal(quoted.nextState.priceInquiry.quoteCompleted, true);
+
+  const choice = await engine.handle({ message: { text: 'opaque', rawPayload: { value: 'price-booking:yes' },
+    inputProvenance: { trusted: true } }, currentState: quoted.nextState, clinicData: f.catalog });
+  assert.equal(choice.interaction.purpose, 'select_booking_service_scope');
+  assert.deepEqual(choice.nextState.pendingBookingServiceChoice, {
+    existingBookingServiceId: f.catalog.services[0].id,
+    currentPriceServiceId: f.catalog.services[1].id,
+  });
+  assert.equal(choice.nextState.booking.serviceId, f.catalog.services[0].id);
+
+  const retargeted = await engine.handle({ message: { text: 'opaque', rawPayload: {
+    value: `booking-service-choice:${f.catalog.services[1].id}` }, inputProvenance: { trusted: true } },
+  currentState: choice.nextState, clinicData: f.catalog });
+  const booking = retargeted.nextState.booking;
+  assert.equal(retargeted.nextState.activeOperationalOwner, 'booking');
+  assert.equal(retargeted.nextState.priceInquiry, undefined);
+  assert.equal(booking.serviceId, f.catalog.services[1].id);
+  assert.equal(booking.specialtyId, 'preserved-specialty');
+  for (const field of ['branchId', 'doctorId', 'roomId', 'date', 'datePeriod', 'timePeriod',
+    'preferredStart', 'insuranceCompanyId', 'insuranceClassId']) assert.equal(booking[field], null, field);
+  assert.equal(booking.paymentMethodId, cash.id);
+  assert.equal(booking.step, 'branch');
+});
+
+test('booking-service scope choice resumes the preserved draft or rejects a stale choice without mutation', async () => {
+  const f = catalogFixture();
+  const availableDate = new Date().toISOString().slice(0, 10);
+  const engine = new ShadenEngine({ priceService: f.priceService,
+    bookingEngine: { getAvailableDates: async () => ({ dates: [availableDate] }) } });
+  const original = ShadenEngine.createBookingState();
+  Object.assign(original, { step: 'date_period', serviceId: f.catalog.services[0].id,
+    city: f.catalog.branches[0].city, branchId: f.catalog.branches[0].id,
+    date: null, datePeriod: null });
+  const state = { version: 1, mode: 'idle', step: null, customer: { name: 'Patient' },
+    context: null, options: [], booking: original };
+  const started = await engine.handle({ message: { text: `سعر ${f.catalog.services[1].name}` },
+    currentState: state, clinicData: f.catalog });
+  const cash = f.catalog.paymentMethods.find((item) => item.code === 'cash');
+  const quoted = await engine.handle({ message: { text: 'opaque', rawPayload: { value: cash.id },
+    inputProvenance: { trusted: true } }, currentState: started.nextState, clinicData: f.catalog });
+  const choice = await engine.handle({ message: { text: 'opaque', rawPayload: { value: 'price-booking:yes' },
+    inputProvenance: { trusted: true } }, currentState: quoted.nextState, clinicData: f.catalog });
+
+  const stale = await engine.handle({ message: { text: 'opaque', rawPayload: { value: 'booking-service-choice:unknown' },
+    inputProvenance: { trusted: true } }, currentState: choice.nextState, clinicData: f.catalog });
+  assert.equal(stale.interaction.purpose, 'select_booking_service_scope');
+  assert.deepEqual(stale.nextState.booking, choice.nextState.booking);
+  assert.deepEqual(stale.nextState.pendingBookingServiceChoice, choice.nextState.pendingBookingServiceChoice);
+
+  const resumed = await engine.handle({ message: { text: 'opaque', rawPayload: {
+    value: `booking-service-choice:${f.catalog.services[0].id}` }, inputProvenance: { trusted: true } },
+  currentState: choice.nextState, clinicData: f.catalog });
+  assert.equal(resumed.nextState.activeOperationalOwner, 'booking');
+  assert.equal(resumed.nextState.booking.serviceId, f.catalog.services[0].id);
+  assert.equal(resumed.nextState.booking.step, 'date_period');
+  assert.equal(resumed.nextState.pendingBookingServiceChoice, undefined);
+  assert.equal(resumed.interaction.purpose, 'select_date_period');
+  assert.ok(resumed.reply);
+});
+
+test('old-service choice preserves synchronous booking-step replies', async () => {
+  const f = catalogFixture();
+  const engine = new ShadenEngine({ priceService: f.priceService });
+  const original = ShadenEngine.createBookingState();
+  Object.assign(original, { step: 'branch', serviceId: f.catalog.services[0].id,
+    city: f.catalog.branches[0].city });
+  const state = { version: 1, mode: 'idle', step: null, customer: { name: 'Patient' },
+    context: null, options: [], booking: original };
+  const started = await engine.handle({ message: { text: `سعر ${f.catalog.services[1].name}` },
+    currentState: state, clinicData: f.catalog });
+  const cash = f.catalog.paymentMethods.find((item) => item.code === 'cash');
+  const quoted = await engine.handle({ message: { text: 'opaque', rawPayload: { value: cash.id },
+    inputProvenance: { trusted: true } }, currentState: started.nextState, clinicData: f.catalog });
+  const choice = await engine.handle({ message: { text: 'opaque', rawPayload: { value: 'price-booking:yes' },
+    inputProvenance: { trusted: true } }, currentState: quoted.nextState, clinicData: f.catalog });
+  const resumed = await engine.handle({ message: { text: 'opaque', rawPayload: {
+    value: `booking-service-choice:${f.catalog.services[0].id}` }, inputProvenance: { trusted: true } },
+  currentState: choice.nextState, clinicData: f.catalog });
+  assert.equal(resumed.nextState.booking.step, 'branch');
+  assert.equal(resumed.nextState.booking.serviceId, f.catalog.services[0].id);
+  assert.equal(resumed.interaction.purpose, 'select_branch');
+  assert.ok(resumed.reply);
+});
+
+test('same-service and no-prior-booking confirmations keep the normal handoff path', async () => {
+  const f = catalogFixture();
+  const cash = f.catalog.paymentMethods.find((item) => item.code === 'cash');
+  const engine = new ShadenEngine({ priceService: f.priceService });
+  const sameService = f.catalog.services[0];
+  const original = ShadenEngine.createBookingState();
+  Object.assign(original, { step: 'branch', serviceId: sameService.id, city: 'old-city' });
+  const withBooking = { version: 1, mode: 'idle', step: null, customer: { name: 'Patient' },
+    context: null, options: [], booking: original };
+  const started = await engine.handle({ message: { text: `سعر ${sameService.name}` }, currentState: withBooking, clinicData: f.catalog });
+  const quoted = await engine.handle({ message: { text: 'opaque', rawPayload: { value: cash.id },
+    inputProvenance: { trusted: true } }, currentState: started.nextState, clinicData: f.catalog });
+  const sameResult = await engine.handle({ message: { text: 'opaque', rawPayload: { value: 'price-booking:yes' },
+    inputProvenance: { trusted: true } }, currentState: quoted.nextState, clinicData: f.catalog });
+  assert.equal(sameResult.nextState.pendingBookingServiceChoice, undefined);
+  assert.equal(sameResult.nextState.activeOperationalOwner, 'booking');
+
+  const noBookingEngine = new ShadenEngine({ priceService: f.priceService });
+  const noBookingStarted = await noBookingEngine.handle({ message: { text: `سعر ${f.catalog.services[1].name}` }, clinicData: f.catalog });
+  const noBookingQuoted = await noBookingEngine.handle({ message: { text: 'opaque', rawPayload: { value: cash.id },
+    inputProvenance: { trusted: true } }, currentState: noBookingStarted.nextState, clinicData: f.catalog });
+  const noBookingResult = await noBookingEngine.handle({ message: { text: 'opaque', rawPayload: { value: 'price-booking:yes' },
+    inputProvenance: { trusted: true } }, currentState: noBookingQuoted.nextState, clinicData: f.catalog });
+  assert.equal(noBookingResult.nextState.pendingBookingServiceChoice, undefined);
+  assert.equal(noBookingResult.nextState.booking.serviceId, f.catalog.services[1].id);
+  assert.equal(noBookingResult.nextState.activeOperationalOwner, 'booking');
+});
 
 test('quoted state yields typed other intents and unknown input without any catalog or price lookup', async () => {
   const s = session();
@@ -67,6 +254,37 @@ test('neutral service survives JSON without any price lookup', async () => {
   assert.equal(next.action, 'YIELD');
   assert.equal(next.nextPriceState.paymentMethod, null);
   assert.equal(s.calls.length, 0);
+});
+
+test('final reduced price state centrally determines the next action', async () => {
+  const s = session();
+  const service = s.catalog.services[0];
+  const company = s.catalog.insuranceCompanies[0];
+  const insuranceClass = s.catalog.insuranceClasses.find((item) => item.insuranceCompanyId === company.id);
+
+  const missingService = await s.turn('سعر خدمة غير معروفة');
+  assert.equal(missingService.nextPriceState.pendingSlot, 'service');
+  assert.equal(missingService.action, 'ASK_SERVICE');
+
+  const missingPayment = await s.turn(`سعر ${service.name}`);
+  assert.equal(missingPayment.nextPriceState.pendingSlot, 'paymentMethod');
+  assert.equal(missingPayment.action, 'ASK_PAYMENT_METHOD');
+
+  const missingCompany = await s.turn(`سعر ${service.name} تأمين`);
+  assert.equal(missingCompany.nextPriceState.pendingSlot, 'insuranceCompany');
+  assert.equal(missingCompany.action, 'ASK_INSURANCE_COMPANY');
+
+  const missingClass = await s.turn(`سعر ${service.name} ${company.name}`);
+  assert.equal(missingClass.nextPriceState.pendingSlot, 'insuranceClass');
+  assert.equal(missingClass.action, 'ASK_INSURANCE_CLASS');
+
+  const cashQuote = await s.turn(`سعر ${service.name} كاش`);
+  assert.equal(cashQuote.action, 'QUOTE_CASH_PRICE');
+  assert.equal(cashQuote.nextPriceState.quoteCompleted, true);
+
+  const insuranceQuote = await s.turn(`سعر ${service.name} ${company.name} ${insuranceClass.name}`);
+  assert.equal(insuranceQuote.action, 'QUOTE_INSURANCE_PRICE');
+  assert.equal(insuranceQuote.nextPriceState.quoteCompleted, true);
 });
 
 for (const company of catalogFixture().catalog.insuranceCompanies) {

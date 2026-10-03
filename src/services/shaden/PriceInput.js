@@ -20,4 +20,5 @@ function normalizeInput(message, catalog = {}) {
   return isPrice(converted) && (isGeneral(converted) || matches(converted, catalog.services).length) ? converted : raw;
 }
 module.exports = { normalizeInput, isPrice, isGeneral, tokens,
+  matchedPriceTokens: text => tokens(text).filter(word => PRICE_WORDS.has(word)),
   isApproval: text => tokens(text).length === 1 && AFFIRMATIVE.has(tokens(text)[0]) };

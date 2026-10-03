@@ -11,7 +11,7 @@ class PriceStateMachine {
   static owns(message, state, catalog, inquiry = null) {
     const text = PriceInput.normalizeInput(message, catalog);
     if (PriceInput.isPrice(text)) return true;
-    if (state?.booking) return false;
+    if (state?.booking && state?.activeOperationalOwner !== 'price') return false;
     if (PriceStateMachine.isBookingConfirmation(text, adapt(state?.priceInquiry, catalog), inquiry)) return true;
     if (inquiry && ['branches', 'branch_address', 'services', 'services_under_specialty',
       'specialties', 'availability_request', 'working_hours', 'working_hours_city',
@@ -21,7 +21,7 @@ class PriceStateMachine {
     }
     const price = state?.priceInquiry;
     if (!price) return false;
-    const grounded = PriceStateMachine.groundCurrentSlots(message, catalog);
+    const grounded = PriceStateMachine.groundCurrentSlots(message, catalog, {}, price);
     if (Object.keys(grounded).length) return true;
     const normalized = adapt(price, catalog);
     // A class label is interpreted within the insurer already selected by the
@@ -63,17 +63,34 @@ class PriceStateMachine {
   // Ground every price slot from the current surface against catalog IDs.  The
   // semantic interpreter may enrich unrelated flows, but it is never the type
   // authority for a price entity.
-  static groundCurrentSlots(message, catalog = {}, supplied = {}) {
+  static resolveContextualReplacement(matchedIds, currentId = null) {
+    const unique = [...new Set((matchedIds || []).filter(Boolean))];
+    const candidates = currentId ? unique.filter((id) => id !== currentId) : unique;
+    return candidates.length === 1 ? candidates[0] : null;
+  }
+
+  static groundCurrentSlots(message, catalog = {}, supplied = {}, persistedPriceState = null) {
     const text = PriceInput.normalizeInput(message, catalog);
-    const one = (items) => {
-      const found = matches(text, items || []);
-      return found.length === 1 ? found[0] : null;
-    };
     const byId = (items, value) => (items || []).find((item) => item.id === value) || null;
+    const persisted = adapt(persistedPriceState, catalog);
+    const contextual = (items, currentId) => {
+      const matched = matches(text, items || []);
+      const id = PriceStateMachine.resolveContextualReplacement(
+        matched.map((item) => item.id), currentId
+      );
+      return byId(items, id);
+    };
+    const one = (items) => contextual(items, null);
     const result = {};
     const service = byId(catalog.services, supplied.serviceId) || one(catalog.services);
-    const company = byId(catalog.insuranceCompanies, supplied.insuranceCompanyId) || one(catalog.insuranceCompanies);
-    const insuranceClass = byId(catalog.insuranceClasses, supplied.insuranceClassId) || one(catalog.insuranceClasses);
+    const company = byId(catalog.insuranceCompanies, supplied.insuranceCompanyId) ||
+      contextual(catalog.insuranceCompanies, persisted.insuranceCompanyId);
+    const classCompanyId = persisted.insuranceCompanyId || company?.id;
+    const classScope = classCompanyId
+      ? (catalog.insuranceClasses || []).filter((item) => item.insuranceCompanyId === classCompanyId)
+      : catalog.insuranceClasses;
+    const insuranceClass = byId(catalog.insuranceClasses, supplied.insuranceClassId) ||
+      contextual(classScope, persisted.insuranceClassId);
     const suppliedPayment = byId(catalog.paymentMethods, supplied.paymentMethodId);
     const explicitPayment = suppliedPayment ||
       (supplied.paymentMethod && (catalog.paymentMethods || []).find((item) => item.code === supplied.paymentMethod || item.id === supplied.paymentMethod)) ||
@@ -112,13 +129,13 @@ class PriceStateMachine {
     return this.decide({ ...input, catalog: { ...input.catalog, applicable } });
   }
 
-  decide({ message, currentSlots = {}, persistedPriceState = null, catalog = {}, currentInquiry = null, activeBooking = null }) {
+  decide({ message, currentSlots = {}, persistedPriceState = null, catalog = {}, currentInquiry = null, activeBooking = null, activeOperationalOwner = null }) {
     this.catalog = catalog;
     const text = PriceInput.normalizeInput(message, catalog);
     const inquiry = currentInquiry || this.policy.recognize(text);
     const bookingDecision = currentSlots.bookingDecision || null;
-    if ((activeBooking && !PriceInput.isPrice(text)) || (persistedPriceState && !Object.keys(currentSlots).length &&
-        !PriceStateMachine.owns(message, { priceInquiry: persistedPriceState, booking: activeBooking }, catalog, inquiry))) {
+    if ((activeBooking && activeOperationalOwner !== 'price' && !PriceInput.isPrice(text)) || (persistedPriceState && !Object.keys(currentSlots).length &&
+        !PriceStateMachine.owns(message, { priceInquiry: persistedPriceState, booking: activeBooking, activeOperationalOwner }, catalog, inquiry))) {
       return { owner: 'PriceStateMachine', kind: 'PRICE', action: 'YIELD', preserveState: true,
         nextPriceState: persistedPriceState, currentSlots: {}, invalidatedSlots: [],
         persistedSlots: persistedPriceState, resolvedSlots: persistedPriceState,
@@ -127,23 +144,29 @@ class PriceStateMachine {
     // Transition order is deliberately fixed: current catalog grounding,
     // dependency invalidation, legacy migration, reduction, then execution.
     // `reduce` owns invalidation/reduction; it never lets persisted slots win.
-    const current = PriceStateMachine.groundCurrentSlots(message, catalog, currentSlots);
+    const current = PriceStateMachine.groundCurrentSlots(message, catalog, currentSlots, persistedPriceState);
     // The slot contract cannot manufacture explicit cash evidence.
     if (current.cash !== true) delete current.cash;
     const persisted = adapt(persistedPriceState, catalog);
-    if (!activeBooking && !PriceInput.isPrice(text) &&
+    if ((!activeBooking || activeOperationalOwner === 'price') && !PriceInput.isPrice(text) &&
         PriceStateMachine.isBookingConfirmation(text, persisted, inquiry, bookingDecision)) {
       const base = legacyProjection(persisted, catalog);
       return this.withAction(this.decisionBase(base, {}, base, []), 'HANDOFF_TO_BOOKING', persisted);
     }
     const companyId = current.insuranceCompanyId || persisted.insuranceCompanyId;
-    const scoped = matches(text, this.classesFor(companyId, catalog));
-    if (scoped.length === 1) {
-      current.insuranceClassId = scoped[0].id;
+    const scopedId = current.insuranceCompanyId && current.insuranceCompanyId !== persisted.insuranceCompanyId
+      ? null
+      : PriceStateMachine.resolveContextualReplacement(
+        matches(text, this.classesFor(companyId, catalog)).map((item) => item.id),
+        persisted.insuranceClassId
+      );
+    const scoped = this.classesFor(companyId, catalog).find((item) => item.id === scopedId) || null;
+    if (scoped) {
+      current.insuranceClassId = scoped.id;
       // A class-only reply belongs to the pending class, even if a service
       // happens to share its catalog label.
       if (persisted.pendingSlot === 'insuranceClass' &&
-          this.policy.normalize(text) === this.policy.normalize(scoped[0].name)) delete current.serviceId;
+          this.policy.normalize(text) === this.policy.normalize(scoped.name)) delete current.serviceId;
     }
     const reduced = reduce(persistedPriceState, current, catalog);
     const base = { ...this.empty(), ...legacyProjection(persisted, catalog) };
@@ -165,28 +188,18 @@ class PriceStateMachine {
       return this.withAction(common, 'ASK_INSURANCE_CLASS', base);
     }
 
-    if (this.isGeneralInquiry(text) && !current.serviceId) {
-      return this.withAction(common, 'ASK_PAYMENT_METHOD', this.empty());
-    }
     if (base.state === 'awaiting_price_booking_confirmation' &&
         (bookingDecision === 'decline' || PriceStateMachine.isRejection(text)) && !Object.keys(current).length) {
       return this.withAction({ ...common, dismissed: true }, 'OFFER_BOOKING', null);
     }
-    if (!activeBooking && (bookingDecision === 'affirm' || this.bookingConfirmation(text)) && base.state === 'awaiting_price_booking_confirmation' &&
+    if ((!activeBooking || activeOperationalOwner === 'price') && (bookingDecision === 'affirm' || this.bookingConfirmation(text)) && base.state === 'awaiting_price_booking_confirmation' &&
         base.quoteCompleted === true && Number.isFinite(base.amount) && !Object.keys(current).length) {
       return this.withAction({ ...common, kind: 'PRICE', owner: 'PriceStateMachine' }, 'HANDOFF_TO_BOOKING', base);
     }
-    if (!resolved.selected_service_id) return this.withAction(common, 'ASK_PAYMENT_METHOD', this.empty());
-    if (!catalog.services.some(item => item.id === resolved.selected_service_id)) return this.withAction(common, 'ASK_PAYMENT_METHOD', this.empty());
     if (base.state === 'price_inquiry_ready' && !Object.keys(current).length && !PriceInput.isPrice(text)) {
       return this.withAction(common, 'PRICE_NOT_FOUND', base);
     }
-    if (resolved.selected_payment_method === 'cash') {
-      if (!current.cash) return this.withAction(common, 'ASK_PAYMENT_METHOD', { ...resolved, selected_payment_method: null, selected_payment_method_id: null });
-      if (!method) return this.withAction(common, 'PRICE_NOT_FOUND', resolved);
-      return this.withAction(common, 'QUOTE_CASH_PRICE', { ...resolved, state: 'awaiting_price_booking_confirmation' });
-    }
-    if (resolved.selected_insurance_company_id) {
+    if (resolved.selected_payment_method === 'insurance' && resolved.selected_insurance_company_id) {
       if (!common.options.companies.some(item => item.id === resolved.selected_insurance_company_id)) {
         return this.withAction(common, 'INVALID_INSURANCE_COMPANY', { ...resolved, selected_insurance_class_id: null, selected_insurance_class_name: null, state: 'awaiting_price_insurance_company' });
       }
@@ -195,7 +208,15 @@ class PriceStateMachine {
           (!current.insuranceClassId && PriceInput.tokens(text).includes('فئه') && !['UNKNOWN', 'AMBIGUOUS', 'NOT_FOUND'].includes(message?.status))) {
         return this.withAction(common, 'INVALID_INSURANCE_CLASS', { ...resolved, selected_insurance_class_id: null, selected_insurance_class_name: null, resolved_insurance_price: null, state: 'awaiting_price_insurance_class' });
       }
-      if (!resolved.selected_insurance_class_id) return this.withAction(common, 'ASK_INSURANCE_CLASS', { ...resolved, state: 'awaiting_price_insurance_class' });
+    }
+    const pendingAction = this.actionForMissingSlot(resolved, catalog);
+    if (pendingAction) return this.withAction(common, pendingAction, resolved);
+    if (resolved.selected_payment_method === 'cash') {
+      if (!current.cash) return this.withAction(common, 'ASK_PAYMENT_METHOD', { ...resolved, selected_payment_method: null, selected_payment_method_id: null });
+      if (!method) return this.withAction(common, 'PRICE_NOT_FOUND', resolved);
+      return this.withAction(common, 'QUOTE_CASH_PRICE', { ...resolved, state: 'awaiting_price_booking_confirmation' });
+    }
+    if (resolved.selected_insurance_company_id) {
       if (!method) return this.withAction(common, 'PRICE_NOT_FOUND', resolved);
       return this.withAction(common, 'QUOTE_INSURANCE_PRICE', { ...resolved, state: 'awaiting_price_booking_confirmation' });
     }
@@ -241,6 +262,13 @@ class PriceStateMachine {
   normalise(value) { return value ? { ...this.empty(), ...legacyProjection(value, this.catalog) } : this.empty(); }
   toState(s) { return { ...this.empty(), state: s.state || 'awaiting_price_payment_method', selected_service_id: s.service?.id || s.selected_service_id || null, selected_service_name: s.service?.name || s.selected_service_name || null, selected_payment_method: s.payment || s.selected_payment_method || null, selected_insurance_company_id: s.company?.id || s.selected_insurance_company_id || null, selected_insurance_company_name: s.company?.name || s.selected_insurance_company_name || null, selected_insurance_class_id: s.insuranceClass?.id || s.selected_insurance_class_id || null, selected_insurance_class_name: s.insuranceClass?.name || s.selected_insurance_class_name || null, resolved_cash_price: s.cashPrice || s.resolved_cash_price || null, resolved_insurance_price: s.insurancePrice || s.resolved_insurance_price || null, currency: s.currency || null, amount: s.amount ?? null, quoteCompleted: s.quoteCompleted === true }; }
   missing(s) { return ['selected_service_id', 'selected_payment_method', ...(s.selected_payment_method === 'insurance' ? ['selected_insurance_company_id', 'selected_insurance_class_id'] : [])].filter((k) => !s[k]); }
+  actionForMissingSlot(resolved, catalog) {
+    if (!resolved.selected_service_id || !catalog.services.some((item) => item.id === resolved.selected_service_id)) return 'ASK_SERVICE';
+    if (!resolved.selected_payment_method) return 'ASK_PAYMENT_METHOD';
+    if (resolved.selected_payment_method === 'insurance' && !resolved.selected_insurance_company_id) return 'ASK_INSURANCE_COMPANY';
+    if (resolved.selected_payment_method === 'insurance' && !resolved.selected_insurance_class_id) return 'ASK_INSURANCE_CLASS';
+    return null;
+  }
   classesFor(companyId, catalog) { return (catalog.applicable?.classes || catalog.insuranceClasses || []).filter((x) => x.insuranceCompanyId === companyId && x.isAccepted !== false); }
   bookingConfirmation(text) { return PriceInput.isApproval(text); }
   isGeneralInquiry(text) { return PriceInput.isGeneral(text); }

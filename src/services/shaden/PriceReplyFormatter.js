@@ -11,6 +11,7 @@ class PriceReplyFormatter {
     if (d.sideInquiry?.type === 'services') return this.policy.services(catalog.services, catalog.clinic);
     if (d.dismissed) return 'تمام 🌸 أنا معك إذا احتجتِ أي خدمة أخرى.';
     switch (d.action) {
+      case 'ASK_SERVICE': return `${d.unknownService ? 'لم أتعرف على الخدمة.\n' : ''}${this.policy.services(o.services || catalog.services, catalog.clinic)}\nاختاري خدمة واحدة لمعرفة سعرها.`;
       case 'ASK_PAYMENT_METHOD': return s.selected_service_id ? 'هل الدفع كاش أم تأمين؟' : `${d.unknownService ? 'لم أتعرف على الخدمة.\n' : ''}${this.policy.services(o.services || catalog.services, catalog.clinic)}\nاختاري خدمة واحدة لمعرفة سعرها.`;
       case 'ASK_INSURANCE_COMPANY': return this.policy.insuranceCompanies(o.companies, true);
       case 'ASK_INSURANCE_CLASS': return this.policy.insuranceClasses(o.classes, true);
